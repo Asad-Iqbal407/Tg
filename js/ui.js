@@ -117,8 +117,10 @@ const UI = {
       case 'next': this.startStage(+d.i); break;
       case 'map': this.show('map'); break;
       case 'reset':
-        if (confirm('Reset ALL progress? Coins, stages, upgrades and achievements will be lost.')) { Save.reset(); this.toast('Progress reset'); this.show('title'); }
+        this.modal(`<h2>Reset progress?</h2><p class="muted">Coins, stages, upgrades and achievements will be lost. This can't be undone.</p>
+          <button class="btn danger" data-act="resetYes">Reset everything</button><button class="btn small ghost" data-act="closeModal">Cancel</button>`);
         break;
+      case 'resetYes': Save.reset(); this.closeModal(); this.toast('Progress reset'); this.show('title'); break;
     }
   },
 
