@@ -21,10 +21,34 @@ export interface Loadout {
   powerDuration: number;
 }
 
+/**
+ * Bounds for a flexible logical size. The shell picks the size inside these bounds that best
+ * fills the screen, once per run; missing bounds default to the definition's width/height.
+ */
+export interface ViewportRange {
+  minWidth?: number;
+  maxWidth?: number;
+  minHeight?: number;
+  maxHeight?: number;
+}
+
+/** Logical pixels at each canvas edge that are covered by on-screen controls or display cutouts. */
+export interface Insets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export const NO_INSETS: Readonly<Insets> = { top: 0, right: 0, bottom: 0, left: 0 };
+
 export interface GameServices {
   ctx: CanvasRenderingContext2D;
+  /** Logical size chosen for this run (within the definition's viewport range). */
   width: number;
   height: number;
+  /** Areas of the canvas covered by touch controls / cutouts; keep important HUD out of them. */
+  insets: Readonly<Insets>;
   input: Input;
   audio: AudioLike;
   rng: Rng;
@@ -73,6 +97,10 @@ export interface GameDefinition {
   controls: readonly (readonly [string, string])[];
   touchHint: string;
   touchButtons: readonly TouchButton[];
+  /** Flexible logical size range; omit for a fixed width x height. */
+  viewport?: ViewportRange;
+  /** Where pointer presses count: only on the canvas (default) or anywhere on the play stage. */
+  pointerArea?: 'canvas' | 'stage';
   /** In-game score points converted into one arcade coin. */
   scorePerCoin: number;
   /** In-game score points converted into one XP. */

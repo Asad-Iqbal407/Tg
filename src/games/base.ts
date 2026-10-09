@@ -2,7 +2,7 @@ import type { AudioLike } from '../core/audio';
 import { FloatingTexts, Particles, Shake } from '../core/fx';
 import type { Input } from '../core/input';
 import type { Rng } from '../core/rng';
-import type { BoostId, GameInstance, GameResult, GameServices } from './types';
+import type { BoostId, GameInstance, GameResult, GameServices, Insets } from './types';
 
 /** Shared plumbing for all games: effects, scoring, stats and a delayed game-over sequence. */
 export abstract class BaseGame implements GameInstance {
@@ -12,6 +12,7 @@ export abstract class BaseGame implements GameInstance {
   protected readonly input: Input;
   protected readonly audio: AudioLike;
   protected readonly rng: Rng;
+  protected readonly insets: Readonly<Insets>;
   protected readonly particles: Particles;
   protected readonly shake: Shake;
   protected readonly texts = new FloatingTexts();
@@ -31,6 +32,7 @@ export abstract class BaseGame implements GameInstance {
     this.input = services.input;
     this.audio = services.audio;
     this.rng = services.rng;
+    this.insets = services.insets;
     this.particles = new Particles(services.rng);
     this.particles.density = services.reducedMotion ? 0.35 : 1;
     this.shake = new Shake();

@@ -3,7 +3,13 @@ import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import { MemoryBackend, PersistentStore } from '../src/core/storage';
 import { GAMES } from '../src/games/registry';
-import type { BoostId, GameDefinition, GameInstance, SkinData } from '../src/games/types';
+import {
+  type BoostId,
+  type GameDefinition,
+  type GameInstance,
+  NO_INSETS,
+  type SkinData,
+} from '../src/games/types';
 import { ArcadeService } from '../src/meta/arcade';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
 import { defaultProfile, type Profile, PROFILE_VERSION, sanitizeProfile } from '../src/meta/profile';
@@ -44,6 +50,7 @@ export function createGame(
       boosts: new Set(opts.boosts ?? []),
       powerDuration: 1,
     },
+    insets: NO_INSETS,
     reducedMotion: false,
     haptic: () => undefined,
   });

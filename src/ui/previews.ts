@@ -5,7 +5,7 @@ import { Rng } from '../core/rng';
 import { fillRoundRect } from '../games/draw';
 import { HERO } from '../games/platformer/sprites';
 import { drawSprite } from '../games/sprite';
-import type { GameDefinition, SkinData } from '../games/types';
+import { type GameDefinition, NO_INSETS, type SkinData } from '../games/types';
 import type { SkinItem } from '../meta/catalog';
 
 /** Seed, simulated seconds and vertical crop focus (0 = top, 1 = bottom) for card art. */
@@ -42,6 +42,7 @@ function renderFrame(def: GameDefinition, skin: SkinData): HTMLCanvasElement | n
     audio: new NullAudio(),
     rng: new Rng(cfg.seed),
     loadout: { skin, boosts: new Set(), powerDuration: 1 },
+    insets: NO_INSETS,
     reducedMotion: true,
     haptic: () => undefined,
   });

@@ -1,7 +1,13 @@
 import { GameLoop, Viewport } from '../core/engine';
 import { Input } from '../core/input';
 import { Rng } from '../core/rng';
-import type { BoostId, GameDefinition, GameInstance, GameResult } from '../games/types';
+import {
+  type BoostId,
+  type GameDefinition,
+  type GameInstance,
+  type GameResult,
+  NO_INSETS,
+} from '../games/types';
 import type { RunSummary, RunTicket } from '../meta/arcade';
 import type { App } from './app';
 import { fmt, h, isTouchDevice } from './dom';
@@ -121,6 +127,7 @@ export class PlayScreen {
       audio: this.app.audio,
       rng: new Rng((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0),
       loadout: this.ticket.loadout,
+      insets: NO_INSETS,
       reducedMotion: this.app.reducedMotion,
       haptic: (ms) => this.app.haptic(ms),
     });
