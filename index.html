@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#14163a">
+  <title>Super Pip Adventure</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="ui">
+    <!-- Title -->
+    <section id="screen-title" class="screen center">
+      <div class="title-wallet chip" id="title-wallet"></div>
+      <div class="logo">
+        <span class="logo-super">SUPER</span>
+        <span class="logo-main">Pip</span>
+        <span class="logo-sub">Adventure</span>
+      </div>
+      <div class="menu">
+        <button class="btn big primary" data-act="play" data-focus>▶ Play</button>
+        <button class="btn" data-act="shop">Shop</button>
+        <button class="btn" data-act="ach">Achievements <i class="badge" id="achBadge"></i></button>
+        <button class="btn" data-act="daily">Daily Reward <i class="badge" id="dailyBadge">!</i></button>
+        <button class="btn" data-act="settings">Settings</button>
+      </div>
+      <div class="hint">← → move · Space jump · Shift run / throw · ↓ in air ground-pound · Esc pause</div>
+    </section>
+
+    <!-- World map -->
+    <section id="screen-map" class="screen">
+      <header class="topbar">
+        <button class="btn small ghost" data-act="home">← Back</button>
+        <h2>World Map</h2>
+        <div class="wallet" id="map-wallet"></div>
+      </header>
+      <div class="rank-card" id="map-rank"></div>
+      <div class="stage-grid" id="stage-list"></div>
+      <div class="map-foot">
+        <button class="btn small" data-act="shop">Shop</button>
+        <button class="btn small" data-act="ach">Achievements</button>
+      </div>
+    </section>
+
+    <!-- Shop -->
+    <section id="screen-shop" class="screen">
+      <header class="topbar">
+        <button class="btn small ghost" data-act="back">← Back</button>
+        <h2>Shop</h2>
+        <div class="wallet" id="shop-wallet"></div>
+      </header>
+      <h3 class="sec">Upgrades</h3>
+      <div class="items" id="shop-upgrades"></div>
+      <h3 class="sec">Outfits</h3>
+      <div class="skins" id="shop-skins"></div>
+    </section>
+
+    <!-- Achievements -->
+    <section id="screen-ach" class="screen">
+      <header class="topbar">
+        <button class="btn small ghost" data-act="back">← Back</button>
+        <h2>Achievements</h2>
+        <div class="wallet" id="ach-wallet"></div>
+      </header>
+      <p class="muted center-text" id="ach-summary"></p>
+      <div class="items" id="ach-list"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="screen-settings" class="screen">
+      <header class="topbar">
+        <button class="btn small ghost" data-act="back">← Back</button>
+        <h2>Settings</h2>
+        <div class="wallet"></div>
+      </header>
+      <div class="panel settings">
+        <label class="row"><span>Music</span><input type="range" id="set-music" min="0" max="100"></label>
+        <label class="row"><span>Sound effects</span><input type="range" id="set-sfx" min="0" max="100"></label>
+        <label class="row"><span>Screen shake</span><input type="checkbox" id="set-shake"></label>
+        <label class="row"><span>Touch controls</span>
+          <select id="set-touch"><option value="auto">Auto</option><option value="on">Always on</option><option value="off">Off</option></select>
+        </label>
+        <h3 class="sec">How to play</h3>
+        <ul class="howto">
+          <li><b>Move</b> ← → or A / D · <b>Jump</b> Space, ↑, W or Z (hold for higher)</li>
+          <li><b>Run</b> hold Shift or X · with the Ember power it also <b>throws fireballs</b></li>
+          <li><b>Ground-pound</b> press ↓ in mid-air to smash bricks and stun enemies</li>
+          <li><b>Stomp</b> enemies; chain stomps without touching the ground for bigger points and a 1UP</li>
+          <li>Hit <b>sparkle blocks</b> for coins and power-ups: Sun Berry, Ember Bloom, Sky Feather (double-jump &amp; glide), Star Shard</li>
+          <li>Find the <b>3 star medals</b> in every stage and beat the par time to earn all 3 stars</li>
+          <li>Spend coins in the <b>Shop</b>, claim <b>Achievements</b> and your <b>Daily Reward</b></li>
+        </ul>
+        <button class="btn small danger" data-act="reset">Reset progress</button>
+      </div>
+    </section>
+
+    <!-- Pause -->
+    <section id="screen-pause" class="screen center dim">
+      <div class="panel narrow">
+        <h1 class="rtitle">Paused</h1>
+        <div class="sub" id="pause-info"></div>
+        <div class="menu">
+          <button class="btn primary" data-act="resume" data-focus>▶ Resume</button>
+          <button class="btn" data-act="restart">↻ Restart stage</button>
+          <button class="btn" data-act="settings">Settings</button>
+          <button class="btn" data-act="quit">Quit to map</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="screen-results" class="screen center dim">
+      <div class="panel result" id="result-body"></div>
+    </section>
+
+    <!-- Game over -->
+    <section id="screen-over" class="screen center dim">
+      <div class="panel narrow" id="over-body"></div>
+    </section>
+
+    <div id="modal" class="modal"><div class="panel narrow"></div></div>
+    <div id="toasts"></div>
+  </div>
+
+  <button id="pauseBtn" aria-label="Pause" style="display:none">❚❚</button>
+
+  <div id="touch" style="display:none">
+    <div class="dpad">
+      <button data-key="left" aria-label="Left">◀</button>
+      <button data-key="down" aria-label="Ground pound">▼</button>
+      <button data-key="right" aria-label="Right">▶</button>
+    </div>
+    <div class="actions">
+      <button data-key="run" class="b" aria-label="Run / Fire">B</button>
+      <button data-key="jump" class="a" aria-label="Jump">A</button>
+    </div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/levels.js"></script>
+  <script src="js/save.js"></script>
+  <script src="js/art.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
