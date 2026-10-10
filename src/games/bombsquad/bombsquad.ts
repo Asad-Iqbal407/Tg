@@ -37,6 +37,8 @@ import {
 } from './types';
 
 /** Stick-like steering with a mouse or finger: no movement inside the dead zone, full speed at the far edge. */
+/** How far off a tile centre the player may be and still be nudged through a gap (tile units). */
+const CORNER_ASSIST = 0.45;
 const DRAG_DEAD_ZONE = 14;
 const DRAG_FULL_SPEED = 70;
 const ITEM_DROPS: readonly { value: ItemKind; weight: number }[] = [
@@ -283,7 +285,7 @@ export class BombSquadGame extends BaseGame {
     const p = this.player;
     const cur = axis === 'x' ? p.x : p.y;
     const off = Math.floor(cur) + 0.5 - cur;
-    if (Math.abs(off) > 0.3) return;
+    if (Math.abs(off) > CORNER_ASSIST) return;
     const next = cur + Math.sign(off) * Math.min(Math.abs(off), amount);
     const blocked = axis === 'x' ? this.blockedAt(next, p.y) : this.blockedAt(p.x, next);
     if (blocked) return;
