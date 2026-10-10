@@ -20,7 +20,6 @@ import {
 import { type BoostId, type GameInstance, type Insets, NO_INSETS } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
 import { gameById, mockCtx } from './helpers';
-import { DuckGame as LegacyDuck } from '../src/games/duck/legacy_tmp';
 
 const DT = 1 / 60;
 const def = gameById('duck');
@@ -35,6 +34,7 @@ interface SimDuck {
   state: 'fly' | 'hit' | 'fall' | 'escape' | 'gone';
   hit: boolean;
   t: number;
+  turnT: number;
   hx: number[];
   hy: number[];
 }
@@ -69,14 +69,13 @@ interface DuckSim extends GameInstance {
   waveFly: number;
   dogT: number;
   dogMode: string;
+  dogStay: boolean;
+  dogPending: boolean;
   dogKinds: string[];
   grassTop: number;
-  touchAim: boolean;
   stats: Record<string, number>;
-  scatterActive: boolean;
-  shotRadius: number;
-  shoot(): void;
-  startWave(): void;
+  readonly scatterActive: boolean;
+  readonly shotRadius: number;
   layoutBar(): { x: number; y: number; w: number; h: number; s: number };
 }
 
@@ -97,14 +96,15 @@ interface MakeOptions {
   height?: number;
   insets?: Insets;
   powerDuration?: number;
-  reducedMotion?: boolean;
+  preview?: boolean;
+  ctx?: CanvasRenderingContext2D;
 }
 
 function make(opts: MakeOptions = {}): { g: DuckSim; input: Input; audio: RecordingAudio } {
   const input = new Input();
   const audio = new RecordingAudio();
   const game = def.create({
-    ctx: mockCtx(),
+    ctx: opts.ctx ?? mockCtx(),
     width: opts.width ?? def.width,
     height: opts.height ?? def.height,
     insets: opts.insets ?? NO_INSETS,
@@ -116,8 +116,9 @@ function make(opts: MakeOptions = {}): { g: DuckSim; input: Input; audio: Record
       boosts: new Set(opts.boosts ?? []),
       powerDuration: opts.powerDuration ?? 1,
     },
-    reducedMotion: opts.reducedMotion ?? false,
+    reducedMotion: false,
     haptic: () => undefined,
+    preview: opts.preview,
   });
   return { g: game as unknown as DuckSim, input, audio };
 }
@@ -130,25 +131,54 @@ function step(g: DuckSim, input: Input, seconds: number, each?: () => void): voi
   }
 }
 
-/** Step until `cond` holds (or fail after `max` seconds). */
-function until(g: DuckSim, input: Input, cond: () => boolean, max = 30): void {
+/** Step until `cond` holds (fails after `max` seconds). */
+function until(g: DuckSim, input: Input, cond: () => boolean, max = 30, each?: () => void): void {
   for (let i = 0; i < max * 60; i++) {
     if (cond()) return;
+    each?.();
     g.update(DT);
     input.postUpdate();
   }
   throw new Error('condition not reached');
 }
 
-/** A pointer press at (x, y) on the canvas, processed by the next update. */
-function tap(input: Input, x: number, y: number, touch = false): void {
+/** A pointer press at (x, y), processed by the next update. */
+function tap(input: Input, x: number, y: number, opts: { touch?: boolean; inside?: boolean } = {}): void {
   const p = input.pointer;
   p.x = x;
   p.y = y;
   p.active = true;
-  p.inside = true;
-  p.touch = touch;
+  p.inside = opts.inside ?? true;
+  p.touch = opts.touch ?? false;
   p.pressed = true;
+}
+
+/** Put the game into a wave with ducks well above the grass. */
+function inWave(seed = 1, opts: MakeOptions = {}): { g: DuckSim; input: Input; audio: RecordingAudio } {
+  const made = make({ seed, ...opts });
+  until(made.g, made.input, () => made.g.phase === 'wave');
+  step(made.g, made.input, 1.3);
+  return made;
+}
+
+/** Freeze a duck at (x, y) moving with (vx, vy), with a matching position history. */
+function placeDuck(d: SimDuck, x: number, y: number, vx = 0, vy = 0): void {
+  d.x = x;
+  d.y = y;
+  d.vx = vx;
+  d.vy = vy;
+  d.speed = Math.hypot(vx, vy);
+  d.turnT = 99;
+  d.t = 5;
+  for (let i = 0; i < d.hx.length; i++) {
+    d.hx[i] = x - vx * DT * (i + 1);
+    d.hy[i] = y - vy * DT * (i + 1);
+  }
+}
+
+/** Keep every other duck far away so a shot can only hit what the test placed. */
+function parkDucks(g: DuckSim, except?: SimDuck): void {
+  for (const d of g.ducks) if (d !== except) placeDuck(d, 60, 60);
 }
 
 interface BotOptions {
@@ -162,36 +192,38 @@ interface BotOptions {
   lag: number;
 }
 
-interface BotStats {
-  frames: number;
+const SKILLED: BotOptions = { cadence: 0.55, reaction: 0.6, noise: 12, lag: 0.2 };
+const CASUAL: BotOptions = { cadence: 0.7, reaction: 0.8, noise: 18, lag: 0.25 };
+
+interface BotRun {
+  seconds: number;
+  /** Share of the run with at least one duck that can be shot. */
   flying: number;
+  /** Share of the run with any duck on screen (flying, falling or leaving). */
   onScreen: number;
   rounds: number;
   over: boolean;
-  score: number;
-  coins: number;
-}
-
-interface BotDuck {
-  x: number;
-  y: number;
-  state: string;
+  /** Arcade coins the run converts to. */
+  arcadeCoins: number;
+  stats: Record<string, number>;
 }
 
 /**
- * A scripted player: it sees ducks `lag` seconds late, leads them linearly, and clicks at a steady
- * cadence with Gaussian aim noise (all seeded).
+ * A scripted player modelled on human limits: it sees ducks `lag` seconds late, leads them
+ * linearly (so turns fool it), and clicks at a steady cadence with Gaussian aim noise.
  */
-function playBot(game: GameInstance, input: Input, seed: number, seconds: number, bot: BotOptions): BotStats {
-  const g = game as unknown as { ducks: BotDuck[]; leaving?: BotDuck[]; phase: string };
+function playBot(seed: number, seconds: number, bot: BotOptions): BotRun {
+  const { g, input } = make({ seed });
   const rng = new Rng(seed * 7 + 1);
   const gauss = () => Math.sqrt(-2 * Math.log(1 - rng.next())) * Math.cos(2 * Math.PI * rng.next());
-  const out: BotStats = { frames: 0, flying: 0, onScreen: 0, rounds: 0, over: false, score: 0, coins: 0 };
-  const seen = new Map<BotDuck, { x: number; y: number }[]>();
+  const seen = new Map<SimDuck, { x: number; y: number }[]>();
   const lagFrames = Math.round(bot.lag * 60);
+  let frames = 0;
+  let flyingFrames = 0;
+  let screenFrames = 0;
   let cool = bot.reaction;
-  let target: BotDuck | null = null;
-  for (let i = 0; i < seconds * 60 && !game.isOver(); i++) {
+  let target: SimDuck | null = null;
+  for (let i = 0; i < seconds * 60 && !g.isOver(); i++) {
     const flying = g.ducks.filter((d) => d.state === 'fly');
     for (const d of flying) {
       let h = seen.get(d);
@@ -205,12 +237,11 @@ function playBot(game: GameInstance, input: Input, seed: number, seconds: number
       const h = target ? seen.get(target) : undefined;
       const a = h?.[Math.min(lagFrames, h.length - 1)];
       const b = h?.[Math.min(lagFrames + 1, h.length - 1)];
-      if (cool <= 0 && a && b && a.y < 370) {
-        const lead = bot.lag;
+      if (cool <= 0 && a && b && a.y < g.grassTop - 30) {
         tap(
           input,
-          a.x + (a.x - b.x) * 60 * lead + gauss() * bot.noise,
-          a.y + (a.y - b.y) * 60 * lead + gauss() * bot.noise,
+          a.x + (a.x - b.x) * 60 * bot.lag + gauss() * bot.noise,
+          a.y + (a.y - b.y) * 60 * bot.lag + gauss() * bot.noise,
         );
         cool = bot.cadence;
       }
@@ -218,60 +249,473 @@ function playBot(game: GameInstance, input: Input, seed: number, seconds: number
       cool = bot.reaction;
       target = null;
     }
-    out.frames++;
-    if (flying.length > 0) out.flying++;
-    if (g.ducks.length + (g.leaving?.length ?? 0) > 0) out.onScreen++;
-    game.update(DT);
+    frames++;
+    if (flying.length > 0) flyingFrames++;
+    if (g.ducks.length + g.leaving.length > 0) screenFrames++;
+    g.update(DT);
     input.postUpdate();
   }
-  const r = game.getResult();
-  out.rounds = r.stats.rounds ?? 0;
-  out.over = game.isOver();
-  out.score = r.score;
-  out.coins = r.coins;
-  return out;
+  const r = g.getResult();
+  return {
+    seconds: frames / 60,
+    flying: flyingFrames / frames,
+    onScreen: screenFrames / frames,
+    rounds: r.stats.rounds ?? 0,
+    over: g.isOver(),
+    arcadeCoins: r.coins + Math.floor(r.score / def.scorePerCoin),
+    stats: r.stats,
+  };
 }
 
-describe('Duck Season pacing', () => {
-  it('explores', () => {
-    for (const [name, bot] of [
-      ['expert', { cadence: 0.45, reaction: 0.45, noise: 8, lag: 0.15 }],
-      ['skilled', { cadence: 0.55, reaction: 0.6, noise: 12, lag: 0.2 }],
-      ['casual', { cadence: 0.7, reaction: 0.8, noise: 18, lag: 0.25 }],
-    ] as const) {
-     for (const legacy of [true, false]) {
-      let frames = 0;
-      let flying = 0;
-      let onScreen = 0;
-      const rows: string[] = [];
-      for (let seed = 1; seed <= 12; seed++) {
-        let s: BotStats;
-        if (legacy) {
-          const input = new Input();
-          const game = new LegacyDuck({
-            ctx: mockCtx(),
-            width: 960,
-            height: 540,
-            insets: NO_INSETS,
-            input,
-            audio: new RecordingAudio(),
-            rng: new Rng(seed),
-            loadout: { skin: toSkinData(defaultSkin('duck')), boosts: new Set(), powerDuration: 1 },
-            reducedMotion: false,
-            haptic: () => undefined,
-          });
-          s = playBot(game, input, seed, 600, bot);
-        } else {
-          const { g, input } = make({ seed });
-          s = playBot(g, input, seed, 600, bot);
+describe('Duck Season viewport and layout', () => {
+  it('declares the agreed flexible width at a fixed height', () => {
+    expect(def.viewport).toEqual({ minWidth: 800, maxWidth: 1280 });
+    expect(def.height).toBe(540);
+  });
+
+  it.each([800, 960, 1280])('keeps ducks inside the screen and spreads them over %i px', (width) => {
+    let maxX = 0;
+    for (const seed of [1, 2, 3]) {
+      const { g, input } = make({ seed, width });
+      step(g, input, 40, () => {
+        for (const d of g.ducks) {
+          if (d.state !== 'fly') continue;
+          expect(d.x).toBeGreaterThanOrEqual(0);
+          expect(d.x).toBeLessThanOrEqual(width);
+          maxX = Math.max(maxX, d.x);
         }
-        frames += s.frames;
-        flying += s.flying;
-        onScreen += s.onScreen;
-        rows.push(`r${s.rounds} ${s.score} c${s.coins} =${s.coins + Math.floor(s.score / (legacy ? 900 : def.scorePerCoin))} ${(s.frames / 60).toFixed(0)}s`);
-      }
-      console.log(name, legacy ? 'OLD' : 'NEW', (flying / frames).toFixed(3), (onScreen / frames).toFixed(3), rows.join(' | '));
-     }
+      });
     }
+    expect(maxX).toBeGreaterThan(width * 0.8);
+  });
+
+  it('lifts the bottom HUD bar above the bottom inset and keeps it on the canvas', () => {
+    for (const width of [800, 1280]) {
+      const { g } = make({ width });
+      const free = g.layoutBar();
+      expect(free.y + free.h).toBeLessThanOrEqual(540);
+      expect(free.x).toBeGreaterThanOrEqual(0);
+      expect(free.x + free.w).toBeLessThanOrEqual(width);
+      const { g: covered } = make({ width, insets: { top: 0, right: 30, bottom: 120, left: 20 } });
+      const bar = covered.layoutBar();
+      expect(bar.y + bar.h).toBeLessThanOrEqual(540 - 120);
+      expect(bar.x).toBeGreaterThanOrEqual(20);
+      expect(bar.x + bar.w).toBeLessThanOrEqual(width - 30);
+    }
+  });
+
+  it('reads the live insets object at render time', () => {
+    const insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+    const { g } = make({ insets });
+    const before = g.layoutBar().y;
+    insets.bottom = 90;
+    expect(g.layoutBar().y).toBe(before - 90);
+  });
+
+  it('skips the HUD and banners when rendering a card preview', () => {
+    const drawn: string[] = [];
+    const base = mockCtx() as unknown as Record<string | symbol, unknown>;
+    const ctx = new Proxy(base, {
+      get(target, key) {
+        if (key === 'fillText') return (s: string) => drawn.push(s);
+        return target[key];
+      },
+      set(target, key, value) {
+        target[key] = value;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D;
+    const { g, input } = make({ ctx, preview: true });
+    step(g, input, 0.3);
+    g.render();
+    expect(drawn).not.toContain('HIT');
+    expect(drawn.some((s) => s.startsWith('ROUND'))).toBe(false);
+    const { g: live, input: liveInput } = make({ ctx });
+    step(live, liveInput, 0.3);
+    live.render();
+    expect(drawn).toContain('HIT');
+  });
+});
+
+describe('Duck Season fairness', () => {
+  it('never lets a hittable duck dip into the foreground grass once it has emerged', () => {
+    for (const seed of [1, 2, 3, 4]) {
+      const { g, input } = make({ seed });
+      step(g, input, 60, () => {
+        for (const d of g.ducks) {
+          if (d.state === 'fly' && d.t > PACE.emerge) expect(d.y).toBeLessThan(g.grassTop - 40);
+        }
+      });
+    }
+  });
+
+  it('spawns supply crates with the box above the grass and announces them', () => {
+    for (let seed = 1; seed < 40; seed++) {
+      const { g, input, audio } = make({ seed });
+      until(g, input, () => g.phase === 'wave');
+      const crate = g.crates[0];
+      if (!crate) continue;
+      expect(crate.y).toBeLessThanOrEqual(g.grassTop - 10);
+      expect(audio.played).toContain('pop');
+      return;
+    }
+    throw new Error('no crate spawned in 40 seeds');
+  });
+
+  it('tests shots against the frame on screen, before the ducks move', () => {
+    const { g, input } = inWave();
+    const d = g.ducks[0]!;
+    parkDucks(g, d);
+    // A fast duck (12 px per step) clipped near the trailing edge of the hit radius.
+    placeDuck(d, 400, 200, 720, 0);
+    tap(input, 400 - g.shotRadius + 4, 200);
+    step(g, input, DT);
+    expect(d.state).toBe('hit');
+  });
+
+  it('forgives about 50 ms of input latency on fast ducks', () => {
+    const { g, input } = inWave();
+    const d = g.ducks[0]!;
+    parkDucks(g, d);
+    placeDuck(d, 400, 200, 720, 0);
+    // Aimed at where the duck was three frames ago (36 px behind): still a hit.
+    tap(input, 400 - 36 - g.shotRadius + 4, 200);
+    step(g, input, DT);
+    expect(d.state).toBe('hit');
+
+    const { g: g2, input: in2 } = inWave();
+    const d2 = g2.ducks[0]!;
+    parkDucks(g2, d2);
+    placeDuck(d2, 400, 200, 720, 0);
+    // Further back than the rewind window: a miss.
+    tap(in2, 400 - 48 - g2.shotRadius - 4, 200);
+    step(g2, in2, DT);
+    expect(d2.state).toBe('fly');
+  });
+
+  it('uses a bigger hit radius for touch, and the reticle shows the real radius', () => {
+    expect(hitRadius(1, true, false)).toBe(hitRadius(1, false, false) + TOUCH_BONUS);
+    const { g, input } = inWave();
+    const mouseR = g.shotRadius;
+    const d = g.ducks[0]!;
+    parkDucks(g, d);
+    placeDuck(d, 400, 200);
+    tap(input, 400 + mouseR + 4, 200, { touch: true });
+    step(g, input, DT);
+    expect(g.shotRadius).toBe(mouseR + TOUCH_BONUS);
+    expect(d.state).toBe('hit');
+  });
+
+  it('ignores presses that land off the canvas (letterbox bars)', () => {
+    const { g, input } = inWave();
+    const shots = g.shots;
+    tap(input, 0, 0, { inside: false });
+    step(g, input, DT);
+    expect(g.shots).toBe(shots);
+  });
+
+  it('collects a crate by shooting its balloon, without breaking the combo', () => {
+    const { g, input } = inWave();
+    parkDucks(g);
+    g.crates = [{ kind: 'slowmo', x: 480, y: 330, vy: 0, alive: true }];
+    g.combo = 5;
+    tap(input, 480, 330 - BALLOON_DY);
+    step(g, input, DT);
+    expect(g.crates).toHaveLength(0);
+    expect(g.stats.powerups).toBe(1);
+    expect(g.powers.slowmo).toBeGreaterThan(0);
+    expect(g.combo).toBe(5);
+    // A plain miss still breaks it.
+    tap(input, 700, 120);
+    step(g, input, DT);
+    expect(g.combo).toBe(0);
+  });
+
+  it('lets the remaining ducks fly off as soon as the shells run out', () => {
+    const { g, input } = inWave(2);
+    const [a, b] = g.ducks;
+    parkDucks(g);
+    placeDuck(a!, 300, 150);
+    placeDuck(b!, 700, 150);
+    tap(input, 300, 150);
+    step(g, input, DT);
+    expect(a!.state).toBe('hit');
+    for (let i = 0; i < 2; i++) {
+      tap(input, 500, 330);
+      step(g, input, 4 * DT);
+    }
+    expect(g.shots).toBe(0);
+    step(g, input, PACE.outOfShells + 0.05);
+    // The first duck is still falling, but the second no longer idles in the air.
+    expect(a!.state === 'fall' || a!.state === 'hit').toBe(true);
+    expect(b!.state).toBe('escape');
+  });
+});
+
+describe('Duck Season keyboard and gamepad aim', () => {
+  it('accelerates while held and keeps diagonals at the same speed', () => {
+    const { g, input } = make();
+    g.aimX = 20;
+    const x0 = g.aimX;
+    input.setVirtual('right', true, 't');
+    step(g, input, 0.1);
+    expect((g.aimX - x0) / 0.1).toBeLessThan(AIM.minSpeed);
+    step(g, input, 0.4);
+    const xa = g.aimX;
+    step(g, input, 0.1);
+    expect((g.aimX - xa) / 0.1).toBeGreaterThan(AIM.maxSpeed * 0.95);
+    input.setVirtual('right', false, 't');
+
+    const { g: d, input: din } = make();
+    d.aimX = 100;
+    d.aimY = 100;
+    din.setVirtual('right', true, 't');
+    din.setVirtual('down', true, 't');
+    step(d, din, 0.3);
+    const x1 = d.aimX;
+    const y1 = d.aimY;
+    step(d, din, 0.05);
+    expect(Math.hypot(d.aimX - x1, d.aimY - y1) / 0.05).toBeLessThanOrEqual(AIM.maxSpeed * 1.01);
+  });
+
+  it('drifts with a nearby duck when the keys are idle, but never in pointer mode', () => {
+    const { g, input } = inWave();
+    const d = g.ducks[0]!;
+    parkDucks(g, d);
+    input.setVirtual('left', true, 't');
+    step(g, input, DT);
+    input.setVirtual('left', false, 't');
+    step(g, input, 0.2);
+    placeDuck(d, g.aimX + 50, g.aimY, 120, 0);
+    const gap0 = Math.hypot(d.x - g.aimX, d.y - g.aimY);
+    step(g, input, 0.3);
+    expect(Math.hypot(d.x - g.aimX, d.y - g.aimY)).toBeLessThan(gap0 * 0.5);
+
+    const { g: p, input: pin } = inWave();
+    const pd = p.ducks[0]!;
+    parkDucks(p, pd);
+    pin.pointer.x = 500;
+    pin.pointer.y = 200;
+    pin.pointer.active = true;
+    step(p, pin, DT);
+    placeDuck(pd, 540, 200, 120, 0);
+    step(p, pin, 0.3);
+    expect(p.aimX).toBe(500);
+  });
+});
+
+describe('Duck Season power-ups and boosts', () => {
+  it('stretches slow-mo and scatter with the Overclock upgrade', () => {
+    const { g, input } = inWave(1, { powerDuration: 1.6 });
+    parkDucks(g);
+    g.crates = [{ kind: 'scatter', x: 480, y: 300, vy: 0, alive: true }];
+    tap(input, 480, 300);
+    step(g, input, DT);
+    expect(g.powers.scatter).toBeCloseTo(9 * 1.6, 1);
+  });
+
+  it('never cancels the Power Start scatter with a scatter crate', () => {
+    const { g, input } = inWave(1, { boosts: ['head-start'] });
+    expect(g.scatterActive).toBe(true);
+    parkDucks(g);
+    g.crates = [{ kind: 'scatter', x: 480, y: 300, vy: 0, alive: true }];
+    tap(input, 480, 300);
+    step(g, input, DT);
+    // Once the crate's own timer has run out, round 1 still has scatter.
+    g.powers.scatter = 0;
+    step(g, input, DT);
+    expect(g.round).toBe(1);
+    expect(g.scatterActive).toBe(true);
+  });
+
+  it('keeps the Power Start scatter for round 1 only', () => {
+    const { g, input } = make({ boosts: ['head-start'] });
+    expect(g.scatterActive).toBe(true);
+    until(
+      g,
+      input,
+      () => g.round === 2,
+      120,
+      () => {
+        // Line every emerged duck up under the crosshair and shoot, so round 1 is cleared.
+        const d = g.ducks.find((x) => x.state === 'fly' && x.t > 0.2);
+        if (g.phase === 'wave' && d) {
+          placeDuck(d, 480, 200);
+          tap(input, 480, 200);
+        }
+      },
+    );
+    expect(g.scatterActive).toBe(false);
+  });
+});
+
+/** Fail a round fast: every wave runs dry immediately. */
+function failRound(g: DuckSim, input: Input): void {
+  until(
+    g,
+    input,
+    () => g.phase === 'roundEnd',
+    60,
+    () => {
+      if (g.phase === 'wave') g.shots = 0;
+    },
+  );
+}
+
+describe('Duck Season round transitions', () => {
+  it('uses the Guardian without a game-over sting, then ends with the dog rising', () => {
+    const { g, input, audio } = make({ boosts: ['shield'] });
+    failRound(g, input);
+    expect(audio.played).toContain('warning');
+    expect(audio.played).not.toContain('gameover');
+    until(g, input, () => g.phase === 'intro');
+    expect(g.retry).toBe(true);
+    expect(g.guardian).toBe(false);
+    expect(g.round).toBe(1);
+    failRound(g, input);
+    expect(audio.played).toContain('gameover');
+    until(g, input, () => g.phase === 'over');
+    expect(g.phaseT).toBeLessThan(0.05);
+    expect(g.dogStay).toBe(true);
+    expect(g.dogT).toBeLessThan(0.05);
+  });
+
+  it('lets a click skip the round result after a short beat', () => {
+    const { g, input } = make();
+    failRound(g, input);
+    tap(input, 300, 200);
+    step(g, input, DT);
+    expect(g.phase).toBe('roundEnd');
+    step(g, input, PACE.roundSkip);
+    tap(input, 300, 200);
+    step(g, input, DT);
+    expect(g.phase).toBe('over');
+  });
+
+  it('starts the next pair shortly after a wave is decided, while shot ducks still fall', () => {
+    const { g, input } = inWave(3);
+    const [a, b] = g.ducks;
+    parkDucks(g);
+    placeDuck(a!, 300, 120);
+    placeDuck(b!, 700, 120);
+    tap(input, 300, 120);
+    step(g, input, DT);
+    tap(input, 700, 120);
+    step(g, input, DT);
+    expect(g.phase).toBe('waveEnd');
+    step(g, input, PACE.nextWave + DT);
+    expect(g.phase).toBe('wave');
+    expect(g.leaving.some((d) => d.state === 'fall' || d.state === 'hit')).toBe(true);
+    // The dog then holds up the kinds that were actually shot.
+    until(g, input, () => !g.dogPending);
+    expect([...g.dogKinds].sort()).toEqual([a!.kind, b!.kind].sort());
+    expect(g.dogMode).toBe('happy');
+  });
+
+  it('keeps ducks in the air for most of the session', () => {
+    let flying = 0;
+    let onScreen = 0;
+    let total = 0;
+    for (const seed of [1, 2, 3, 4]) {
+      const run = playBot(seed, 150, SKILLED);
+      flying += run.flying * run.seconds;
+      onScreen += run.onScreen * run.seconds;
+      total += run.seconds;
+    }
+    // Before the redesign a scripted player saw flying ducks only 23-36% of the time.
+    expect(flying / total).toBeGreaterThan(0.45);
+    expect(onScreen / total).toBeGreaterThan(0.65);
+  });
+});
+
+describe('Duck Season difficulty curve', () => {
+  it('raises duck speed smoothly, without a ceiling but without jumps', () => {
+    let prev = roundSpeed(1);
+    expect(prev).toBe(1);
+    for (let r = 2; r <= 60; r++) {
+      const s = roundSpeed(r);
+      expect(s).toBeGreaterThan(prev);
+      expect(s - prev).toBeLessThan(0.11);
+      prev = s;
+    }
+    expect(roundSpeed(4)).toBeCloseTo(1.27, 1);
+    expect(roundSpeed(12)).toBeCloseTo(1.64, 1);
+  });
+
+  it('never stacks a required-hits step on top of a speed step', () => {
+    for (let r = 2; r <= 40; r++) {
+      expect(requiredHits(r)).toBeGreaterThanOrEqual(requiredHits(r - 1));
+      expect(requiredHits(r) - requiredHits(r - 1)).toBeLessThanOrEqual(1);
+      if (isStepRound(r)) expect(speedScale(r)).toBeLessThan(speedScale(r - 1));
+    }
+    expect(requiredHits(1)).toBe(6);
+    expect(requiredHits(16)).toBe(9);
+  });
+
+  it('keeps every duck kind in the mix', () => {
+    for (let r = 1; r <= 60; r++) {
+      const w = kindWeights(r);
+      const total = w.reduce((s, k) => s + k.weight, 0);
+      const share = (kind: string) => w.find((k) => k.value === kind)!.weight / total;
+      expect(share('green')).toBeGreaterThanOrEqual(0.14);
+      expect(share('gold')).toBeLessThanOrEqual(0.1);
+      expect(share('red')).toBeLessThanOrEqual(0.4);
+    }
+  });
+
+  it('plans ten ducks per round, mixing in triples only later', () => {
+    const rng = new Rng(5);
+    for (let r = 1; r <= 30; r++) {
+      const plan = wavePlan(r, rng);
+      expect(plan.reduce((s, n) => s + n, 0)).toBe(DUCKS_PER_ROUND);
+      if (r < 8) expect(plan).toEqual([2, 2, 2, 2, 2]);
+    }
+    expect(flyTime(1, 2)).toBeGreaterThan(flyTime(20, 2));
+    expect(flyTime(20, 3)).toBeGreaterThan(flyTime(20, 2));
+  });
+
+  it('lets a casual player through the first rounds, ends long runs, and pays a sensible amount', () => {
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const casual = playBot(seed, 900, CASUAL);
+      expect(casual.rounds).toBeGreaterThanOrEqual(4);
+      expect(casual.over).toBe(true);
+      expect(casual.arcadeCoins).toBeGreaterThanOrEqual(30);
+      expect(casual.arcadeCoins).toBeLessThanOrEqual(400);
+    }
+  });
+});
+
+describe('Duck Season determinism', () => {
+  it('renders without touching the simulation', () => {
+    const play = (renderEvery: number) => {
+      const { g, input } = make({ seed: 11 });
+      for (let i = 0; i < 60 * 40; i++) {
+        if (i % 90 === 0) tap(input, 200 + (i % 500), 150);
+        g.update(DT);
+        input.postUpdate();
+        if (renderEvery > 0 && i % renderEvery === 0) g.render();
+      }
+      return g.getResult();
+    };
+    expect(play(1)).toEqual(play(0));
+  });
+
+  it('keeps the stat keys that missions and achievements read', () => {
+    const run = playBot(2, 120, SKILLED);
+    expect(run.rounds).toBeGreaterThan(0);
+    const known = [
+      'ducks',
+      'hits',
+      'shots',
+      'rounds',
+      'bestRound',
+      'perfectRounds',
+      'doubleKills',
+      'goldenDucks',
+      'powerups',
+    ];
+    for (const k of Object.keys(run.stats)) expect(known).toContain(k);
+    expect(run.stats.ducks).toBeGreaterThan(0);
+    expect(run.stats.bestRound).toBe(run.rounds);
   });
 });

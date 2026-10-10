@@ -6,7 +6,7 @@ const ITERATIONS = 6;
 export const GRAVITY = 980;
 
 /** Engine acceleration (px/s²) at standstill, before the vehicle's power (traction limits it too). */
-const DRIVE_ACCEL = 650;
+const DRIVE_ACCEL = 600;
 const BRAKE_DECEL = 950;
 const REVERSE_ACCEL = 320;
 const ROLL_DECEL = 22;
@@ -496,7 +496,7 @@ export class Vehicle {
     const max = this.spec.maxSpeed;
     let dv = 0;
     if (input.throttle > 0) {
-      const fade = v > 0 ? Math.max(0, 1 - (v / max) ** 2) : 1;
+      const fade = v > 0 ? Math.max(0, 1 - v / max) : 1;
       dv = Math.min(DRIVE_ACCEL * this.spec.power * fade, traction) * input.throttle * dt;
     } else if (input.brake > 0 && (v > 8 || !input.canReverse)) {
       dv = -Math.sign(v) * Math.min(Math.abs(v), Math.min(BRAKE_DECEL, traction * 1.4) * dt);

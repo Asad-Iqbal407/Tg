@@ -104,13 +104,16 @@ export function requiredHits(round: number): number {
   return round <= 4 ? 6 : round <= 9 ? 7 : round <= 15 ? 8 : 9;
 }
 
-/** Rounds where the required hits step up get slightly slower ducks, so two ramps never stack. */
+/**
+ * Rounds where the required hits step up get slightly slower ducks (a 6% dip, just below the
+ * previous round), so two ramps never stack.
+ */
 export function isStepRound(round: number): boolean {
   return round > 1 && requiredHits(round) > requiredHits(round - 1);
 }
 
 export function speedScale(round: number): number {
-  return roundSpeed(round) * (isStepRound(round) ? 0.95 : 1);
+  return roundSpeed(round) * (isStepRound(round) ? 0.94 : 1);
 }
 
 /** Seconds a wave may fly before the ducks escape (triples get a little longer). */
