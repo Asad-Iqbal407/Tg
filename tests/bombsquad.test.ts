@@ -6,7 +6,7 @@ import type { Action } from '../src/core/input';
 import { Arena, BORDER, CRATE, FLOOR, manhattan, PILLAR } from '../src/games/bombsquad/grid';
 import { drawScene, type Palette, type SceneView } from '../src/games/bombsquad/render';
 import type { Bomb, Bot, BotKind, Explosion, Item, Player } from '../src/games/bombsquad/types';
-import { FUSE, LIVES, WALKER_SPEED } from '../src/games/bombsquad/types';
+import { BOT_TOUCH_GRACE, FUSE, LIVES, WALKER_SPEED } from '../src/games/bombsquad/types';
 import type { BoostId, GameInstance, GameServices } from '../src/games/types';
 import { NO_INSETS } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
@@ -69,6 +69,7 @@ function makeBot(kind: BotKind, x: number, y: number): Bot {
     repath: 99,
     bombCd: 99,
     touchCd: 99,
+    contact: 0,
     wait: 1e9,
     flash: 0,
     facingX: 1,
@@ -594,6 +595,33 @@ describe('spawns', () => {
   });
 });
 
+describe('walker contact', () => {
+  it('a walker in touch range hurts only once it has held range for the grace period', () => {
+    const { game, input, i, arena } = quietGame(24);
+    clearInterior(arena);
+    i.player.invuln = 0;
+    // Stands still 0.4 tiles from the player, inside touch range.
+    i.bots = [{ ...makeBot('walker', 1, 1), x: 1.9, y: 1.5, speed: 0, wait: 0, repath: 99, touchCd: 0 }];
+    run(game, input, BOT_TOUCH_GRACE - 0.05);
+    expect(i.lives).toBe(LIVES);
+    run(game, input, 0.1);
+    expect(i.lives).toBe(LIVES - 1);
+  });
+
+  it('a walker that leaves range inside the grace period never lands its touch', () => {
+    const { game, input, i, arena } = quietGame(25);
+    clearInterior(arena);
+    i.player.invuln = 0;
+    const walker = { ...makeBot('walker', 1, 1), x: 1.9, y: 1.5, speed: 0, wait: 0, repath: 99, touchCd: 0 };
+    i.bots = [walker];
+    run(game, input, BOT_TOUCH_GRACE / 2);
+    walker.x = 4.5;
+    run(game, input, 2);
+    expect(i.lives).toBe(LIVES);
+    expect(walker.contact).toBe(0);
+  });
+});
+
 describe('waves, items and stats', () => {
   it('wave 2 starts only after wave 1 is cleared', () => {
     const { game, input, i } = quietGame(11);
@@ -697,6 +725,52 @@ describe('robustness', () => {
       game.render();
       const r = game.getResult();
       expect(Number.isFinite(r.score)).toBe(true);
+    }
+  });
+
+  it('keeps ammo, laid bombs, solid tiles and bot paths consistent through long random play', () => {
+    for (const seed of [41, 42, 43]) {
+      const { game, input } = createGame(gameById('bombsquad'), { seed });
+      const i = internals(game);
+      let laid = 0;
+      const addBomb = i.addBomb.bind(i);
+      i.addBomb = (owner, tx, ty, power, fuse) => {
+        if (owner === 'player') laid++;
+        addBomb(owner, tx, ty, power, fuse);
+      };
+      const rng = new Rng(seed);
+      const held = new Set<Action>();
+      for (let f = 0; f < 60 * 60 && !game.isOver(); f++) {
+        if (f % 6 === 0) {
+          for (const a of ACTIONS) {
+            const want = rng.chance(0.25);
+            if (want && !held.has(a)) {
+              held.add(a);
+              input.setVirtual(a, true, 'invariant');
+            } else if (!want && held.has(a)) {
+              held.delete(a);
+              input.setVirtual(a, false, 'invariant');
+            }
+          }
+        }
+        game.update(DT);
+        input.postUpdate();
+        // Ammo comes back exactly when one of the player's own bombs goes off.
+        const own = i.bombs.filter((b) => b.owner === 'player').length;
+        expect(i.player.ammo + own).toBe(i.player.ammoMax);
+        expect(i.arena.isSolid(Math.floor(i.player.x), Math.floor(i.player.y))).toBe(false);
+        for (const bot of i.bots) {
+          expect(i.arena.isSolid(Math.floor(bot.x), Math.floor(bot.y))).toBe(false);
+          // With no bomb on the board nothing blocks the way, so every settled bot can reach the player.
+          if (i.bombs.length === 0 && bot.wait <= 0 && bot.goal < 0) {
+            const free = new Uint8Array(i.arena.cols * i.arena.rows);
+            const from = { x: Math.floor(bot.x), y: Math.floor(bot.y) };
+            const to = { x: Math.floor(i.player.x), y: Math.floor(i.player.y) };
+            expect(i.arena.findPath(from.x, from.y, to.x, to.y, free)).not.toBeNull();
+          }
+        }
+      }
+      expect(game.getResult().stats.bombs ?? 0).toBe(laid);
     }
   });
 });

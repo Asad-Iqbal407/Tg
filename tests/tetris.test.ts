@@ -3,8 +3,17 @@ import { type Action, Input, type PointerState, type SwipeDir } from '../src/cor
 import { NullAudio } from '../src/core/audio';
 import { Rng } from '../src/core/rng';
 import { Board, COLS, HIDDEN_ROWS, ROWS } from '../src/games/tetris/board';
-import { layoutTetris } from '../src/games/tetris/draw';
-import { cellsOf, type Kind, kickTests, type Piece, PieceQueue, type Rot } from '../src/games/tetris/pieces';
+import { layoutTetris, panelSlots } from '../src/games/tetris/draw';
+import {
+  cellsOf,
+  type Kind,
+  KINDS,
+  kickTests,
+  type Piece,
+  PieceQueue,
+  type Rot,
+  turnedBackRot,
+} from '../src/games/tetris/pieces';
 import { levelFor, secondsPerRow } from '../src/games/tetris/tetris';
 import { TouchDrop } from '../src/games/tetris/touch';
 import { tetrisGame } from '../src/games/tetris';
@@ -13,7 +22,7 @@ import { defaultSkin, toSkinData } from '../src/meta/catalog';
 import { cornerSizes, createGame, mockCtx } from './helpers';
 
 const DT = 1 / 60;
-const ACTIONS: Action[] = ['left', 'right', 'up', 'down', 'primary', 'secondary'];
+const ACTIONS: Action[] = ['left', 'right', 'up', 'down', 'primary', 'secondary', 'tertiary'];
 const SWIPES: SwipeDir[] = ['left', 'right', 'up', 'down'];
 /** Touch controls cover this much of the bottom of the canvas in these tests. */
 const TOUCH_BOTTOM = 110;
@@ -27,6 +36,8 @@ interface Internals {
   level: number;
   shieldUsed: boolean;
   queue: PieceQueue;
+  texts: { items: { x: number; y: number }[] };
+  cache: unknown;
 }
 
 function peek(game: GameInstance): Internals {
@@ -118,6 +129,22 @@ function setStack(game: GameInstance, rows: readonly string[]): void {
 
 function statsOf(game: GameInstance): GameResult['stats'] {
   return game.getResult().stats;
+}
+
+/** The rows of the well that hold any block, top first. */
+function occupiedRows(game: GameInstance): number[] {
+  const { cells } = peek(game).board;
+  const rows: number[] = [];
+  for (let y = 0; y < ROWS; y++) if (cells.slice(y * COLS, (y + 1) * COLS).some((c) => c !== 0)) rows.push(y);
+  return rows;
+}
+
+/**
+ * Points for `rows` rows of soft drop at `level`: each row is worth the share of a row that gravity would not have
+ * moved in the same time, which is nothing once gravity is the quicker.
+ */
+function softPoints(level: number, rows: number): number {
+  return Math.floor(rows * Math.max(0, 1 - 0.05 / secondsPerRow(level)) + 1e-9);
 }
 
 /** A random but seeded session, with taps, held keys, swipes and renders. */
@@ -240,6 +267,167 @@ describe('rotation', () => {
     step(game, input);
     expect(peek(game).active.rot).toBe(2);
   });
+
+  it('has the standard anticlockwise wall-kick tests for J, L, S, T and Z', () => {
+    const standard: [Rot, Rot, [number, number][]][] = [
+      [
+        1,
+        0,
+        [
+          [0, 0],
+          [1, 0],
+          [1, -1],
+          [0, 2],
+          [1, 2],
+        ],
+      ],
+      [
+        2,
+        1,
+        [
+          [0, 0],
+          [-1, 0],
+          [-1, 1],
+          [0, -2],
+          [-1, -2],
+        ],
+      ],
+      [
+        3,
+        2,
+        [
+          [0, 0],
+          [-1, 0],
+          [-1, -1],
+          [0, 2],
+          [-1, 2],
+        ],
+      ],
+      [
+        0,
+        3,
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, -2],
+          [1, -2],
+        ],
+      ],
+    ];
+    for (const kind of ['J', 'L', 'S', 'T', 'Z'] as const)
+      for (const [from, to, kicks] of standard) expect(kickTests(kind, from, to)).toEqual(kicks);
+  });
+
+  it('has the standard anticlockwise wall-kick tests for the I piece in all four states', () => {
+    const standard: [Rot, Rot, [number, number][]][] = [
+      [
+        1,
+        0,
+        [
+          [0, 0],
+          [2, 0],
+          [-1, 0],
+          [2, 1],
+          [-1, -2],
+        ],
+      ],
+      [
+        2,
+        1,
+        [
+          [0, 0],
+          [1, 0],
+          [-2, 0],
+          [1, -2],
+          [-2, 1],
+        ],
+      ],
+      [
+        3,
+        2,
+        [
+          [0, 0],
+          [-2, 0],
+          [1, 0],
+          [-2, -1],
+          [1, 2],
+        ],
+      ],
+      [
+        0,
+        3,
+        [
+          [0, 0],
+          [-1, 0],
+          [2, 0],
+          [-1, 2],
+          [2, -1],
+        ],
+      ],
+    ];
+    for (const [from, to, kicks] of standard) expect(kickTests('I', from, to)).toEqual(kicks);
+  });
+
+  it('takes each anticlockwise kick from the clockwise kick of the reverse turn, negated', () => {
+    for (const kind of KINDS)
+      for (const from of [0, 1, 2, 3] as const) {
+        const to = turnedBackRot(from);
+        const reverse = kickTests(kind, to, from).map(([dx, dy]) => [0 - dx, 0 - dy]);
+        expect(kickTests(kind, from, to)).toEqual(reverse);
+      }
+  });
+
+  it('turns counter-clockwise with the tertiary key, so the state drops by one', () => {
+    const { game, input } = start(2);
+    setActive(game, 'T', 1, 3, 0);
+    tap(game, input, 'tertiary');
+    expect(peek(game).active.rot).toBe(0);
+    tap(game, input, 'tertiary');
+    expect(peek(game).active.rot).toBe(3);
+    tap(game, input, 'tertiary');
+    expect(peek(game).active.rot).toBe(2);
+  });
+
+  it('reaches the same state with three clockwise turns as with one anticlockwise turn, in every state', () => {
+    for (const kind of KINDS)
+      for (const rot of [0, 1, 2, 3] as const) {
+        const turns = start(3);
+        setActive(turns.game, kind, rot, 3, 5);
+        for (let i = 0; i < 3; i++) tap(turns.game, turns.input, 'up');
+        const back = start(3);
+        setActive(back.game, kind, rot, 3, 5);
+        tap(back.game, back.input, 'tertiary');
+        expect(peek(turns.game).active).toEqual(peek(back.game).active);
+      }
+  });
+
+  it('lets an I piece turn counter-clockwise against the left wall by kicking inwards', () => {
+    const { game, input } = start(1);
+    setActive(game, 'I', 1, -2, 5);
+    expect(peek(game).board.fitsAt('I', 0, -2, 5)).toBe(false);
+    tap(game, input, 'tertiary');
+    expect(peek(game).active.rot).toBe(0);
+    expect(peek(game).active.x).toBe(0);
+  });
+
+  it('lets a T piece turn counter-clockwise against the left wall by kicking inwards', () => {
+    const { game, input } = start(1);
+    setActive(game, 'T', 1, -1, 5);
+    expect(peek(game).board.fitsAt('T', 0, -1, 5)).toBe(false);
+    tap(game, input, 'tertiary');
+    expect(peek(game).active.rot).toBe(0);
+    expect(peek(game).active.x).toBe(0);
+  });
+
+  it('lets an I piece turn counter-clockwise against the right wall by kicking inwards', () => {
+    const { game, input } = start(1);
+    setActive(game, 'I', 3, 8, 5);
+    expect(peek(game).board.fitsAt('I', 2, 8, 5)).toBe(false);
+    tap(game, input, 'tertiary');
+    expect(peek(game).active.rot).toBe(2);
+    expect(peek(game).active.x).toBe(6);
+  });
 });
 
 describe('line clears and scoring', () => {
@@ -289,15 +477,16 @@ describe('line clears and scoring', () => {
     expect(statsOf(game).pieces).toBe(1);
   });
 
-  it('scores 1 point per row of soft drop, at 20 rows a second', () => {
+  it('falls at 20 rows a second under Down at level 1, and scores the rows gravity would not have moved', () => {
     const { game, input } = start(6);
     setActive(game, 'T', 0, 3, 0);
     input.setVirtual('down', true, 'test');
-    step(game, input, 30);
+    step(game, input, 48);
     const { active } = peek(game);
-    expect(active.y).toBeGreaterThanOrEqual(9);
-    expect(active.y).toBeLessThanOrEqual(11);
-    expect(game.getResult().score).toBe(active.y);
+    expect(active.y).toBeGreaterThanOrEqual(15);
+    expect(active.y).toBeLessThanOrEqual(16);
+    expect(game.getResult().score).toBe(softPoints(1, active.y));
+    expect(game.getResult().score).toBe(15);
   });
 
   it('falls one row a second under gravity without scoring', () => {
@@ -400,6 +589,44 @@ describe('top-out and the Guardian boost', () => {
     step(game, input, 150);
     expect(game.isOver()).toBe(true);
   });
+
+  it('lets the Guardian clear the four highest settled rows, and keeps the rows below them and the piece', () => {
+    const { game, input } = start(2, ['shield']);
+    const { board } = peek(game);
+    board.cells.fill(0);
+    // Rows 10 to 21 are full but for the last column, and row 2 is a sparse top of two blocks.
+    for (let y = 10; y < ROWS; y++) for (let x = 0; x < COLS - 1; x++) board.cells[y * COLS + x] = 1;
+    board.cells[2 * COLS] = 1;
+    board.cells[2 * COLS + 1] = 1;
+    setActive(game, 'O', 0, 0, 0);
+    tap(game, input, 'primary');
+    expect(game.isOver()).toBe(false);
+    expect(peek(game).shieldUsed).toBe(true);
+    // Settled rows 2, 10, 11 and 12 go. The O was never settled, so it is not cleared: it drops with the rows
+    // above the gaps to rows 4 and 5, and rows 13 to 21 are untouched.
+    expect(occupiedRows(game)).toEqual([4, 5, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    expect(board.cells[4 * COLS]).toBe(KINDS.indexOf('O') + 1);
+    expect(board.cells[5 * COLS + 1]).toBe(KINDS.indexOf('O') + 1);
+  });
+
+  it('counts a settled row that the top-out piece completes as a cleared line, within the four', () => {
+    const { game, input } = start(2, ['shield']);
+    const { board } = peek(game);
+    board.cells.fill(0);
+    for (let y = 10; y < ROWS; y++) for (let x = 0; x < COLS - 1; x++) board.cells[y * COLS + x] = 1;
+    // Row 2 is settled but for the last column, and a block sits at (9, 4) under the column the I piece lands in.
+    for (let x = 0; x < COLS - 1; x++) board.cells[2 * COLS + x] = 1;
+    board.cells[4 * COLS + 9] = 1;
+    setActive(game, 'I', 1, 7, 0);
+    tap(game, input, 'primary');
+    expect(game.isOver()).toBe(false);
+    // The piece completes row 2, a line clear worth 100 at level 1. The Guardian takes the rest of the four
+    // highest settled rows (4, 10 and 11), and the piece's cells fall to rows 4 to 6.
+    expect(statsOf(game).lines).toBe(1);
+    expect(game.getResult().score).toBe(100);
+    expect(occupiedRows(game)).toEqual([4, 5, 6, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+    expect(board.cells[4 * COLS + 9]).toBe(KINDS.indexOf('I') + 1);
+  });
 });
 
 describe('ghost', () => {
@@ -411,6 +638,72 @@ describe('ghost', () => {
     expect(d).toBe(13);
     expect(board.fits({ ...p, y: p.y + d })).toBe(true);
     expect(board.fits({ ...p, y: p.y + d + 1 })).toBe(false);
+  });
+});
+
+describe('soft drop scoring', () => {
+  /** Holds Down for `sec` seconds with a T piece at the top of an empty well, at `level`. */
+  function holdDown(level: number, sec: number): { rows: number; score: number } {
+    const { game, input } = start(20);
+    setActive(game, 'T', 0, 3, 0);
+    peek(game).level = level;
+    input.setVirtual('down', true, 'test');
+    step(game, input, Math.round(sec / DT));
+    return { rows: peek(game).active.y, score: game.getResult().score };
+  }
+
+  it('pays one point for each row Down adds beyond gravity at level 1, and nothing for the gravity row', () => {
+    const { rows, score } = holdDown(1, 0.8);
+    expect(rows).toBeGreaterThanOrEqual(15);
+    expect(score).toBe(softPoints(1, rows));
+  });
+
+  it('still pays a share of each row at level 10, where gravity is only a little slower', () => {
+    const { rows, score } = holdDown(10, 0.8);
+    expect(rows).toBeGreaterThanOrEqual(14);
+    expect(score).toBe(softPoints(10, rows));
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it('pays nothing at level 11, where gravity already falls faster than soft drop', () => {
+    const { rows, score } = holdDown(11, 0.8);
+    expect(score).toBe(0);
+    // Down moves the piece no faster than gravity alone would: about 0.8 s over the gravity interval.
+    expect(Math.abs(rows - 0.8 / secondsPerRow(11))).toBeLessThanOrEqual(1);
+  });
+
+  it('pays nothing at level 15, where gravity is at its fastest', () => {
+    const { rows, score } = holdDown(15, 0.2);
+    expect(score).toBe(0);
+    expect(rows).toBeGreaterThanOrEqual(9);
+  });
+
+  it('scores a touch drag soft drop by the same rule, which is nothing at level 11', () => {
+    const { game, input } = start(21);
+    setActive(game, 'T', 0, 3, 0);
+    peek(game).level = 11;
+    press(game, input, 100, 300);
+    dragTo(game, input, 100, 380, 0.4);
+    holdFinger(game, input, 0.4);
+    expect(peek(game).active.y).toBeGreaterThan(8);
+    expect(game.getResult().score).toBe(0);
+  });
+});
+
+describe('score popups', () => {
+  it('moves each score popup to the next column, so consecutive clears do not pile up', () => {
+    const { game, input } = start(3);
+    for (let i = 0; i < 3; i++) {
+      setStack(game, ['....######']);
+      setActive(game, 'I', 0, 0, 20);
+      tap(game, input, 'primary');
+    }
+    const { well } = layoutTetris(tetrisGame.width, tetrisGame.height, 0, true);
+    const xs = peek(game).texts.items.map((t) => t.x);
+    expect(xs).toHaveLength(3);
+    for (let i = 0; i < xs.length; i++)
+      for (let j = i + 1; j < xs.length; j++)
+        expect(Math.abs((xs[i] ?? 0) - (xs[j] ?? 0))).toBeGreaterThanOrEqual(2 * well.cell);
   });
 });
 
@@ -477,7 +770,7 @@ describe('touch drops', () => {
     holdFinger(game, input, 0.5);
     const held = peek(game).active.y;
     expect(held).toBeGreaterThanOrEqual(8);
-    expect(game.getResult().score).toBe(held);
+    expect(game.getResult().score).toBe(softPoints(1, held));
     expect(statsOf(game).pieces).toBe(0);
     liftFinger(game, input);
     step(game, input, 30);
@@ -587,6 +880,58 @@ describe('level and gravity', () => {
   });
 });
 
+describe('side panel boxes', () => {
+  /** Whether two boxes share any area. */
+  const overlaps = (a: { x: number; y: number; w: number; h: number }, b: typeof a): boolean =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  it('keeps every box apart, inside the panel and with the stats tall, at every size and touch inset', () => {
+    const problems: string[] = [];
+    for (let width = 480; width <= 900; width += 20) {
+      for (let height = 800; height <= 1100; height += 20) {
+        for (let bottom = 0; bottom <= height / 2; bottom += 10) {
+          const { panel } = layoutTetris(width, height, bottom, true);
+          const where = `${width}x${height} inset ${bottom}`;
+          if (!panel) {
+            problems.push(`${where}: no panel`);
+            continue;
+          }
+          const s = panelSlots(panel);
+          const boxes = [s.hold, ...s.next, ...s.stats];
+          boxes.forEach((b, i) => {
+            if (
+              b.x < panel.x ||
+              b.y < panel.y ||
+              b.x + b.w > panel.x + panel.w ||
+              b.y + b.h > panel.y + panel.h
+            )
+              problems.push(`${where}: box ${i} leaves the panel`);
+          });
+          for (let i = 0; i < boxes.length; i++)
+            for (let j = i + 1; j < boxes.length; j++)
+              if (overlaps(boxes[i] ?? s.hold, boxes[j] ?? s.hold))
+                problems.push(`${where}: boxes ${i} and ${j} meet`);
+          for (const r of s.stats) if (r.h < 36) problems.push(`${where}: a stat box is short`);
+          // The NEXT label sits between the hold box and the first next box.
+          if (s.nextLabel.y - 6 < s.hold.y + s.hold.h) problems.push(`${where}: NEXT label meets HOLD`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('keeps the NEXT boxes clear of the stats at the design size, with the stats tall', () => {
+    const { panel } = layoutTetris(tetrisGame.width, tetrisGame.height, 0, true);
+    if (!panel) throw new Error('no panel');
+    const s = panelSlots(panel);
+    expect(s.stats.every((r) => r.h >= 36)).toBe(true);
+    const lastNext = s.next[2];
+    const firstStat = s.stats[0];
+    if (!lastNext || !firstStat) throw new Error('missing boxes');
+    expect(lastNext.y + lastNext.h).toBeLessThan(firstStat.y);
+  });
+});
+
 describe('layout and rendering', () => {
   it('keeps the well above the touch controls and inside the margins at every size', () => {
     const sizes = [{ width: tetrisGame.width, height: tetrisGame.height }, ...cornerSizes(tetrisGame)];
@@ -610,6 +955,18 @@ describe('layout and rendering', () => {
     expect(panel?.side).toBe(false);
     expect(panel ? panel.y + panel.h : 0).toBeLessThanOrEqual(well.y);
     expect(well.x + COLS * well.cell).toBeLessThanOrEqual(360 - 16);
+  });
+
+  it('reuses the layout until the touch inset changes', () => {
+    const insets = { top: 0, right: 0, bottom: TOUCH_BOTTOM, left: 0 };
+    const { game } = createGame(tetrisGame, { seed: 4, insets });
+    game.render();
+    const first = peek(game).cache;
+    game.render();
+    expect(peek(game).cache).toBe(first);
+    insets.bottom = 200;
+    game.render();
+    expect(peek(game).cache).not.toBe(first);
   });
 
   it('renders the card preview without a panel and without throwing', () => {

@@ -25,6 +25,8 @@ export const SPAWN_STAGGER = 0.4;
 export const WAVE_BANNER = 2;
 export const WAVE_CLEAR_DELAY = 1.5;
 export const BOT_TOUCH_RANGE = 0.6;
+/** Seconds a bot must stay in touch range before its touch lands: a player who steps out in time is safe. */
+export const BOT_TOUCH_GRACE = 0.25;
 export const BOT_TOUCH_COOLDOWN = 0.9;
 export const BOMBER_DROP_COOLDOWN = 3.5;
 export const BOMBER_DROP_RANGE = 3;
@@ -87,6 +89,8 @@ export interface Bot {
   bombCd: number;
   /** Seconds until this bot can hurt the player again. */
   touchCd: number;
+  /** Seconds this bot has continuously been within touch range of the player. */
+  contact: number;
   /** Seconds until the bot starts moving (spawn animation). */
   wait: number;
   /** Seconds of white damage flash left. */

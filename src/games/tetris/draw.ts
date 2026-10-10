@@ -9,6 +9,8 @@ const PANEL_CELLS = 4.5;
 /** Height of the strip above the well when there is no room for a side panel. */
 const STRIP_PX = 104;
 const LABEL_PX = 18;
+/** Shortest stat box that still has room for its name above its value. */
+const STAT_TALL_PX = 36;
 /** Narrowest logical width that leaves a side panel room beside a well of usable size. */
 const SIDE_MIN_W = COLS * 24 + GAP + 112 + 2 * MARGIN;
 
@@ -213,13 +215,12 @@ export function drawFlash(
   for (const r of rows) ctx.fillRect(well.x, well.y + r * well.cell, COLS * well.cell, well.cell);
 }
 
+/** What the panel shows: the held piece, the next pieces, and the stat lines (label and value) top to bottom. */
 export interface PanelState {
   readonly hold: Kind | null;
   readonly holdLocked: boolean;
   readonly next: readonly Kind[];
-  readonly score: number;
-  readonly level: number;
-  readonly lines: number;
+  readonly stats: readonly (readonly [string, string])[];
 }
 
 interface Rect {
@@ -229,7 +230,8 @@ interface Rect {
   readonly h: number;
 }
 
-interface Slots {
+/** Where each box and label of a panel goes. It only changes with the layout, so it is built once per layout. */
+export interface PanelSlots {
   readonly holdLabel: { readonly x: number; readonly y: number };
   readonly hold: Rect;
   readonly nextLabel: { readonly x: number; readonly y: number };
@@ -237,20 +239,34 @@ interface Slots {
   readonly stats: readonly Rect[];
 }
 
-/** Side panel: the hold box, the next three pieces, then the stats stacked at the bottom. */
-function sideSlots(p: Panel): Slots {
+/** The slots of a panel: the side layout beside the well, or the strip above it. */
+export function panelSlots(panel: Panel): PanelSlots {
+  return panel.side ? sideSlots(panel) : stripSlots(panel);
+}
+
+/**
+ * Side panel: the hold box, the next three pieces, then the stats stacked at the bottom. The stats keep the tall
+ * form. The hold and next boxes get the room the labels, the gaps and the stats leave, so a short panel (a tall
+ * touch inset) shrinks them together rather than running into the stats.
+ */
+function sideSlots(p: Panel): PanelSlots {
   const cellPx = p.h / ROWS;
   const pad = Math.max(6, Math.round(cellPx * 0.25));
   const x = p.x + pad;
   const w = p.w - 2 * pad;
-  const holdY = p.y + LABEL_PX;
-  const holdH = Math.round(w * 0.95);
-  const nextY = holdY + holdH + LABEL_PX + GAP;
-  const nextH = Math.round(w * 0.8);
   const nextGap = 8;
-  const statH = Math.round(cellPx * 1.6);
+  const statH = Math.max(STAT_TALL_PX, Math.round(cellPx * 1.6));
   const statGap = 8;
-  const statsY = p.y + p.h - 3 * statH - 2 * statGap;
+  const statsH = 3 * statH + 2 * statGap;
+  const room = Math.max(0, p.h - 2 * LABEL_PX - 2 * GAP - 2 * nextGap - statsH);
+  const holdNatural = Math.round(w * 0.95);
+  const nextNatural = Math.round(w * 0.8);
+  const fit = Math.min(1, room / (holdNatural + 3 * nextNatural));
+  const holdH = Math.floor(holdNatural * fit);
+  const nextH = Math.floor(nextNatural * fit);
+  const holdY = p.y + LABEL_PX;
+  const nextY = holdY + holdH + LABEL_PX + GAP;
+  const statsY = p.y + p.h - statsH;
   return {
     holdLabel: { x, y: holdY - 9 },
     hold: { x, y: holdY, w, h: holdH },
@@ -261,7 +277,7 @@ function sideSlots(p: Panel): Slots {
 }
 
 /** Strip above the well: hold and next pieces on the left, the stats in three rows on the right. */
-function stripSlots(p: Panel): Slots {
+function stripSlots(p: Panel): PanelSlots {
   const gap = 6;
   const boxW = Math.floor(p.w * 0.14);
   const boxY = p.y + LABEL_PX;
@@ -309,10 +325,12 @@ function drawPreview(ctx: CanvasRenderingContext2D, kind: Kind, r: Rect, look: L
 
 /** One stat: the name above its value in a tall box, the name beside the value in a short one. */
 function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rect): void {
-  const pad = 10;
-  if (r.h >= 36) {
+  const pad = Math.min(10, Math.round(r.w * 0.12));
+  if (r.h >= STAT_TALL_PX) {
+    // The value shrinks in a narrow box rather than spilling out of it (a digit is about 0.62 em wide).
+    const size = Math.min(18, Math.floor((r.w - 2 * pad) / (0.62 * value.length)));
     text(ctx, name, r.x + pad, r.y + 11, { size: 10, weight: 800, color: '#d8b4fe', stroke: null });
-    text(ctx, value, r.x + pad, r.y + r.h - 12, { size: 18, stroke: null });
+    text(ctx, value, r.x + pad, r.y + r.h - 12, { size, stroke: null });
     return;
   }
   const mid = r.y + r.h / 2;
@@ -320,26 +338,24 @@ function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rec
   text(ctx, value, r.x + r.w - 6, mid, { size: 13, align: 'right', stroke: null });
 }
 
-/** Hold box, the next three pieces, and score, level and lines. */
-export function drawPanel(ctx: CanvasRenderingContext2D, panel: Panel, look: Look, s: PanelState): void {
-  const slots = panel.side ? sideSlots(panel) : stripSlots(panel);
+/** Hold box, the next three pieces, and the stat lines. Works from slots built once, so it allocates nothing. */
+export function drawPanel(ctx: CanvasRenderingContext2D, slots: PanelSlots, look: Look, s: PanelState): void {
   label(ctx, 'HOLD', slots.holdLabel);
   box(ctx, slots.hold);
   if (s.hold) drawPreview(ctx, s.hold, slots.hold, look, s.holdLocked ? 0.4 : 1);
   label(ctx, 'NEXT', slots.nextLabel);
-  slots.next.forEach((r, i) => {
+  for (let i = 0; i < slots.next.length; i++) {
+    const r = slots.next[i];
+    if (!r) continue;
     box(ctx, r);
     const kind = s.next[i];
     if (kind) drawPreview(ctx, kind, r, look, 1);
-  });
-  const values: readonly (readonly [string, string])[] = [
-    ['SCORE', s.score.toLocaleString('en-US')],
-    ['LEVEL', `${s.level}`],
-    ['LINES', `${s.lines}`],
-  ];
-  slots.stats.forEach((r, i) => {
+  }
+  for (let i = 0; i < slots.stats.length; i++) {
+    const r = slots.stats[i];
+    if (!r) continue;
     box(ctx, r);
-    const v = values[i];
+    const v = s.stats[i];
     if (v) stat(ctx, v[0], v[1], r);
-  });
+  }
 }

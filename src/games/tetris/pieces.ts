@@ -75,21 +75,14 @@ const SHAPES: Readonly<Record<Kind, Shape>> = {
   L: shapeOf(['..L', 'LLL', '...']),
 };
 
-/** Standard SRS kicks for J, L, S, T and Z, keyed "from>to" by rotation state. */
-const JLSTZ_KICKS: Readonly<Record<string, readonly Kick[]>> = {
+/** Standard SRS kicks for J, L, S, T and Z, for each clockwise turn keyed "from>to" by rotation state. */
+const JLSTZ_CW: Readonly<Record<string, readonly Kick[]>> = {
   '0>1': [
     [0, 0],
     [-1, 0],
     [-1, 1],
     [0, -2],
     [-1, -2],
-  ],
-  '1>0': [
-    [0, 0],
-    [1, 0],
-    [1, -1],
-    [0, 2],
-    [1, 2],
   ],
   '1>2': [
     [0, 0],
@@ -98,13 +91,6 @@ const JLSTZ_KICKS: Readonly<Record<string, readonly Kick[]>> = {
     [0, 2],
     [1, 2],
   ],
-  '2>1': [
-    [0, 0],
-    [-1, 0],
-    [-1, 1],
-    [0, -2],
-    [-1, -2],
-  ],
   '2>3': [
     [0, 0],
     [1, 0],
@@ -112,44 +98,23 @@ const JLSTZ_KICKS: Readonly<Record<string, readonly Kick[]>> = {
     [0, -2],
     [1, -2],
   ],
-  '3>2': [
-    [0, 0],
-    [-1, 0],
-    [-1, -1],
-    [0, 2],
-    [-1, 2],
-  ],
   '3>0': [
     [0, 0],
     [-1, 0],
     [-1, -1],
     [0, 2],
     [-1, 2],
-  ],
-  '0>3': [
-    [0, 0],
-    [1, 0],
-    [1, 1],
-    [0, -2],
-    [1, -2],
   ],
 };
 
-/** Standard SRS kicks for the I piece, keyed "from>to" by rotation state. */
-const I_KICKS: Readonly<Record<string, readonly Kick[]>> = {
+/** Standard SRS kicks for the I piece, for each clockwise turn keyed "from>to" by rotation state. */
+const I_CW: Readonly<Record<string, readonly Kick[]>> = {
   '0>1': [
     [0, 0],
     [-2, 0],
     [1, 0],
     [-2, -1],
     [1, 2],
-  ],
-  '1>0': [
-    [0, 0],
-    [2, 0],
-    [-1, 0],
-    [2, 1],
-    [-1, -2],
   ],
   '1>2': [
     [0, 0],
@@ -158,26 +123,12 @@ const I_KICKS: Readonly<Record<string, readonly Kick[]>> = {
     [-1, 2],
     [2, -1],
   ],
-  '2>1': [
-    [0, 0],
-    [1, 0],
-    [-2, 0],
-    [1, -2],
-    [-2, 1],
-  ],
   '2>3': [
     [0, 0],
     [2, 0],
     [-1, 0],
     [2, 1],
     [-1, -2],
-  ],
-  '3>2': [
-    [0, 0],
-    [-2, 0],
-    [1, 0],
-    [-2, -1],
-    [1, 2],
   ],
   '3>0': [
     [0, 0],
@@ -186,14 +137,25 @@ const I_KICKS: Readonly<Record<string, readonly Kick[]>> = {
     [1, -2],
     [-2, 1],
   ],
-  '0>3': [
-    [0, 0],
-    [-1, 0],
-    [2, 0],
-    [-1, 2],
-    [2, -1],
-  ],
 };
+
+/**
+ * Adds the anticlockwise turns to a clockwise table. Turning back from `to` to `from` takes the same offsets
+ * negated, which is how the standard tables list it. 0 - x (not -x) keeps a zero offset at +0.
+ */
+function withAnticlockwise(
+  cw: Readonly<Record<string, readonly Kick[]>>,
+): Readonly<Record<string, readonly Kick[]>> {
+  const table: Record<string, readonly Kick[]> = { ...cw };
+  for (const [key, kicks] of Object.entries(cw)) {
+    const [from, to] = key.split('>');
+    table[`${to}>${from}`] = kicks.map(([dx, dy]): Kick => [0 - dx, 0 - dy]);
+  }
+  return table;
+}
+
+const JLSTZ_KICKS = withAnticlockwise(JLSTZ_CW);
+const I_KICKS = withAnticlockwise(I_CW);
 
 /** The O piece is symmetric, so turning it never needs a kick. */
 const NO_KICK: readonly Kick[] = [[0, 0]];
@@ -221,6 +183,11 @@ export function pieceBounds(kind: Kind): {
 /** The state one clockwise turn away from `rot`. */
 export function turnedRot(rot: Rot): Rot {
   return ((rot + 1) % 4) as Rot;
+}
+
+/** The state one anticlockwise turn away from `rot`. */
+export function turnedBackRot(rot: Rot): Rot {
+  return ((rot + 3) % 4) as Rot;
 }
 
 /** The wall-kick offsets to try, in order, when a piece turns from state `from` to the adjacent state `to`. */

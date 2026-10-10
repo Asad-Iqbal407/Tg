@@ -1,5 +1,8 @@
-/** Abstract actions. `pause` comes from gamepads only; the play screen handles Escape/P itself. */
-export type Action = 'left' | 'right' | 'up' | 'down' | 'primary' | 'secondary' | 'pause';
+/**
+ * Abstract actions. `tertiary` is a third game button (Q, LB). `pause` comes from gamepads only; the play
+ * screen handles Escape/P itself.
+ */
+export type Action = 'left' | 'right' | 'up' | 'down' | 'primary' | 'secondary' | 'tertiary' | 'pause';
 export type SwipeDir = 'left' | 'right' | 'up' | 'down';
 
 const KEYMAP: Readonly<Record<string, readonly Action[]>> = {
@@ -20,6 +23,7 @@ const KEYMAP: Readonly<Record<string, readonly Action[]>> = {
   KeyX: ['secondary'],
   KeyK: ['secondary'],
   KeyB: ['secondary'],
+  KeyQ: ['tertiary'],
 };
 
 /** Keys whose default browser behaviour (scrolling, button activation) we suppress while a game is attached. */
@@ -73,7 +77,16 @@ export interface PadMenuEdges {
   prev: boolean;
 }
 
-const PAD_ACTIONS: readonly Action[] = ['left', 'right', 'up', 'down', 'primary', 'secondary', 'pause'];
+const PAD_ACTIONS: readonly Action[] = [
+  'left',
+  'right',
+  'up',
+  'down',
+  'primary',
+  'secondary',
+  'tertiary',
+  'pause',
+];
 
 const MENU_START = 1;
 const MENU_CONFIRM = 2;
@@ -128,6 +141,7 @@ export class Input {
     down: false,
     primary: false,
     secondary: false,
+    tertiary: false,
     pause: false,
   };
   private latchPad = false;
@@ -144,7 +158,7 @@ export class Input {
     target.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
-    window.addEventListener('pointercancel', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerCancel);
     target.addEventListener('contextmenu', this.onContextMenu);
   }
 
@@ -154,7 +168,7 @@ export class Input {
     window.removeEventListener('blur', this.onBlur);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
-    window.removeEventListener('pointercancel', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerCancel);
     if (this.target) {
       this.target.removeEventListener('pointerdown', this.onPointerDown);
       this.target.removeEventListener('contextmenu', this.onContextMenu);
@@ -226,6 +240,7 @@ export class Input {
       if (b(13) || ay > STICK_DEADZONE_Y) want.down = true;
       if (b(0) || b(7)) want.primary = true;
       if (b(1) || b(2) || b(6)) want.secondary = true;
+      if (b(4)) want.tertiary = true;
       if (b(9)) want.pause = true;
     }
     const latch = this.latchPad;
@@ -458,11 +473,21 @@ export class Input {
   };
 
   private readonly onPointerUp = (e: PointerEvent): void => {
+    this.lift(e, false);
+  };
+
+  /** A cancelled touch carries no real end point (Chrome reports 0,0), so it never judges a swipe. */
+  private readonly onPointerCancel = (e: PointerEvent): void => {
+    this.lift(e, true);
+  };
+
+  /** Releases a pointer's hold. A cancelled pointer releases too, but judges no swipe and starts no press. */
+  private lift(e: PointerEvent, cancelled: boolean): void {
     if (!this.target) return;
     if (e.pointerType === 'mouse') this.syncRightButton(e);
     const s = this.swipeStart;
     if (s && s.id === e.pointerId) {
-      if (!s.fired) {
+      if (!s.fired && !cancelled) {
         const dir = this.detectSwipe(e.clientX - s.x, e.clientY - s.y, performance.now() - s.t);
         if (dir && this.enabled) this.swipes.push(dir);
       }
@@ -486,7 +511,7 @@ export class Input {
       p.touch = o.touch;
       p.down = true;
     }
-  };
+  }
 
   /** The stage suppresses the context menu, so the right mouse button is free for 'secondary'. */
   private syncRightButton(e: PointerEvent): void {

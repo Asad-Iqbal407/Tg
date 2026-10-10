@@ -16,7 +16,8 @@ export const tetrisGame: GameDefinition = {
   gradient: ['#a855f7', '#1e1b4b'],
   controls: [
     ['← → / A D', 'Move'],
-    ['↑ / W', 'Rotate'],
+    ['↑ / W', 'Rotate clockwise'],
+    ['Q', 'Rotate counter-clockwise'],
     ['↓ / S', 'Soft drop'],
     ['Space / Enter', 'Hard drop'],
     ['X / Shift', 'Hold a piece'],

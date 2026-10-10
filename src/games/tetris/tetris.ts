@@ -13,10 +13,22 @@ import {
   drawWell,
   layoutTetris,
   type Look,
+  type PanelSlots,
+  panelSlots,
   type TetrisLayout,
   type Well,
 } from './draw';
-import { cellsOf, type Kind, KINDS, kickTests, type Piece, PieceQueue, pieceSize, turnedRot } from './pieces';
+import {
+  cellsOf,
+  type Kind,
+  KINDS,
+  kickTests,
+  type Piece,
+  PieceQueue,
+  pieceSize,
+  turnedBackRot,
+  turnedRot,
+} from './pieces';
 import { TouchDrop } from './touch';
 
 /** The highest level. Gravity stops speeding up there. */
@@ -41,8 +53,20 @@ const ARR_SEC = 0.05;
 const FLASH_SEC = 0.2;
 const BANNER_SEC = 2;
 const TOP_OUT_SEC = 1.6;
-/** Rows the Guardian boost clears on the first top-out. */
+/** Settled rows the Guardian boost clears on the first top-out. */
 const SHIELD_ROWS = 4;
+/** Columns the score popups take in turn, so consecutive clears do not pile up at one point. */
+const POPUP_COLUMNS = [2, 5, 8];
+
+/** The layout for one size, touch inset and preview flag, with the side panel's slots built from it. */
+interface LayoutCache {
+  readonly width: number;
+  readonly height: number;
+  readonly bottom: number;
+  readonly preview: boolean;
+  readonly layout: TetrisLayout;
+  readonly slots: PanelSlots | null;
+}
 
 /** Level for a number of lines cleared, starting from `startLevel`: one more every ten lines. */
 export function levelFor(lines: number, startLevel = 1): number {
@@ -52,6 +76,14 @@ export function levelFor(lines: number, startLevel = 1): number {
 /** Seconds per row of gravity at a level: (0.8 - (L - 1) * 0.007) ^ (L - 1), but never under 0.02. */
 export function secondsPerRow(level: number): number {
   return Math.max(0.02, Math.pow(0.8 - (level - 1) * 0.007, level - 1));
+}
+
+/**
+ * Where the rows `rows` end up once the full rows `gone` are removed: a row moves down past each removed row
+ * below it, and a removed row drops out of the list.
+ */
+function afterRemoval(rows: readonly number[], gone: readonly number[]): number[] {
+  return rows.filter((r) => !gone.includes(r)).map((r) => r + gone.filter((g) => g > r).length);
 }
 
 /** A piece at its spawn position: state 0, centred in the top buffer rows. */
@@ -76,6 +108,8 @@ export class TetrisGame extends BaseGame {
   private fallT = 0;
   /** Seconds the active piece has rested on something. */
   private lockT = 0;
+  /** The part of a soft-drop row this piece has earned but not yet been paid for, in rows. */
+  private softShare = 0;
   private lockResets = 0;
   /** The direction auto-repeat is running in (-1, 0 or 1), and the time that direction has been held. */
   private steerDir = 0;
@@ -85,9 +119,22 @@ export class TetrisGame extends BaseGame {
   private bannerT = 0;
   private flashT = 0;
   private flashRows: number[] = [];
+  /** Which of POPUP_COLUMNS the next score popup goes in. */
+  private popupSlot = 0;
   private readonly touchDrop: TouchDrop;
   /** A finger on the well is dragging down far enough to soft drop this step. */
   private dragSoft = false;
+  /** The layout and panel slots, rebuilt only when the size, the touch inset or the preview flag changes. */
+  private cache: LayoutCache | null = null;
+  /** The panel's contents, refreshed in place each frame. Stat lines are rebuilt only when a number changes. */
+  private readonly hud: {
+    hold: Kind | null;
+    holdLocked: boolean;
+    next: Kind[];
+    stats: [string, string][];
+  } = { hold: null, holdLocked: false, next: [KINDS[0], KINDS[0], KINDS[0]], stats: [] };
+  /** The score, level and lines the stat lines were last built from. */
+  private shown = { score: -1, level: -1, lines: -1 };
 
   constructor(services: GameServices) {
     super(services);
@@ -117,7 +164,8 @@ export class TetrisGame extends BaseGame {
   render(): void {
     const ctx = this.ctx;
     const preview = this.services.preview === true;
-    const { well, panel } = this.layout();
+    const { layout, slots } = this.current();
+    const { well } = layout;
     ctx.fillStyle = this.look.backdrop;
     ctx.fillRect(0, 0, this.W, this.H);
     ctx.save();
@@ -135,24 +183,64 @@ export class TetrisGame extends BaseGame {
     this.particles.render(ctx);
     this.texts.render(ctx);
     ctx.restore();
-    if (panel) {
-      drawPanel(ctx, panel, this.look, {
-        hold: this.hold,
-        holdLocked: this.holdLocked,
-        next: [this.queue.peek(0), this.queue.peek(1), this.queue.peek(2)],
-        score: this.score,
-        level: this.level,
-        lines: this.lines,
-      });
+    if (slots) {
+      this.refreshHud();
+      drawPanel(ctx, slots, this.look, this.hud);
     }
     if (this.bannerT > 0 && !preview) {
       banner(ctx, this.W, this.H, `LEVEL ${this.level}`, 'Faster!', 1 - this.bannerT / BANNER_SEC, '#fde047');
     }
   }
 
-  /** Well and panel placement for the current size and touch inset. Read live, so it follows the controls. */
+  /** Well and panel placement for the current size and touch inset, reused until one of them changes. */
+  private current(): LayoutCache {
+    const { W, H } = this;
+    const bottom = this.insets.bottom;
+    const preview = this.services.preview === true;
+    let cache = this.cache;
+    if (
+      !cache ||
+      cache.width !== W ||
+      cache.height !== H ||
+      cache.bottom !== bottom ||
+      cache.preview !== preview
+    ) {
+      const layout = layoutTetris(W, H, bottom, !preview);
+      cache = {
+        width: W,
+        height: H,
+        bottom,
+        preview,
+        layout,
+        slots: layout.panel ? panelSlots(layout.panel) : null,
+      };
+      this.cache = cache;
+    }
+    return cache;
+  }
+
   private layout(): TetrisLayout {
-    return layoutTetris(this.W, this.H, this.insets.bottom, this.services.preview !== true);
+    return this.current().layout;
+  }
+
+  /** Copies what the panel shows into the HUD. Stat lines are rebuilt only when a score, level or lines count moves. */
+  private refreshHud(): void {
+    const hud = this.hud;
+    hud.hold = this.hold;
+    hud.holdLocked = this.holdLocked;
+    hud.next[0] = this.queue.peek(0);
+    hud.next[1] = this.queue.peek(1);
+    hud.next[2] = this.queue.peek(2);
+    const shown = this.shown;
+    if (shown.score === this.score && shown.level === this.level && shown.lines === this.lines) return;
+    shown.score = this.score;
+    shown.level = this.level;
+    shown.lines = this.lines;
+    hud.stats = [
+      ['SCORE', this.score.toLocaleString('en-US')],
+      ['LEVEL', `${this.level}`],
+      ['LINES', `${this.lines}`],
+    ];
   }
 
   /**
@@ -165,12 +253,13 @@ export class TetrisGame extends BaseGame {
       this.holdPiece();
       if (this.isEnding) return true;
     }
-    if (input.wasPressed('up')) this.rotate();
+    if (input.wasPressed('up')) this.rotate(true);
+    if (input.wasPressed('tertiary')) this.rotate(false);
     // A down swipe is not a drop: short drags are common while steering. Touch drops come from the finger instead.
     for (let s = input.consumeSwipe(); s !== null; s = input.consumeSwipe()) {
       if (s === 'left') this.shift(-1);
       else if (s === 'right') this.shift(1);
-      else if (s === 'up') this.rotate();
+      else if (s === 'up') this.rotate(true);
     }
     const gesture = this.touchDrop.update(input.pointer, this.time);
     this.dragSoft = gesture === 'soft';
@@ -216,10 +305,10 @@ export class TetrisGame extends BaseGame {
     this.moved();
   }
 
-  /** A clockwise turn with SRS wall kicks: the first kick offset that fits is taken. */
-  private rotate(): void {
+  /** A turn with SRS wall kicks, clockwise or anticlockwise: the first kick offset that fits is taken. */
+  private rotate(clockwise: boolean): void {
     const p = this.active;
-    const to = turnedRot(p.rot);
+    const to = clockwise ? turnedRot(p.rot) : turnedBackRot(p.rot);
     for (const [dx, dy] of kickTests(p.kind, p.rot, to)) {
       if (!this.board.fitsAt(p.kind, to, p.x + dx, p.y - dy)) continue;
       p.rot = to;
@@ -256,11 +345,20 @@ export class TetrisGame extends BaseGame {
     const gravity = secondsPerRow(this.level);
     const soft = this.input.isDown('down') || this.dragSoft;
     const interval = soft ? Math.min(gravity, SOFT_DROP_SEC) : gravity;
+    // A row that takes `interval` seconds where gravity takes `gravity` is worth only the share gravity would not
+    // have moved. Where gravity is already the quicker, the share is zero and soft drop scores nothing.
+    const share = 1 - interval / gravity;
     this.fallT += dt;
     while (this.fallT >= interval && !this.grounded()) {
       this.fallT -= interval;
       this.active.y++;
-      if (soft) this.score += SOFT_POINTS;
+      this.softShare += share;
+    }
+    // Whole rows are paid out; the fraction carries on to the next row this piece falls.
+    const whole = Math.floor(this.softShare + 1e-9);
+    if (whole > 0) {
+      this.score += whole * SOFT_POINTS;
+      this.softShare -= whole;
     }
   }
 
@@ -279,12 +377,14 @@ export class TetrisGame extends BaseGame {
   private lock(): void {
     const p = this.active;
     const buffered = this.board.inBuffer(p);
+    // The settled rows the Guardian would take, found before the piece is written in: its own cells never count.
+    const stack = buffered ? this.board.highestRows(SHIELD_ROWS) : [];
     this.board.place(p);
     this.addStat('pieces');
     this.audio.play('land', { volume: 0.6 });
     const rows = this.board.fullRows();
     if (rows.length > 0) this.clearRows(rows);
-    if (buffered && !this.survive()) return;
+    if (buffered && !this.survive(afterRemoval(stack, rows))) return;
     this.holdLocked = false;
     this.enter(this.queue.next());
   }
@@ -293,27 +393,27 @@ export class TetrisGame extends BaseGame {
   private enter(kind: Kind): void {
     this.active = newPiece(kind);
     this.fallT = 0;
+    this.softShare = 0;
     this.lockT = 0;
     this.lockResets = 0;
     if (this.board.fits(this.active)) return;
-    if (this.survive() && this.board.fits(this.active)) return;
+    if (this.survive(this.board.highestRows(SHIELD_ROWS)) && this.board.fits(this.active)) return;
     this.endGame(TOP_OUT_SEC);
   }
 
   /**
-   * A top-out ends the run, except the first one with the Guardian boost: that clears the highest rows
-   * of the stack and carries on. Returns whether the run continues.
+   * A top-out ends the run, except the first one with the Guardian boost: that clears the given settled rows (the
+   * highest that held blocks before the top-out piece locked) and carries on. Returns whether the run continues.
    */
-  private survive(): boolean {
+  private survive(rows: readonly number[]): boolean {
     if (this.shieldUsed || !this.hasBoost('shield')) {
       this.endGame(TOP_OUT_SEC);
       return false;
     }
     this.shieldUsed = true;
     const well = this.layout().well;
-    const rows = this.board.highestRows(SHIELD_ROWS);
     this.board.removeRows(rows);
-    this.flashRows = rows;
+    this.flashRows = [...rows];
     this.flashT = FLASH_SEC;
     this.shake.add(0.35);
     this.audio.play('bump');
@@ -343,7 +443,9 @@ export class TetrisGame extends BaseGame {
     this.shake.add(0.1 * n);
     this.services.haptic(n === TETRIS_LINES ? 25 : 10);
     this.audio.play(n === TETRIS_LINES ? 'reward' : 'pop');
-    const at = cellCentre(well, Math.floor(COLS / 2), rows[0] ?? 0);
+    const column = POPUP_COLUMNS[this.popupSlot] ?? Math.floor(COLS / 2);
+    this.popupSlot = (this.popupSlot + 1) % POPUP_COLUMNS.length;
+    const at = cellCentre(well, column, rows[0] ?? 0);
     const label = n === TETRIS_LINES ? 'TETRIS!' : `+${points}`;
     this.texts.add(
       at.x,

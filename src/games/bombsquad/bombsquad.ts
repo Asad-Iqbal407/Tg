@@ -752,6 +752,7 @@ export class BombSquadGame extends BaseGame {
       repath: this.rng.range(0, REPATH_TIME),
       bombCd: 2,
       touchCd: 0,
+      contact: 0,
       wait: 0.5,
       flash: 0,
       facingX: -1,

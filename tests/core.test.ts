@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AudioEngine } from '../src/core/audio';
 import { chooseLogicalSize, fittedArea, GameLoop, type SizeSpec } from '../src/core/engine';
-import { type AttachOptions, Input } from '../src/core/input';
+import { type Action, type AttachOptions, Input } from '../src/core/input';
 import { clamp, formatCompact, rectsOverlap, wrapAngle } from '../src/core/math';
 import { hashString, Rng } from '../src/core/rng';
 import { BaseGame } from '../src/games/base';
@@ -236,6 +236,8 @@ describe('GameLoop', () => {
 // ---------------------------------------------------------------------------------------------
 // Input: pointer ownership, pointer area and keyboard focus
 
+const ALL_ACTIONS: Action[] = ['left', 'right', 'up', 'down', 'primary', 'secondary', 'tertiary', 'pause'];
+
 class FakeStage extends EventTarget {
   getBoundingClientRect() {
     return { left: 0, top: 0, right: 400, bottom: 800, width: 400, height: 800 };
@@ -344,6 +346,44 @@ describe('Input pointer', () => {
     expect(p.released).toBe(true);
   });
 
+  it('releases the pointer on a cancelled touch without a swipe or a press', () => {
+    const { input, stage, win, p } = setup({ pointerArea: 'stage' });
+    stage.dispatchEvent(ptr('pointerdown', 1, 100, 300));
+    input.postUpdate();
+    // Chrome reports a cancelled touch at 0,0; a lift there would read as a swipe up from the touch.
+    win.dispatchEvent(ptr('pointercancel', 1, 0, 0));
+    expect([p.down, p.released, p.pressed]).toEqual([false, true, false]);
+    expect(input.consumeSwipe()).toBeNull();
+  });
+
+  it('never counts a cancelled touch that missed the game as a press or a swipe', () => {
+    const { input, stage, win, p } = setup();
+    stage.dispatchEvent(ptr('pointerdown', 1, 200, 700));
+    win.dispatchEvent(ptr('pointercancel', 1, 0, 0));
+    expect([p.down, p.pressed, p.released]).toEqual([false, false, false]);
+    expect(input.consumeSwipe()).toBeNull();
+  });
+
+  it('drops a cancelled secondary finger without disturbing the owner', () => {
+    const { input, stage, win, p } = setup({ pointerArea: 'stage' });
+    stage.dispatchEvent(ptr('pointerdown', 1, 100, 300));
+    stage.dispatchEvent(ptr('pointerdown', 2, 300, 500));
+    input.postUpdate();
+    win.dispatchEvent(ptr('pointercancel', 2, 0, 0));
+    expect([p.down, p.released, p.x, p.y]).toEqual([true, false, 100, 100]);
+    win.dispatchEvent(ptr('pointermove', 1, 110, 310));
+    expect([p.x, p.y]).toEqual([110, 110]);
+    expect(input.consumeSwipe()).toBeNull();
+  });
+
+  it('still reads a normal lift as a swipe', () => {
+    const { input, stage, win, p } = setup({ pointerArea: 'stage' });
+    stage.dispatchEvent(ptr('pointerdown', 1, 100, 300));
+    win.dispatchEvent(ptr('pointerup', 1, 100, 60));
+    expect([p.down, p.released]).toEqual([false, true]);
+    expect(input.consumeSwipe()).toBe('up');
+  });
+
   it('follows a hovering mouse only over the pointer area', () => {
     const mouse = { pointerType: 'mouse', buttons: 0 };
     const a = setup();
@@ -421,6 +461,45 @@ describe('Input keyboard', () => {
     win.dispatchEvent(key('keyup', 'Space'));
     expect(input.isDown('primary')).toBe(false);
   });
+
+  it('binds Q to the tertiary action', () => {
+    const { input, win } = setup();
+    win.dispatchEvent(key('keydown', 'KeyQ'));
+    expect([input.isDown('tertiary'), input.wasPressed('tertiary')]).toEqual([true, true]);
+    win.dispatchEvent(key('keyup', 'KeyQ'));
+    expect([input.isDown('tertiary'), input.wasReleased('tertiary')]).toEqual([false, true]);
+  });
+
+  it('keeps every existing key on its action and off the new one', () => {
+    const { input, win } = setup();
+    const bindings: [string, Action][] = [
+      ['ArrowLeft', 'left'],
+      ['KeyA', 'left'],
+      ['ArrowRight', 'right'],
+      ['KeyD', 'right'],
+      ['ArrowUp', 'up'],
+      ['KeyW', 'up'],
+      ['ArrowDown', 'down'],
+      ['KeyS', 'down'],
+      ['Space', 'primary'],
+      ['Enter', 'primary'],
+      ['KeyJ', 'primary'],
+      ['KeyZ', 'primary'],
+      ['ShiftLeft', 'secondary'],
+      ['ShiftRight', 'secondary'],
+      ['KeyX', 'secondary'],
+      ['KeyK', 'secondary'],
+      ['KeyB', 'secondary'],
+    ];
+    for (const [code, action] of bindings) {
+      win.dispatchEvent(key('keydown', code));
+      expect(
+        ALL_ACTIONS.filter((a) => input.isDown(a)),
+        code,
+      ).toEqual([action]);
+      win.dispatchEvent(key('keyup', code));
+    }
+  });
 });
 
 describe('Input gamepad', () => {
@@ -474,6 +553,41 @@ describe('Input gamepad', () => {
     expect(input.pollPadMenu()?.start).toBe(true);
     pads = [pad([0, 0.9], [9])];
     expect(input.pollPadMenu()).toMatchObject({ next: true, start: false });
+  });
+
+  it('maps LB to the tertiary action', () => {
+    let pads = [pad([0, 0], [4])];
+    vi.stubGlobal('navigator', { getGamepads: () => pads });
+    const input = new Input();
+    input.pollGamepads();
+    expect([input.isDown('tertiary'), input.wasPressed('tertiary')]).toEqual([true, true]);
+    pads = [pad([0, 0])];
+    input.pollGamepads();
+    expect([input.isDown('tertiary'), input.wasReleased('tertiary')]).toEqual([false, true]);
+  });
+
+  it('keeps every existing gamepad button on its action', () => {
+    const bindings: [number, Action][] = [
+      [0, 'primary'],
+      [7, 'primary'],
+      [1, 'secondary'],
+      [2, 'secondary'],
+      [6, 'secondary'],
+      [9, 'pause'],
+      [12, 'up'],
+      [13, 'down'],
+      [14, 'left'],
+      [15, 'right'],
+    ];
+    for (const [button, action] of bindings) {
+      vi.stubGlobal('navigator', { getGamepads: () => [pad([0, 0], [button])] });
+      const input = new Input();
+      input.pollGamepads();
+      expect(
+        ALL_ACTIONS.filter((a) => input.isDown(a)),
+        `button ${button}`,
+      ).toEqual([action]);
+    }
   });
 });
 

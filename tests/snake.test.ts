@@ -32,7 +32,9 @@ interface Internals {
   level: number;
   slowT: number;
   invulnT: number;
+  readyT: number;
   shieldUsed: boolean;
+  readonly isEnding: boolean;
   grid: Grid;
   stepInterval(): number;
   levelUp(level: number): void;
@@ -42,8 +44,16 @@ function peek(game: GameInstance): Internals {
   return game as unknown as Internals;
 }
 
-function start(seed: number, boosts: BoostId[] = [], width?: number, height?: number) {
+/** A fresh run, READY period included. */
+function fresh(seed: number, boosts: BoostId[] = [], width?: number, height?: number) {
   return createGame(snakeGame, { seed, boosts, width, height });
+}
+
+/** A fresh run with READY already over, so a test drives the snake from its first move. */
+function start(seed: number, boosts: BoostId[] = [], width?: number, height?: number) {
+  const run = fresh(seed, boosts, width, height);
+  while (peek(run.game).readyT > 0) step(run.game, run.input);
+  return run;
 }
 
 /** One fixed simulation step, as the shell runs it. */
@@ -158,21 +168,32 @@ function autoplay(seed: number, maxSteps = 6000) {
   return { maxLevel, result: game.getResult(), over: game.isOver() };
 }
 
-/** Preview services (card art): no HUD or banner is drawn. */
-function previewGame(seed = 2): GameInstance {
-  return snakeGame.create({
-    ctx: mockCtx(),
+/** A default-size game drawing on `ctx`; `preview` drops the HUD and banners, as on card art. */
+function gameOn(
+  ctx: CanvasRenderingContext2D,
+  seed: number,
+  preview: boolean,
+): { game: GameInstance; input: Input } {
+  const input = new Input();
+  const game = snakeGame.create({
+    ctx,
     width: snakeGame.width,
     height: snakeGame.height,
-    input: new Input(),
+    input,
     audio: new NullAudio(),
     rng: new Rng(seed),
     loadout: { skin: toSkinData(defaultSkin('snake')), boosts: new Set(), powerDuration: 1 },
     insets: NO_INSETS,
     reducedMotion: false,
     haptic: () => undefined,
-    preview: true,
+    preview,
   });
+  return { game, input };
+}
+
+/** Preview services (card art): no HUD or banner is drawn. */
+function previewGame(seed = 2): GameInstance {
+  return gameOn(mockCtx(), seed, true).game;
 }
 
 /**
@@ -198,6 +219,18 @@ function recordStrokes(): { ctx: CanvasRenderingContext2D; strokes: string[] } {
     },
   });
   return { ctx, strokes };
+}
+
+/** A canvas stand-in that records every line of text the drawing code fills, in order. */
+function recordTexts(): { ctx: CanvasRenderingContext2D; texts: string[] } {
+  const texts: string[] = [];
+  const ctx = new Proxy(mockCtx(), {
+    get(target, key) {
+      if (key === 'fillText') return (value: string) => texts.push(value);
+      return Reflect.get(target, key);
+    },
+  });
+  return { ctx, texts };
 }
 
 describe('snake rules', () => {
@@ -495,5 +528,111 @@ describe('snake rules', () => {
     expect(bodyStrokes[0]).toBe(shades[7]);
     expect(bodyStrokes[8]).toBe(shades[0]);
     expect(new Set(bodyStrokes).size).toBeGreaterThan(4);
+  });
+});
+
+describe('snake start and death delay', () => {
+  it('holds the snake still for the READY period, then lets it move', () => {
+    const { game, input } = fresh(4);
+    const s = peek(game);
+    const head = headOf(game);
+    let frames = 0;
+    while (s.readyT > 0) {
+      step(game, input);
+      frames++;
+      expect(headOf(game)).toEqual(head);
+    }
+    // READY lasts 1.2 seconds at 60 steps a second.
+    expect(frames * DT).toBeCloseTo(1.2, 1);
+    expect(game.isOver()).toBe(false);
+    // The first apple pops in during READY, so it is full size before the snake moves.
+    expect(s.apple?.age ?? 0).toBeGreaterThan(0.2);
+    untilMove(game, input);
+    expect(headOf(game)).not.toEqual(head);
+  });
+
+  it('queues turns and swipes pressed during READY, and applies them one per move afterwards', () => {
+    const { game, input } = fresh(4);
+    const s = peek(game);
+    const head = headOf(game);
+    tap(game, input, 'up');
+    input.pushSwipe('right');
+    step(game, input);
+    expect(s.turns).toEqual(['up', 'right']);
+    while (s.readyT > 0) step(game, input);
+    expect(s.turns).toEqual(['up', 'right']);
+    expect(headOf(game)).toEqual(head);
+    untilMove(game, input);
+    expect(s.heading).toBe('up');
+    expect(headOf(game)).toEqual({ x: head.x, y: head.y - 1 });
+    untilMove(game, input);
+    expect(s.heading).toBe('right');
+    expect(s.turns).toEqual([]);
+    expect(game.isOver()).toBe(false);
+  });
+
+  it('cannot crash during READY, even when the first move would drive into the border', () => {
+    const { game, input } = fresh(6);
+    const s = peek(game);
+    // Head on the east edge facing the border: the first move would be fatal.
+    const edge = s.grid.cols - 1;
+    s.body = [0, 1, 2, 3].map((i) => ({ x: edge - i, y: 14 }));
+    s.heading = 'right';
+    placeApple(s, { x: 3, y: 3 });
+    while (s.readyT > 0) {
+      step(game, input);
+      expect(s.isEnding).toBe(false);
+    }
+    expect(headOf(game)).toEqual({ x: edge, y: 14 });
+    expect(untilOver(game, input)).toBe(true);
+    expect(headOf(game)).toEqual({ x: edge, y: 14 });
+  });
+
+  it('shows a READY line only while READY runs, and never on card art', () => {
+    const shown = recordTexts();
+    const { game, input } = gameOn(shown.ctx, 3, false);
+    const s = peek(game);
+    game.render();
+    expect(shown.texts).toContain('READY');
+    while (s.readyT > 0) step(game, input);
+    shown.texts.length = 0;
+    game.render();
+    expect(shown.texts).not.toContain('READY');
+    const card = recordTexts();
+    gameOn(card.ctx, 3, true).game.render();
+    expect(card.texts).not.toContain('READY');
+  });
+
+  it('ignores turns and swipes pressed during the death delay, so they cannot change the outcome', () => {
+    const dieAtBorder = (presses: boolean) => {
+      const { game, input } = start(6);
+      const s = peek(game);
+      for (let i = 0; i < 900 && !s.isEnding; i++) step(game, input);
+      expect(s.isEnding).toBe(true);
+      let frames = 0;
+      for (; !game.isOver() && frames < 300; frames++) {
+        if (!presses) {
+          step(game, input);
+          continue;
+        }
+        const d = DIRS[frames % DIRS.length] as Dir;
+        input.setVirtual(d, true, 'test');
+        input.pushSwipe(d);
+        step(game, input);
+        input.setVirtual(d, false, 'test');
+      }
+      expect(game.isOver()).toBe(true);
+      return {
+        frames,
+        heading: s.heading,
+        turns: [...s.turns],
+        body: s.body.map((c) => ({ ...c })),
+        result: game.getResult(),
+      };
+    };
+    const quiet = dieAtBorder(false);
+    expect(dieAtBorder(true)).toEqual(quiet);
+    // The death delay is 1.4 seconds at 60 steps a second.
+    expect(quiet.frames * DT).toBeCloseTo(1.4, 1);
   });
 });

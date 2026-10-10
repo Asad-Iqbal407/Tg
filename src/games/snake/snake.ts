@@ -46,6 +46,8 @@ const WALL_MIN_HEAD_DIST = 5;
 const INVULN_SEC = 1.5;
 const BANNER_SEC = 2.2;
 const DEATH_DELAY_SEC = 1.4;
+/** READY on a fresh run: the snake waits this long before its first move, so the board can be read first. */
+const READY_SEC = 1.2;
 const MAX_QUEUED_TURNS = 2;
 
 const TURN_KEYS: readonly Dir[] = ['up', 'down', 'left', 'right'];
@@ -67,6 +69,8 @@ export class SnakeGame extends BaseGame {
   private applesEaten = 0;
   private level = 1;
   private moveT = 0;
+  /** Seconds of READY left before the first move. */
+  private readyT = READY_SEC;
   private slowT = 0;
   private invulnT = 0;
   private shieldUsed = false;
@@ -97,8 +101,16 @@ export class SnakeGame extends BaseGame {
   }
 
   protected tick(dt: number): void {
+    // Once dead the snake is frozen and its input is not read, so presses during the death delay are dropped.
     if (this.isEnding) return;
     this.readTurns();
+    // READY: turns are queued as usual, but nothing moves, times out or can crash until the first move. The
+    // apple's pop-in still runs, so the first apple is full size before the snake moves.
+    if (this.readyT > 0) {
+      this.readyT = Math.max(0, this.readyT - dt);
+      if (this.apple) this.apple.age += dt;
+      return;
+    }
     this.invulnT = Math.max(0, this.invulnT - dt);
     this.slowT = Math.max(0, this.slowT - dt);
     this.bannerT = Math.max(0, this.bannerT - dt);
@@ -155,6 +167,17 @@ export class SnakeGame extends BaseGame {
           `LEVEL ${this.level}`,
           'New walls!',
           1 - this.bannerT / BANNER_SEC,
+          pal.gold,
+        );
+      }
+      if (this.readyT > 0) {
+        banner(
+          ctx,
+          this.W,
+          this.H,
+          'READY',
+          'Arrows, WASD or swipe to turn',
+          1 - this.readyT / READY_SEC,
           pal.gold,
         );
       }

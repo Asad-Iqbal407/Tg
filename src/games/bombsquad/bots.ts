@@ -4,6 +4,7 @@ import {
   BOMBER_DROP_COOLDOWN,
   BOMBER_DROP_RANGE,
   BOT_TOUCH_COOLDOWN,
+  BOT_TOUCH_GRACE,
   BOT_TOUCH_RANGE,
   type Bot,
   REPATH_TIME,
@@ -82,8 +83,10 @@ export function stepBot(bot: Bot, env: BotEnv, px: number, py: number, dt: numbe
     }
   }
 
-  const reach = BOT_TOUCH_RANGE;
-  if (bot.touchCd <= 0 && Math.hypot(bot.x - px, bot.y - py) < reach) {
+  // The touch lands only after the bot has held range for BOT_TOUCH_GRACE, so a player who steps out lives.
+  const inReach = Math.hypot(bot.x - px, bot.y - py) < BOT_TOUCH_RANGE;
+  bot.contact = inReach ? bot.contact + dt : 0;
+  if (bot.touchCd <= 0 && bot.contact >= BOT_TOUCH_GRACE) {
     bot.touchCd = BOT_TOUCH_COOLDOWN;
     return true;
   }
