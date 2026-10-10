@@ -25,7 +25,7 @@ const ARRIVE_EPS = 1e-6;
  * and reports whether it touched the player this step (the caller applies the hit).
  */
 export function stepBot(bot: Bot, env: BotEnv, px: number, py: number, dt: number): boolean {
-  const { arena, occupied } = env;
+  const { arena } = env;
   if (bot.wait > 0) {
     bot.wait -= dt;
     return false;

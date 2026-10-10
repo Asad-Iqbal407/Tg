@@ -314,7 +314,15 @@ export class BombSquadGame extends BaseGame {
     p.invuln = RESPAWN_INVULN;
     p.respawn = 0;
     const s = this.screenOf(p.x, p.y);
-    this.particles.emit({ x: s.x, y: s.y, count: 14, speed: 120, life: 0.5, size: 3, colors: [this.palette.visor] });
+    this.particles.emit({
+      x: s.x,
+      y: s.y,
+      count: 14,
+      speed: 120,
+      life: 0.5,
+      size: 3,
+      colors: [this.palette.visor],
+    });
   }
 
   private hurtPlayer(): void {
@@ -326,7 +334,15 @@ export class BombSquadGame extends BaseGame {
       p.invuln = SHIELD_INVULN;
       this.audio.play('bump');
       this.shake.add(0.3);
-      this.particles.emit({ x: s.x, y: s.y, count: 18, speed: 200, life: 0.5, size: 4, colors: ['#60a5fa', '#bfdbfe'] });
+      this.particles.emit({
+        x: s.x,
+        y: s.y,
+        count: 18,
+        speed: 200,
+        life: 0.5,
+        size: 4,
+        colors: ['#60a5fa', '#bfdbfe'],
+      });
       return;
     }
     this.lives--;
@@ -620,7 +636,16 @@ export class BombSquadGame extends BaseGame {
     this.addStat('blocks');
     this.score += 10;
     const s = this.screenOf(x + 0.5, y + 0.5);
-    this.particles.emit({ x: s.x, y: s.y, count: 12, speed: 150, life: 0.6, size: 4, colors: WOOD_COLORS, shape: 'square' });
+    this.particles.emit({
+      x: s.x,
+      y: s.y,
+      count: 12,
+      speed: 150,
+      life: 0.6,
+      size: 4,
+      colors: WOOD_COLORS,
+      shape: 'square',
+    });
     if (!this.rng.chance(DROP_CHANCE)) return;
     this.items.push({ kind: this.rng.weighted(ITEM_DROPS), x, y });
   }

@@ -12,6 +12,7 @@ export const bombsquadGame: GameDefinition = {
   width: 960,
   height: 600,
   viewport: { minWidth: 800, maxWidth: 1280, minHeight: 540, maxHeight: 760 },
+  pointerArea: 'stage',
   accent: '#fb923c',
   gradient: ['#fb923c', '#7c2d12'],
   controls: [

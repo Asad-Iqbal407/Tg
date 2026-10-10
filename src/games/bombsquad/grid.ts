@@ -199,7 +199,8 @@ export class Arena {
       }
       extra.sort(
         (a, b) =>
-          manhattan(b.x, b.y, playerSpawn.x, playerSpawn.y) - manhattan(a.x, a.y, playerSpawn.x, playerSpawn.y),
+          manhattan(b.x, b.y, playerSpawn.x, playerSpawn.y) -
+          manhattan(a.x, a.y, playerSpawn.x, playerSpawn.y),
       );
       for (const c of extra) {
         if (out.length >= 4) break;
