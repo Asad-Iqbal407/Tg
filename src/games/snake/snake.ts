@@ -262,7 +262,8 @@ export class SnakeGame extends BaseGame {
     if (turn) this.heading = turn;
     this.shake.add(0.35);
     this.audio.play('bump');
-    const at = cellCentre(this.layout(), this.head);
+    const rect = this.layout();
+    const at = cellCentre(rect, this.head);
     this.particles.emit({
       x: at.x,
       y: at.y,
@@ -272,7 +273,7 @@ export class SnakeGame extends BaseGame {
       size: 3.5,
       colors: ['#67e8f9', '#ffffff'],
     });
-    this.texts.add(at.x, at.y - this.layout().cell, 'GUARDIAN!', '#67e8f9', 18, 1.2);
+    this.popup(rect, this.head, 'GUARDIAN!', '#67e8f9', 18, 1.2);
   }
 
   private eat(apple: Apple): void {
@@ -300,13 +301,7 @@ export class SnakeGame extends BaseGame {
       drag: 2.4,
       colors: [colour, '#ffffff'],
     });
-    this.texts.add(
-      at.x,
-      at.y - rect.cell * 0.5,
-      `+${points}`,
-      golden ? pal.gold : '#ffffff',
-      golden ? 22 : 18,
-    );
+    this.popup(rect, apple, `+${points}`, golden ? pal.gold : '#ffffff', golden ? 22 : 18);
     this.audio.play(golden ? 'reward' : 'pop');
     if (golden) {
       this.shake.add(0.12);
@@ -343,6 +338,15 @@ export class SnakeGame extends BaseGame {
       size: 3,
       colors: [pal.gold, '#ffffff', pal.body],
     });
+  }
+
+  /** Floating text above a cell, or below it when the cell sits in the upper half so it stays on the board. */
+  private popup(rect: BoardRect, c: Cell, text: string, colour: string, size: number, life?: number): void {
+    const at = cellCentre(rect, c);
+    const midY = rect.y + (this.grid.rows * rect.cell) / 2;
+    const lift = rect.cell * 1.1;
+    const y = at.y < midY ? at.y + lift : at.y - lift;
+    this.texts.add(at.x, y, text, colour, size, life);
   }
 
   /** Every 7th apple is golden. An apple goes on a random open cell, never on the snake or a wall. */

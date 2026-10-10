@@ -17,6 +17,8 @@ export interface Palette {
 export const GOLDEN_SEC = 6;
 const GOLDEN_BLINK_SEC = 1.5;
 const DEATH_FLASH = '#fb7185';
+/** Colour steps used to fade the snake body toward its tail. */
+const FADE_STEPS = 8;
 
 const HEX = /^#?([0-9a-f]{6})$/i;
 
@@ -54,7 +56,7 @@ function stone(
   h: number,
   r: number,
   base: string,
-) {
+): void {
   fillRoundRect(ctx, x, y, w, h, r, shade(base, -0.45));
   fillRoundRect(ctx, x + 1, y + 1, w - 2, h - 3, Math.max(0, r - 1), base);
   fillRoundRect(ctx, x + 2, y + 2, w - 4, Math.min(3, h * 0.18), 1.5, shade(base, 0.4));
@@ -186,43 +188,51 @@ export function drawSnake(
   const n = body.length;
   const width = cell * (0.78 + 0.06 * look.thick);
   const tailColour = shade(pal.body, -0.35);
+  // The body fades toward the tail in a few steps; one stroke colour per step, none per frame.
+  const shades: string[] = [];
+  for (let k = 0; k < FADE_STEPS; k++)
+    shades.push(mixHex(pal.body, tailColour, (0.8 * k) / (FADE_STEPS - 1)));
+  const cx = (c: Cell): number => rect.x + (c.x + 0.5) * cell;
+  const cy = (c: Cell): number => rect.y + (c.y + 0.5) * cell;
   ctx.save();
   if (look.ghost) ctx.globalAlpha = 0.45 + 0.25 * Math.sin(look.time * 18);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.lineWidth = width;
   for (let i = n - 1; i >= 1; i--) {
-    const a = cellCentre(rect, body[i] as Cell);
-    const b = cellCentre(rect, body[i - 1] as Cell);
-    ctx.strokeStyle = mixHex(pal.body, tailColour, (0.8 * i) / Math.max(1, n - 1));
+    const a = body[i] as Cell;
+    const b = body[i - 1] as Cell;
+    ctx.strokeStyle = shades[Math.floor(((FADE_STEPS - 1) * i) / Math.max(1, n - 1))] ?? pal.body;
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(cx(a), cy(a));
+    ctx.lineTo(cx(b), cy(b));
     ctx.stroke();
   }
   ctx.strokeStyle = 'rgba(255,255,255,0.16)';
   ctx.lineWidth = width * 0.28;
   ctx.beginPath();
   for (let i = n - 1; i >= 0; i--) {
-    const p = cellCentre(rect, body[i] as Cell);
-    if (i === n - 1) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
+    const p = body[i] as Cell;
+    if (i === n - 1) ctx.moveTo(cx(p), cy(p));
+    else ctx.lineTo(cx(p), cy(p));
   }
   ctx.stroke();
 
-  const head = cellCentre(rect, body[0] as Cell);
+  const headCell = body[0] as Cell;
+  const hx = cx(headCell);
+  const hy = cy(headCell);
   const d = delta(look.heading);
   const px = -d.y;
   const py = d.x;
-  const r = width * 0.62;
+  const r = width * 0.7;
   // Tongue first, so the head covers its root.
   if (Math.sin(look.time * 10) > 0.55 && !look.dead) {
-    const tx = head.x + d.x * (r + cell * 0.32);
-    const ty = head.y + d.y * (r + cell * 0.32);
+    const tx = hx + d.x * (r + cell * 0.32);
+    const ty = hy + d.y * (r + cell * 0.32);
     ctx.strokeStyle = DEATH_FLASH;
     ctx.lineWidth = Math.max(1.5, cell * 0.07);
     ctx.beginPath();
-    ctx.moveTo(head.x + d.x * r, head.y + d.y * r);
+    ctx.moveTo(hx + d.x * r, hy + d.y * r);
     ctx.lineTo(tx, ty);
     ctx.lineTo(tx + d.x * cell * 0.1 + px * cell * 0.12, ty + d.y * cell * 0.1 + py * cell * 0.12);
     ctx.moveTo(tx, ty);
@@ -232,11 +242,11 @@ export function drawSnake(
   const flashOn = look.dead && Math.floor(look.time * 10) % 2 === 0;
   ctx.fillStyle = flashOn ? DEATH_FLASH : pal.head;
   ctx.beginPath();
-  ctx.arc(head.x, head.y, r, 0, TAU);
+  ctx.arc(hx, hy, r, 0, TAU);
   ctx.fill();
   for (const side of [-1, 1]) {
-    const ex = head.x + d.x * r * 0.3 + px * side * r * 0.5;
-    const ey = head.y + d.y * r * 0.3 + py * side * r * 0.5;
+    const ex = hx + d.x * r * 0.3 + px * side * r * 0.5;
+    const ey = hy + d.y * r * 0.3 + py * side * r * 0.5;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.arc(ex, ey, r * 0.28, 0, TAU);
