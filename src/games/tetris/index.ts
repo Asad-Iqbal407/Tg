@@ -20,16 +20,18 @@ export const tetrisGame: GameDefinition = {
     ['↓ / S', 'Soft drop'],
     ['Space / Enter', 'Hard drop'],
     ['X / Shift', 'Hold a piece'],
-    ['Swipe', 'Left / right to move, up to rotate, down to drop'],
+    ['Swipe', 'Left / right to move, up to rotate'],
+    ['Touch flick / drag', 'Flick down to hard drop, drag down and hold to soft drop'],
   ],
-  touchHint: 'Use the buttons: move, rotate, soft drop, hard drop and hold.',
+  touchHint:
+    'Tap ◀ ▶ to move, ROT to turn and HOLD to swap. Flick down to drop, or drag down and hold to fall faster.',
+  // Four buttons keep a 360 px phone clear of both edges. Touch players drop with gestures on the well instead: a flick
+  // down hard drops, and a drag down that stays held soft drops (see TouchDrop). A short downward drag does neither.
   touchButtons: [
     { action: 'left', label: '◀', side: 'left', slot: 0 },
     { action: 'right', label: '▶', side: 'left', slot: 1 },
-    { action: 'secondary', label: 'HOLD', side: 'left', slot: 2 },
     { action: 'up', label: 'ROT', side: 'right', slot: 0 },
-    { action: 'down', label: '▼', side: 'right', slot: 1 },
-    { action: 'primary', label: 'DROP', side: 'right', slot: 2 },
+    { action: 'secondary', label: 'HOLD', side: 'right', slot: 1 },
   ],
   scorePerCoin: 500,
   scorePerXp: 100,

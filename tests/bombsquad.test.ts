@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { NullAudio } from '../src/core/audio';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import type { Action } from '../src/core/input';
 import { Arena, BORDER, CRATE, FLOOR, manhattan, PILLAR } from '../src/games/bombsquad/grid';
+import { drawScene, type Palette, type SceneView } from '../src/games/bombsquad/render';
 import type { Bomb, Bot, BotKind, Explosion, Item, Player } from '../src/games/bombsquad/types';
-import { FLIGHT_TIME, LIVES } from '../src/games/bombsquad/types';
+import { FUSE, LIVES, WALKER_SPEED } from '../src/games/bombsquad/types';
 import type { BoostId, GameInstance, GameServices } from '../src/games/types';
 import { NO_INSETS } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
@@ -27,20 +28,16 @@ interface Internals {
   wave: number;
   lives: number;
   layout(): { ts: number; ox: number; oy: number };
-  addBomb(
-    owner: Bomb['owner'],
-    tx: number,
-    ty: number,
-    fromX: number,
-    fromY: number,
-    power: number,
-    fuse: number,
-    flight: number,
-  ): void;
+  addBomb(owner: Bomb['owner'], tx: number, ty: number, power: number, fuse: number): void;
 }
 
 function internals(game: GameInstance): Internals {
   return game as unknown as Internals;
+}
+
+/** The game's sound player, so a test can check which effects were requested. */
+function audioOf(game: GameInstance): NullAudio {
+  return (game as unknown as { audio: NullAudio }).audio;
 }
 
 function tilesOf(arena: Arena): Uint8Array {
@@ -205,20 +202,71 @@ describe('determinism', () => {
 });
 
 describe('bombs and blasts', () => {
-  it('a thrown bomb explodes after its fuse and returns its ammo', () => {
-    const { game, input, i } = quietGame(3);
-    clearInterior(i.arena);
+  it("a laid bomb sits on the player's tile and explodes after its fuse, returning its ammo", () => {
+    const { game, input, i, arena } = quietGame(3);
+    clearInterior(arena);
     expect(i.player.ammo).toBe(1);
     press(game, input, 'primary');
     expect(i.bombs.length).toBe(1);
+    const bomb = i.bombs[0];
+    expect([bomb?.tx, bomb?.ty]).toEqual([1, 1]);
+    expect([bomb?.x, bomb?.y]).toEqual([1.5, 1.5]);
     expect(i.player.ammo).toBe(0);
-    run(game, input, 2.3); // landed after 0.25 s, so 2.05 s of a 2.2 s fuse have passed
+    // The fuse started when the bomb was laid: after 2.0 s it still burns, and it blows up soon after 2.2 s.
+    run(game, input, 2.0);
     expect(i.bombs.length).toBe(1);
+    expect([bomb?.x, bomb?.y]).toEqual([1.5, 1.5]);
     run(game, input, 0.3);
     expect(i.bombs.length).toBe(0);
     expect(i.explosions.length).toBeGreaterThan(0);
     expect(i.player.ammo).toBe(1);
     expect(game.getResult().stats.bombs).toBe(1);
+  });
+
+  it('laying on a tile that already holds your bomb lays in front, and does nothing when both are taken', () => {
+    const { game, input, i, arena } = quietGame(4);
+    clearInterior(arena);
+    i.player.ammoMax = 3;
+    i.player.ammo = 3;
+    press(game, input, 'primary');
+    press(game, input, 'primary');
+    expect(i.bombs.map((b) => [b.tx, b.ty])).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
+    expect(i.player.ammo).toBe(1);
+
+    const empty = vi.spyOn(audioOf(game), 'play');
+    press(game, input, 'primary');
+    expect(i.bombs.length).toBe(2);
+    expect(i.player.ammo).toBe(1);
+    expect(empty).toHaveBeenCalledWith('empty');
+  });
+
+  it('does not lay in front on a tile the body already overlaps, so the player cannot walk through it', () => {
+    const { game, input, i, arena } = quietGame(4);
+    clearInterior(arena);
+    i.player.ammoMax = 3;
+    i.player.ammo = 3;
+    // Own tile (1, 1) holds a bomb; the body reaches into the faced tile (2, 1).
+    i.addBomb('player', 1, 1, 2, 100);
+    i.player.x = 1.8;
+    i.player.y = 1.5;
+    i.player.facingX = 1;
+    i.player.facingY = 0;
+    const empty = vi.spyOn(audioOf(game), 'play');
+    press(game, input, 'primary');
+    expect(i.bombs.length).toBe(1);
+    expect(i.player.ammo).toBe(3);
+    expect(empty).toHaveBeenCalledWith('empty');
+
+    // Clear of the body, the faced tile takes the bomb as usual.
+    i.player.x = 1.5;
+    press(game, input, 'primary');
+    expect(i.bombs.map((b) => [b.tx, b.ty])).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
   });
 
   it('a blast stops at a pillar and destroys exactly one crate', () => {
@@ -227,7 +275,7 @@ describe('bombs and blasts', () => {
     setKind(arena, 3, 3, PILLAR);
     setKind(arena, 6, 3, CRATE);
     setKind(arena, 7, 3, CRATE);
-    i.addBomb('bot', 5, 3, 5.5, 3.5, 3, 0.001, 0);
+    i.addBomb('bot', 5, 3, 3, 0.001);
     run(game, input, 0.1);
     expect(arena.kindAt(3, 3)).toBe(PILLAR);
     expect(arena.kindAt(6, 3)).toBe(FLOOR);
@@ -244,7 +292,7 @@ describe('bombs and blasts', () => {
     const { game, input, i, arena } = quietGame(5);
     clearInterior(arena);
     i.bots = [makeBot('walker', 5, 3)];
-    i.addBomb('bot', 5, 3, 5.5, 3.5, 2, 0.001, 0);
+    i.addBomb('bot', 5, 3, 2, 0.001);
     run(game, input, 0.1);
     expect(i.bots.length).toBe(0);
     expect(game.getResult().stats.kills).toBe(1);
@@ -254,11 +302,11 @@ describe('bombs and blasts', () => {
     const { game, input, i, arena } = quietGame(6);
     clearInterior(arena);
     i.bots = [makeBot('bomber', 5, 3)];
-    i.addBomb('bot', 5, 3, 5.5, 3.5, 2, 0.001, 0);
+    i.addBomb('bot', 5, 3, 2, 0.001);
     run(game, input, 0.1);
     expect(i.bots.length).toBe(1);
     expect(i.bots[0]?.hp).toBe(1);
-    i.addBomb('bot', 5, 3, 5.5, 3.5, 2, 0.001, 0);
+    i.addBomb('bot', 5, 3, 2, 0.001);
     run(game, input, 0.1);
     expect(i.bots.length).toBe(0);
   });
@@ -268,7 +316,7 @@ describe('bombs and blasts', () => {
     clearInterior(arena);
     i.bots = [makeBot('walker', 5, 3), makeBot('walker', 4, 3), makeBot('walker', 6, 3)];
     const before = game.getResult().score;
-    i.addBomb('bot', 5, 3, 5.5, 3.5, 2, 0.001, 0);
+    i.addBomb('bot', 5, 3, 2, 0.001);
     run(game, input, 0.1);
     const stats = game.getResult().stats;
     expect(stats.kills).toBe(3);
@@ -281,7 +329,7 @@ describe('bombs and blasts', () => {
     const plain = quietGame(8);
     clearInterior(plain.arena);
     plain.i.player.invuln = 0;
-    plain.i.addBomb('bot', 1, 1, 1.5, 1.5, 2, 0.001, 0);
+    plain.i.addBomb('bot', 1, 1, 2, 0.001);
     run(plain.game, plain.input, 0.1);
     expect(plain.i.lives).toBe(LIVES - 1);
 
@@ -289,43 +337,221 @@ describe('bombs and blasts', () => {
     clearInterior(shielded.arena);
     shielded.i.player.invuln = 0;
     expect(shielded.i.player.shielded).toBe(true);
-    shielded.i.addBomb('bot', 1, 1, 1.5, 1.5, 2, 0.001, 0);
+    shielded.i.addBomb('bot', 1, 1, 2, 0.001);
     run(shielded.game, shielded.input, 0.1);
     expect(shielded.i.lives).toBe(LIVES);
     expect(shielded.i.player.shielded).toBe(false);
     expect(shielded.i.player.invuln).toBeGreaterThan(0);
   });
 
-  it('punch kicks a landed bomb three tiles forward and keeps its fuse', () => {
+  it('punch kicks a laid bomb three tiles forward and keeps its fuse', () => {
     const { game, input, i, arena } = quietGame(9);
     clearInterior(arena);
-    i.addBomb('player', 2, 1, 1.5, 1.5, 2, 2.2, 0);
-    const bomb = i.bombs[0];
-    expect(bomb).toBeDefined();
+    i.player.ammoMax = 2;
+    i.player.ammo = 2;
+    press(game, input, 'primary'); // on the player's tile (1, 1)
+    press(game, input, 'primary'); // that tile is taken, so this one goes in front, on (2, 1)
+    const bomb = i.bombs[1];
+    expect([bomb?.tx, bomb?.ty]).toEqual([2, 1]);
     run(game, input, 0.5);
     const fuseBefore = bomb?.fuse ?? 0;
     press(game, input, 'secondary');
-    expect(bomb?.tx).toBe(5);
-    expect(bomb?.ty).toBe(1);
-    expect(bomb?.flight).toBeGreaterThan(0);
-    expect(bomb?.flight).toBeLessThanOrEqual(FLIGHT_TIME);
-    // A bomb in flight does not burn its fuse, so the kick keeps the remaining time exactly.
-    expect(bomb?.fuse).toBe(fuseBefore);
+    expect([bomb?.tx, bomb?.ty]).toEqual([5, 1]);
+    // The slide does not reset or pause the fuse: it runs on through the kick.
+    expect(bomb?.fuse).toBeCloseTo(fuseBefore - 2 * DT, 9);
+    run(game, input, 0.3);
+    expect(bomb?.x).toBeCloseTo(5.5, 9);
+    expect(bomb?.y).toBeCloseTo(1.5, 9);
+    expect(i.bombs.length).toBe(2);
   });
 
-  it('a throw lands on the last free tile when the far tile is blocked', () => {
-    const { game, input, i, arena } = quietGame(10);
+  it('a kicked bomb stops short of a crate', () => {
+    const { game, input, i, arena } = quietGame(22);
     clearInterior(arena);
     setKind(arena, 4, 1, CRATE);
-    press(game, input, 'primary');
-    expect(i.bombs.length).toBe(1);
-    const landed = i.bombs[0];
-    expect(landed?.tx).toBe(3);
-    expect(landed?.ty).toBe(1);
+    i.addBomb('player', 2, 1, 2, 10);
+    const bomb = i.bombs[0];
+    press(game, input, 'secondary');
+    expect([bomb?.tx, bomb?.ty]).toEqual([3, 1]);
   });
 });
 
-describe('spawns and aim', () => {
+describe('bombs block movement', () => {
+  it('a laid bomb blocks the player: they can step off it but not step back on', () => {
+    const { game, input, i, arena } = quietGame(21);
+    clearInterior(arena);
+    press(game, input, 'primary'); // laid under the player on (1, 1)
+    input.setVirtual('right', true, 'test');
+    run(game, input, 0.5);
+    input.setVirtual('right', false, 'test');
+    expect(i.player.x).toBeGreaterThan(2.5);
+
+    input.setVirtual('left', true, 'test');
+    for (let t = 0; t < 1; t += DT) {
+      game.update(DT);
+      input.postUpdate();
+      expect(Math.floor(i.player.x)).not.toBe(1);
+    }
+    input.setVirtual('left', false, 'test');
+    expect(i.player.x).toBeGreaterThan(2.3);
+    expect(i.bombs.length).toBe(1);
+  });
+
+  it('a laid bomb blocks a bot: it walks around the bomb and never steps onto it', () => {
+    const { game, input, i, arena } = quietGame(23);
+    clearInterior(arena);
+    const walker = { ...makeBot('walker', 5, 1), speed: WALKER_SPEED, wait: 0, repath: 0, touchCd: 99 };
+    i.bots = [walker];
+    i.addBomb('player', 3, 1, 2, 100);
+    for (let t = 0; t < 6; t += DT) {
+      game.update(DT);
+      input.postUpdate();
+      expect(Math.floor(walker.x) === 3 && Math.floor(walker.y) === 1).toBe(false);
+    }
+    // It detours through the row below and makes it past the bomb.
+    expect(i.bots).toContain(walker);
+    expect(Math.floor(walker.x)).toBeLessThanOrEqual(2);
+  });
+});
+
+/** One filled shape, as drawn: its colour and the last circle drawn before the fill (empty if none). */
+interface Fill {
+  style: string;
+  circle: number[];
+}
+
+/** A canvas stand-in that records every fill in drawing order, with the colour and circle behind it. */
+function recordFills(): { ctx: CanvasRenderingContext2D; fills: Fill[] } {
+  const fills: Fill[] = [];
+  let style = '';
+  let circle: number[] = [];
+  const ctx = new Proxy(mockCtx(), {
+    get(target, key) {
+      if (key === 'arc')
+        return (...args: number[]) => {
+          circle = args;
+        };
+      if (key === 'fill')
+        return () => {
+          fills.push({ style, circle });
+          circle = [];
+        };
+      return Reflect.get(target, key);
+    },
+    set(target, key, value) {
+      if (key === 'fillStyle') style = String(value);
+      return Reflect.set(target, key, value);
+    },
+  });
+  return { ctx, fills };
+}
+
+describe('rendering', () => {
+  const palette: Palette = {
+    suit: '#3b82f6',
+    visor: '#e0f2fe',
+    skin: '#f1c27d',
+    hair: '#4b2e1e',
+    bomb: '#111827',
+    fuse: '#f97316',
+    crate: '#a16207',
+    stone: '#64748b',
+    floor1: '#1e3a2f',
+    floor2: '#1f4a36',
+  };
+  const TS = 48;
+  const OX = 24;
+  const OY = 60;
+
+  /** Draws one frame of an otherwise empty arena (no HUD) with the given bomb and player. */
+  function paintFrame(bomb: Bomb, player: Player): Fill[] {
+    const arena = new Arena(960, 600, new Rng(1));
+    clearInterior(arena);
+    const { ctx, fills } = recordFills();
+    const view: SceneView = {
+      W: 960,
+      H: 600,
+      time: 0.5,
+      preview: true,
+      arena,
+      layout: { ts: TS, ox: OX, oy: OY },
+      palette,
+      player,
+      bots: [],
+      bombs: [bomb],
+      explosions: [],
+      items: [],
+      lives: LIVES,
+      wave: 1,
+      waveAge: 9,
+      score: 0,
+      ammo: 0,
+      ammoMax: 1,
+    };
+    drawScene(ctx, view);
+    return fills;
+  }
+
+  function player(x: number, y: number): Player {
+    return {
+      x,
+      y,
+      facingX: 1,
+      facingY: 0,
+      ammo: 0,
+      ammoMax: 1,
+      speedUps: 0,
+      blastUps: 0,
+      bombUps: 0,
+      shielded: false,
+      invuln: 0,
+      respawn: 0,
+      punchCd: 0,
+      walk: 0,
+    };
+  }
+
+  function bombAt(tx: number, ty: number): Bomb {
+    return {
+      owner: 'player',
+      power: 2,
+      fuse: 1.5,
+      maxFuse: FUSE,
+      tx,
+      ty,
+      x: tx + 0.5,
+      y: ty + 0.5,
+      slide: 0,
+      fromX: tx + 0.5,
+      fromY: ty + 0.5,
+      dead: false,
+    };
+  }
+
+  it('draws a bomb under the player beneath the sprite, sunk to its feet, fuse over the sprite', () => {
+    const fills = paintFrame(bombAt(1, 1), player(1.5, 1.5));
+    const bodyAt = fills.findIndex((f) => f.style === palette.bomb);
+    const shirtAt = fills.findIndex((f) => f.style === palette.suit);
+    const sparkAt = fills.findIndex((f) => f.style === palette.fuse);
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    expect(shirtAt).toBeGreaterThan(bodyAt);
+    expect(sparkAt).toBeGreaterThan(shirtAt);
+    // The sprite's legs end about 0.2 tile below the player's centre: the bomb must reach past that to show.
+    const [, cy = 0, r = 0] = fills[bodyAt]?.circle ?? [];
+    expect(cy + r).toBeGreaterThan(OY + (1.5 + 0.3) * TS);
+  });
+
+  it('draws a bomb the player is not standing on at the centre of its tile', () => {
+    const fills = paintFrame(bombAt(3, 1), player(1.5, 1.5));
+    const bodyAt = fills.findIndex((f) => f.style === palette.bomb);
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    const [cx = 0, cy = 0] = fills[bodyAt]?.circle ?? [];
+    expect(cx).toBeCloseTo(OX + 3.5 * TS, 9);
+    expect(cy).toBeCloseTo(OY + 1.5 * TS, 9);
+  });
+});
+
+describe('spawns', () => {
   it('never spawns a bot on top of the player, even when the player stands on a spawn point', () => {
     const { game, input, i, arena } = quietGame(15);
     const spawn = arena.botSpawns[0];
@@ -355,7 +581,7 @@ describe('spawns and aim', () => {
   it('a due bot waits while every far spawn point is taken, then appears', () => {
     const { game, input, i, arena } = quietGame(16);
     // Long-fused bombs hold every spawn point without going off during the test.
-    for (const s of arena.botSpawns) i.addBomb('bot', s.x, s.y, s.x + 0.5, s.y + 0.5, 1, 100, 0);
+    for (const s of arena.botSpawns) i.addBomb('bot', s.x, s.y, 1, 100);
     i.spawnQueue = ['walker'];
     i.spawnTimer = 0;
     run(game, input, 1);
@@ -365,31 +591,6 @@ describe('spawns and aim', () => {
     run(game, input, 0.2);
     expect(i.bots.length).toBe(1);
     expect(i.spawnQueue.length).toBe(0);
-  });
-
-  it('a pointer resting over the HUD or the margins does not steer the throw off the grid', () => {
-    const { game, input, i, arena } = quietGame(17);
-    clearInterior(arena);
-    const { ts, ox, oy } = i.layout();
-    const centre = (tx: number, ty: number) => ({ x: ox + (tx + 0.5) * ts, y: oy + (ty + 0.5) * ts });
-    i.player.x = 5.5;
-    i.player.y = 5.5;
-    i.player.facingX = 1;
-    i.player.facingY = 0;
-    const throwAt = (x: number, y: number): number[] | null => {
-      Object.assign(input.pointer, { x, y, inside: true, active: true, touch: false });
-      i.bombs = [];
-      i.player.ammo = 1;
-      press(game, input, 'primary');
-      const b = i.bombs[0];
-      return b ? [b.tx, b.ty] : null;
-    };
-    // Over the HUD strip and in the left margin: both fall back to the facing direction (right).
-    expect(throwAt(480, 20)).toEqual([8, 5]);
-    expect(throwAt(4, oy + 2 * ts)).toEqual([8, 5]);
-    // Over the arena itself, the throw follows the pointer's tile.
-    const up = centre(5, 2);
-    expect(throwAt(up.x, up.y)).toEqual([5, 2]);
   });
 });
 
@@ -441,7 +642,7 @@ describe('waves, items and stats', () => {
     const { game, input, i, arena } = quietGame(14);
     clearInterior(arena);
     i.bots = [makeBot('walker', 5, 3)];
-    i.addBomb('bot', 5, 3, 5.5, 3.5, 2, 0.001, 0);
+    i.addBomb('bot', 5, 3, 2, 0.001);
     run(game, input, 0.1);
     expect(game.getResult().coins).toBe(1 + 0 + 2 * 1);
   });

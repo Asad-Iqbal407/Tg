@@ -1,0 +1,345 @@
+import { fillRoundRect, roundRectPath, shade, text } from '../draw';
+import { type Board, COLS, HIDDEN_ROWS, ROWS, VISIBLE_ROWS } from './board';
+import { cellsOf, type Kind, KINDS, type Piece, pieceBounds } from './pieces';
+
+const MARGIN = 16;
+const GAP = 12;
+/** Side panel width, in cells of the well. */
+const PANEL_CELLS = 4.5;
+/** Height of the strip above the well when there is no room for a side panel. */
+const STRIP_PX = 104;
+const LABEL_PX = 18;
+/** Narrowest logical width that leaves a side panel room beside a well of usable size. */
+const SIDE_MIN_W = COLS * 24 + GAP + 112 + 2 * MARGIN;
+
+/** Top-left corner of the well (row 0, the top buffer row) and the size of a cell, in logical px. */
+export interface Well {
+  readonly x: number;
+  readonly y: number;
+  readonly cell: number;
+}
+
+/** The side panel, or the strip above the well when the width leaves no room beside it. */
+export interface Panel {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  /** True beside the well; false above it. */
+  readonly side: boolean;
+}
+
+export interface TetrisLayout {
+  readonly well: Well;
+  /** Null when there is no HUD to show (card previews). */
+  readonly panel: Panel | null;
+}
+
+/**
+ * Where the well and its panel go. The well is fitted with the largest whole cell, centred in the area above
+ * the touch controls. The panel sits to the right when the width allows, otherwise above the well.
+ */
+export function layoutTetris(W: number, H: number, bottom: number, withPanel: boolean): TetrisLayout {
+  const availW = W - 2 * MARGIN;
+  const availH = H - 2 * MARGIN - bottom;
+  /** Start of a block of `size` centred in `space`, never above or left of the margin. */
+  const centred = (space: number, size: number): number =>
+    MARGIN + Math.max(0, Math.floor((space - size) / 2));
+  if (!withPanel) {
+    const cell = Math.max(1, Math.floor(Math.min(availW / COLS, availH / ROWS)));
+    return {
+      well: { x: centred(availW, COLS * cell), y: centred(availH, ROWS * cell), cell },
+      panel: null,
+    };
+  }
+  if (W >= SIDE_MIN_W) {
+    const cell = Math.max(1, Math.floor(Math.min(availH / ROWS, (availW - GAP) / (COLS + PANEL_CELLS))));
+    const panelW = Math.floor(PANEL_CELLS * cell);
+    const groupW = COLS * cell + GAP + panelW;
+    const x = centred(availW, groupW);
+    const y = centred(availH, ROWS * cell);
+    return {
+      well: { x, y, cell },
+      panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true },
+    };
+  }
+  const cell = Math.max(1, Math.floor(Math.min(availW / COLS, (availH - STRIP_PX - GAP) / ROWS)));
+  const boardW = COLS * cell;
+  const top = centred(availH, STRIP_PX + GAP + ROWS * cell);
+  const x = centred(availW, boardW);
+  return {
+    well: { x, y: top + STRIP_PX + GAP, cell },
+    panel: { x, y: top, w: boardW, h: STRIP_PX, side: false },
+  };
+}
+
+/** One piece's colours: the fill and the lighter and darker tones of its bevel. */
+export interface Block {
+  readonly fill: string;
+  readonly light: string;
+  readonly dark: string;
+}
+
+/** Colours for the whole game, read once from the equipped skin. */
+export interface Look {
+  readonly backdrop: string;
+  readonly board: string;
+  readonly grid: string;
+  readonly frame: string;
+  readonly ghost: string;
+  readonly blocks: Record<Kind, Block>;
+}
+
+function makeBlock(fill: string): Block {
+  return { fill, light: shade(fill, 0.5), dark: shade(fill, -0.4) };
+}
+
+/** Builds the look from a colour lookup (the skin palette, with a fallback per key). */
+export function buildLook(color: (key: string, fallback: string) => string): Look {
+  const board = color('board', '#0b1020');
+  return {
+    backdrop: shade(board, -0.4),
+    board,
+    grid: color('grid', '#16203a'),
+    frame: color('frame', '#334155'),
+    ghost: color('ghost', '#e2e8f0'),
+    blocks: {
+      I: makeBlock(color('I', '#22d3ee')),
+      O: makeBlock(color('O', '#facc15')),
+      T: makeBlock(color('T', '#a855f7')),
+      S: makeBlock(color('S', '#22c55e')),
+      Z: makeBlock(color('Z', '#ef4444')),
+      J: makeBlock(color('J', '#3b82f6')),
+      L: makeBlock(color('L', '#f97316')),
+    },
+  };
+}
+
+/** Centre of a cell of the well, in logical px. */
+export function cellCentre(well: Well, x: number, y: number): { x: number; y: number } {
+  return { x: well.x + (x + 0.5) * well.cell, y: well.y + (y + 0.5) * well.cell };
+}
+
+/** One square with a bevel: light on the top and left, dark on the bottom and right. */
+function drawCell(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, b: Block): void {
+  const e = Math.max(1, Math.round(s * 0.14));
+  ctx.fillStyle = b.dark;
+  ctx.fillRect(x, y, s, s);
+  ctx.fillStyle = b.fill;
+  ctx.fillRect(x, y, s - e, s - e);
+  ctx.fillStyle = b.light;
+  ctx.fillRect(x, y, s - e, e);
+  ctx.fillRect(x, y, e, s - e);
+}
+
+/** The playfield: background, grid lines and frame. The buffer rows above it stay open for spawning. */
+export function drawWell(ctx: CanvasRenderingContext2D, well: Well, look: Look): void {
+  const { x, cell } = well;
+  const top = well.y + HIDDEN_ROWS * cell;
+  const w = COLS * cell;
+  const h = VISIBLE_ROWS * cell;
+  ctx.fillStyle = look.board;
+  ctx.fillRect(x, top, w, h);
+  ctx.beginPath();
+  for (let c = 1; c < COLS; c++) {
+    const gx = x + c * cell + 0.5;
+    ctx.moveTo(gx, top);
+    ctx.lineTo(gx, top + h);
+  }
+  for (let r = 1; r < VISIBLE_ROWS; r++) {
+    const gy = top + r * cell + 0.5;
+    ctx.moveTo(x, gy);
+    ctx.lineTo(x + w, gy);
+  }
+  ctx.strokeStyle = look.grid;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  const fw = Math.max(2, cell * 0.12);
+  ctx.strokeStyle = look.frame;
+  ctx.lineWidth = fw;
+  ctx.strokeRect(x - fw / 2, top - fw / 2, w + fw, h + fw);
+}
+
+/** Every locked cell. */
+export function drawStack(ctx: CanvasRenderingContext2D, board: Board, well: Well, look: Look): void {
+  for (let i = 0; i < board.cells.length; i++) {
+    const code = board.cells[i];
+    if (!code) continue;
+    const kind = KINDS[code - 1];
+    if (!kind) continue;
+    drawCell(
+      ctx,
+      well.x + (i % COLS) * well.cell,
+      well.y + Math.floor(i / COLS) * well.cell,
+      well.cell,
+      look.blocks[kind],
+    );
+  }
+}
+
+/** A piece drawn `dy` rows below its position: 0 for the active piece, its landing distance for the ghost. */
+export function drawPiece(ctx: CanvasRenderingContext2D, p: Piece, well: Well, look: Look, dy = 0): void {
+  const b = look.blocks[p.kind];
+  for (const o of cellsOf(p.kind, p.rot)) {
+    drawCell(ctx, well.x + (p.x + o.x) * well.cell, well.y + (p.y + dy + o.y) * well.cell, well.cell, b);
+  }
+}
+
+/** Outline of where the piece would land, `dy` rows below it. */
+export function drawGhost(ctx: CanvasRenderingContext2D, p: Piece, dy: number, well: Well, look: Look): void {
+  const lw = Math.max(1.5, well.cell * 0.07);
+  const inset = lw / 2 + 1;
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = look.ghost;
+  ctx.lineWidth = lw;
+  for (const o of cellsOf(p.kind, p.rot)) {
+    const x = well.x + (p.x + o.x) * well.cell;
+    const y = well.y + (p.y + dy + o.y) * well.cell;
+    ctx.strokeRect(x + inset, y + inset, well.cell - 2 * inset, well.cell - 2 * inset);
+  }
+  ctx.restore();
+}
+
+/** White flash over the rows that just cleared, `alpha` running from 1 down to 0. */
+export function drawFlash(
+  ctx: CanvasRenderingContext2D,
+  well: Well,
+  rows: readonly number[],
+  alpha: number,
+): void {
+  if (alpha <= 0) return;
+  ctx.fillStyle = `rgba(255,255,255,${(0.85 * alpha).toFixed(3)})`;
+  for (const r of rows) ctx.fillRect(well.x, well.y + r * well.cell, COLS * well.cell, well.cell);
+}
+
+export interface PanelState {
+  readonly hold: Kind | null;
+  readonly holdLocked: boolean;
+  readonly next: readonly Kind[];
+  readonly score: number;
+  readonly level: number;
+  readonly lines: number;
+}
+
+interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+interface Slots {
+  readonly holdLabel: { readonly x: number; readonly y: number };
+  readonly hold: Rect;
+  readonly nextLabel: { readonly x: number; readonly y: number };
+  readonly next: readonly Rect[];
+  readonly stats: readonly Rect[];
+}
+
+/** Side panel: the hold box, the next three pieces, then the stats stacked at the bottom. */
+function sideSlots(p: Panel): Slots {
+  const cellPx = p.h / ROWS;
+  const pad = Math.max(6, Math.round(cellPx * 0.25));
+  const x = p.x + pad;
+  const w = p.w - 2 * pad;
+  const holdY = p.y + LABEL_PX;
+  const holdH = Math.round(w * 0.95);
+  const nextY = holdY + holdH + LABEL_PX + GAP;
+  const nextH = Math.round(w * 0.8);
+  const nextGap = 8;
+  const statH = Math.round(cellPx * 1.6);
+  const statGap = 8;
+  const statsY = p.y + p.h - 3 * statH - 2 * statGap;
+  return {
+    holdLabel: { x, y: holdY - 9 },
+    hold: { x, y: holdY, w, h: holdH },
+    nextLabel: { x, y: nextY - 9 },
+    next: [0, 1, 2].map((i) => ({ x, y: nextY + i * (nextH + nextGap), w, h: nextH })),
+    stats: [0, 1, 2].map((i) => ({ x, y: statsY + i * (statH + statGap), w, h: statH })),
+  };
+}
+
+/** Strip above the well: hold and next pieces on the left, the stats in three rows on the right. */
+function stripSlots(p: Panel): Slots {
+  const gap = 6;
+  const boxW = Math.floor(p.w * 0.14);
+  const boxY = p.y + LABEL_PX;
+  const boxH = p.h - LABEL_PX;
+  const statsW = p.w - 4 * boxW - 4 * gap;
+  const rowH = Math.floor(boxH / 3);
+  const nextX = (i: number) => p.x + boxW + gap + i * (boxW + gap);
+  const statsX = p.x + p.w - statsW;
+  return {
+    holdLabel: { x: p.x, y: p.y + 8 },
+    hold: { x: p.x, y: boxY, w: boxW, h: boxH },
+    nextLabel: { x: nextX(0), y: p.y + 8 },
+    next: [0, 1, 2].map((i) => ({ x: nextX(i), y: boxY, w: boxW, h: boxH })),
+    stats: [0, 1, 2].map((i) => ({ x: statsX, y: boxY + i * rowH, w: statsW, h: rowH - 3 })),
+  };
+}
+
+function box(ctx: CanvasRenderingContext2D, r: Rect): void {
+  const radius = Math.min(12, r.h / 3);
+  fillRoundRect(ctx, r.x, r.y, r.w, r.h, radius, 'rgba(8, 10, 30, 0.55)');
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1.5;
+  roundRectPath(ctx, r.x, r.y, r.w, r.h, radius);
+  ctx.stroke();
+}
+
+function label(ctx: CanvasRenderingContext2D, value: string, at: { x: number; y: number }): void {
+  text(ctx, value, at.x, at.y, { size: 11, weight: 800, color: '#d8b4fe', stroke: null });
+}
+
+/** A piece centred in a box, at the largest size that fits it. */
+function drawPreview(ctx: CanvasRenderingContext2D, kind: Kind, r: Rect, look: Look, alpha: number): void {
+  const b = pieceBounds(kind);
+  const pad = 6;
+  const mini = Math.max(2, Math.floor(Math.min((r.w - 2 * pad) / b.w, (r.h - 2 * pad) / b.h)));
+  const ox = r.x + (r.w - b.w * mini) / 2;
+  const oy = r.y + (r.h - b.h * mini) / 2;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  for (const o of cellsOf(kind, 0)) {
+    drawCell(ctx, ox + (o.x - b.x) * mini, oy + (o.y - b.y) * mini, mini, look.blocks[kind]);
+  }
+  ctx.restore();
+}
+
+/** One stat: the name above its value in a tall box, the name beside the value in a short one. */
+function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rect): void {
+  const pad = 10;
+  if (r.h >= 36) {
+    text(ctx, name, r.x + pad, r.y + 11, { size: 10, weight: 800, color: '#d8b4fe', stroke: null });
+    text(ctx, value, r.x + pad, r.y + r.h - 12, { size: 18, stroke: null });
+    return;
+  }
+  const mid = r.y + r.h / 2;
+  text(ctx, name, r.x + 6, mid, { size: 9, weight: 800, color: '#d8b4fe', stroke: null });
+  text(ctx, value, r.x + r.w - 6, mid, { size: 13, align: 'right', stroke: null });
+}
+
+/** Hold box, the next three pieces, and score, level and lines. */
+export function drawPanel(ctx: CanvasRenderingContext2D, panel: Panel, look: Look, s: PanelState): void {
+  const slots = panel.side ? sideSlots(panel) : stripSlots(panel);
+  label(ctx, 'HOLD', slots.holdLabel);
+  box(ctx, slots.hold);
+  if (s.hold) drawPreview(ctx, s.hold, slots.hold, look, s.holdLocked ? 0.4 : 1);
+  label(ctx, 'NEXT', slots.nextLabel);
+  slots.next.forEach((r, i) => {
+    box(ctx, r);
+    const kind = s.next[i];
+    if (kind) drawPreview(ctx, kind, r, look, 1);
+  });
+  const values: readonly (readonly [string, string])[] = [
+    ['SCORE', s.score.toLocaleString('en-US')],
+    ['LEVEL', `${s.level}`],
+    ['LINES', `${s.lines}`],
+  ];
+  slots.stats.forEach((r, i) => {
+    box(ctx, r);
+    const v = values[i];
+    if (v) stat(ctx, v[0], v[1], r);
+  });
+}

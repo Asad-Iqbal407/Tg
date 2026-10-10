@@ -14,7 +14,6 @@ import {
   DROP_CHANCE,
   EXPLOSION_TIME,
   type Explosion,
-  FLIGHT_TIME,
   FUSE,
   type Item,
   type ItemKind,
@@ -29,9 +28,10 @@ import {
   RESPAWN_DELAY,
   RESPAWN_INVULN,
   SHIELD_INVULN,
+  SLIDE_TILES,
+  SLIDE_TIME,
   SPAWN_STAGGER,
   SPEED_STEP,
-  THROW_RANGE,
   WALKER_SPEED,
   WAVE_CLEAR_DELAY,
 } from './types';
@@ -57,12 +57,12 @@ const FIRE_COLORS = ['#fff7ed', '#fde047', '#fb923c', '#ef4444', '#7c2d12'];
 const WOOD_COLORS = ['#a16207', '#facc15', '#78350f'];
 const NO_VECTOR = { x: 0, y: 0 };
 
-/** Bomb Squad: a bomb-throwing arena. Crates hide power-ups; bots chase you in waves. */
+/** Bomb Squad: a bomb-laying arena. Crates hide power-ups; bots chase you in waves. */
 export class BombSquadGame extends BaseGame {
   private readonly arena: Arena;
   private readonly palette: Palette;
   private readonly player: Player;
-  /** 1 on tiles that hold a live bomb (landed or in flight); used for bot path finding. */
+  /** 1 on tiles that hold a live bomb; used for bot path finding. */
   private readonly occupied: Uint8Array;
   /** Stamp of the latest detonation that covered each tile; compared against `serial`. */
   private readonly blastMark: Uint32Array;
@@ -83,8 +83,6 @@ export class BombSquadGame extends BaseGame {
   private blocks = 0;
   private serial = 0;
   private dragOrigin: { x: number; y: number } | null = null;
-  /** Tile the next throw would land on (for the aim marker), or null. */
-  private aim: { x: number; y: number } | null = null;
   private layoutKey = -1;
   private lay: Layout = { ts: 1, ox: 0, oy: 0 };
 
@@ -177,7 +175,6 @@ export class BombSquadGame extends BaseGame {
       bombs: this.bombs,
       explosions: this.explosions,
       items: this.items,
-      aim: this.aim,
       lives: this.lives,
       wave: this.wave,
       waveAge: this.waveAge,
@@ -211,16 +208,14 @@ export class BombSquadGame extends BaseGame {
     if (p.respawn > 0) {
       p.respawn -= dt;
       if (p.respawn <= 0) this.respawnPlayer();
-      this.aim = null;
       return;
     }
     p.invuln = Math.max(0, p.invuln - dt);
     p.punchCd = Math.max(0, p.punchCd - dt);
     this.steer(dt);
-    if (this.input.wasPressed('primary')) this.throwBomb();
+    if (this.input.wasPressed('primary')) this.layBomb();
     if (this.input.wasPressed('secondary')) this.punch();
     this.pickUpItems();
-    this.updateAim();
   }
 
   private steer(dt: number): void {
@@ -293,6 +288,10 @@ export class BombSquadGame extends BaseGame {
     else p.y = next;
   }
 
+  /**
+   * True when the body centred on (x, y) would overlap a wall, pillar, crate or bomb. A bomb the body
+   * already overlaps (the one it was laid under) never blocks it, so the player can always step off.
+   */
   private blockedAt(x: number, y: number): boolean {
     const r = PLAYER_RADIUS;
     const x0 = Math.floor(x - r);
@@ -302,9 +301,22 @@ export class BombSquadGame extends BaseGame {
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         if (this.arena.isSolid(tx, ty)) return true;
+        if (this.bombAt(tx, ty) && !this.overlapsPlayer(tx, ty)) return true;
       }
     }
     return false;
+  }
+
+  /** Whether the player's body, as it is right now, overlaps tile (tx, ty). */
+  private overlapsPlayer(tx: number, ty: number): boolean {
+    const { x, y } = this.player;
+    const r = PLAYER_RADIUS;
+    return (
+      tx >= Math.floor(x - r) &&
+      tx <= Math.floor(x + r - 1e-9) &&
+      ty >= Math.floor(y - r) &&
+      ty <= Math.floor(y + r - 1e-9)
+    );
   }
 
   private respawnPlayer(): void {
@@ -406,74 +418,55 @@ export class BombSquadGame extends BaseGame {
     p.ammoMax = 1 + p.bombUps + this.skinParam('startBombs', 0) + (this.hasBoost('head-start') ? 1 : 0);
   }
 
-  // ---- aiming and throwing ------------------------------------------------------------------
+  // ---- laying and kicking bombs -------------------------------------------------------------
 
-  /** Direction and reach of a throw: toward the pointer's tile on a mouse, else the facing direction. */
-  private aimDirection(): { dx: number; dy: number; reach: number } {
+  /** Primary: lays a bomb on the player's tile, or on the tile they face when their own tile is taken. */
+  private layBomb(): void {
     const p = this.player;
-    const pt = this.input.pointer;
-    const ox = Math.floor(p.x);
-    const oy = Math.floor(p.y);
-    if (pt.active && !pt.touch && pt.inside) {
-      const lay = this.layout();
-      const tx = Math.floor((pt.x - lay.ox) / lay.ts);
-      const ty = Math.floor((pt.y - lay.oy) / lay.ts);
-      // Only a pointer over the arena itself aims: the HUD strip and the margins fall back to facing.
-      if (this.arena.inBounds(tx, ty)) {
-        const ddx = tx - ox;
-        const ddy = ty - oy;
-        if (Math.abs(ddx) >= Math.abs(ddy) && ddx !== 0) {
-          return { dx: Math.sign(ddx), dy: 0, reach: Math.min(THROW_RANGE, Math.abs(ddx)) };
-        }
-        if (ddy !== 0) return { dx: 0, dy: Math.sign(ddy), reach: Math.min(THROW_RANGE, Math.abs(ddy)) };
-      }
-    }
-    return { dx: p.facingX, dy: p.facingY, reach: THROW_RANGE };
-  }
-
-  private updateAim(): void {
-    const p = this.player;
-    const a = this.aimDirection();
-    const land = this.landingFrom(Math.floor(p.x), Math.floor(p.y), a.dx, a.dy, a.reach);
-    this.aim = land;
-  }
-
-  /**
-   * Tile a bomb thrown from (ox, oy) lands on: the farthest free tile along the line, stepping back
-   * from `reach` while tiles are solid or hold a bomb. Null when nothing along the line is free.
-   */
-  private landingFrom(
-    ox: number,
-    oy: number,
-    dx: number,
-    dy: number,
-    reach: number,
-  ): { x: number; y: number } | null {
-    for (let s = reach; s >= 1; s--) {
-      const x = ox + dx * s;
-      const y = oy + dy * s;
-      if (!this.arena.isSolid(x, y) && !this.bombAt(x, y)) return { x, y };
-    }
-    if (!this.arena.isSolid(ox, oy) && !this.bombAt(ox, oy)) return { x: ox, y: oy };
-    return null;
-  }
-
-  private throwBomb(): void {
-    const p = this.player;
-    if (p.ammo <= 0) {
+    const spot = this.layTile();
+    if (p.ammo <= 0 || !spot) {
       this.audio.play('empty');
-      return;
-    }
-    const a = this.aimDirection();
-    const land = this.landingFrom(Math.floor(p.x), Math.floor(p.y), a.dx, a.dy, a.reach);
-    if (!land) {
-      this.audio.play('error');
       return;
     }
     p.ammo--;
     this.addStat('bombs');
-    this.addBomb('player', land.x, land.y, p.x, p.y, BLAST_BASE + p.blastUps, FUSE, FLIGHT_TIME);
+    this.addBomb('player', spot.x, spot.y, BLAST_BASE + p.blastUps, FUSE);
+    const s = this.screenOf(spot.x + 0.5, spot.y + 0.5);
+    this.particles.emit({
+      x: s.x,
+      y: s.y,
+      count: 6,
+      speed: 70,
+      life: 0.3,
+      size: 3,
+      colors: [this.palette.stone],
+    });
     this.audio.play('bomb');
+  }
+
+  /** The tile a new bomb goes on: the player's own tile when free, else the tile they face when free, else null. */
+  private layTile(): Cell | null {
+    const p = this.player;
+    const tx = Math.floor(p.x);
+    const ty = Math.floor(p.y);
+    if (this.canLayOn(tx, ty)) return { x: tx, y: ty };
+    const fx = tx + p.facingX;
+    const fy = ty + p.facingY;
+    // A bomb under the body is never blocking, so a bomb laid where the body already overlaps would let the
+    // player walk through it. Only lay on the faced tile when the body is clear of it.
+    return !this.overlapsPlayer(fx, fy) && this.canLayOn(fx, fy) ? { x: fx, y: fy } : null;
+  }
+
+  /** Open floor with no bomb on it and no bot standing on it or stepping onto it. */
+  private canLayOn(tx: number, ty: number): boolean {
+    if (this.arena.isSolid(tx, ty) || this.bombAt(tx, ty)) return false;
+    return !this.botOn(tx, ty);
+  }
+
+  /** True when a bot stands on tile (tx, ty) or is walking onto it. */
+  private botOn(tx: number, ty: number): boolean {
+    const k = this.arena.index(tx, ty);
+    return this.bots.some((b) => b.goal === k || (Math.floor(b.x) === tx && Math.floor(b.y) === ty));
   }
 
   /** Punch: kicks the bomb on the adjacent tile in the facing direction and hits the bots there. */
@@ -485,18 +478,8 @@ export class BombSquadGame extends BaseGame {
     const tx = Math.floor(p.x) + p.facingX;
     const ty = Math.floor(p.y) + p.facingY;
 
-    const bomb = this.landedBombAt(tx, ty);
-    if (bomb) {
-      const land = this.landingFrom(tx, ty, p.facingX, p.facingY, THROW_RANGE);
-      if (land) {
-        bomb.fromX = bomb.x;
-        bomb.fromY = bomb.y;
-        bomb.tx = land.x;
-        bomb.ty = land.y;
-        bomb.flight = FLIGHT_TIME;
-        this.audio.play('bump');
-      }
-    }
+    const bomb = this.bombAt(tx, ty);
+    if (bomb) this.kickBomb(bomb, p.facingX, p.facingY);
 
     let hit = false;
     for (const bot of this.bots) {
@@ -519,48 +502,55 @@ export class BombSquadGame extends BaseGame {
 
   // ---- bombs and blasts ---------------------------------------------------------------------
 
-  private addBomb(
-    owner: Bomb['owner'],
-    tx: number,
-    ty: number,
-    fromX: number,
-    fromY: number,
-    power: number,
-    fuse: number,
-    flight: number,
-  ): void {
-    const landed = flight <= 0;
+  /** Puts a bomb down on tile (tx, ty); its fuse starts now. */
+  private addBomb(owner: Bomb['owner'], tx: number, ty: number, power: number, fuse: number): void {
     this.bombs.push({
       owner,
       power,
       fuse,
       maxFuse: fuse,
-      flight: landed ? 0 : flight,
-      x: landed ? tx + 0.5 : fromX,
-      y: landed ? ty + 0.5 : fromY,
-      fromX,
-      fromY,
       tx,
       ty,
+      x: tx + 0.5,
+      y: ty + 0.5,
+      slide: 0,
+      fromX: tx + 0.5,
+      fromY: ty + 0.5,
       dead: false,
     });
   }
 
-  /** Any live bomb whose landing tile is (x, y), in flight or landed. */
-  private bombAt(x: number, y: number): boolean {
-    return this.bombs.some((b) => !b.dead && b.tx === x && b.ty === y);
+  /** The live bomb lying on tile (x, y), if any. */
+  private bombAt(x: number, y: number): Bomb | undefined {
+    return this.bombs.find((b) => !b.dead && b.tx === x && b.ty === y);
   }
 
-  private landedBombAt(x: number, y: number): Bomb | null {
-    for (const b of this.bombs) {
-      if (!b.dead && b.flight === 0 && b.tx === x && b.ty === y) return b;
+  /**
+   * Slides a bomb up to SLIDE_TILES tiles along (dx, dy), stopping short of walls, crates, bombs and
+   * bots. Its fuse keeps running while it slides.
+   */
+  private kickBomb(bomb: Bomb, dx: number, dy: number): void {
+    let tx = bomb.tx;
+    let ty = bomb.ty;
+    for (let s = 0; s < SLIDE_TILES; s++) {
+      const nx = tx + dx;
+      const ny = ty + dy;
+      if (this.arena.isSolid(nx, ny) || this.bombAt(nx, ny) || this.botOn(nx, ny)) break;
+      tx = nx;
+      ty = ny;
     }
-    return null;
+    if (tx === bomb.tx && ty === bomb.ty) return;
+    bomb.fromX = bomb.x;
+    bomb.fromY = bomb.y;
+    bomb.tx = tx;
+    bomb.ty = ty;
+    bomb.slide = SLIDE_TIME;
+    this.audio.play('bump');
   }
 
   private botDropBomb(tx: number, ty: number): boolean {
     if (this.arena.isSolid(tx, ty) || this.bombAt(tx, ty)) return false;
-    this.addBomb('bot', tx, ty, tx + 0.5, ty + 0.5, BLAST_BASE, BOT_FUSE, 0);
+    this.addBomb('bot', tx, ty, BLAST_BASE, BOT_FUSE);
     return true;
   }
 
@@ -568,21 +558,13 @@ export class BombSquadGame extends BaseGame {
     const due: Bomb[] = [];
     for (const b of this.bombs) {
       if (b.dead) continue;
-      if (b.flight > 0) {
-        b.flight -= dt;
-        if (b.flight <= 0) {
-          b.flight = 0;
-          b.x = b.tx + 0.5;
-          b.y = b.ty + 0.5;
-          this.audio.play('land');
-        } else {
-          const t = 1 - b.flight / FLIGHT_TIME;
-          b.x = lerp(b.fromX, b.tx + 0.5, t);
-          b.y = lerp(b.fromY, b.ty + 0.5, t);
-        }
-      } else {
-        b.fuse -= dt;
-        if (b.fuse <= 0) due.push(b);
+      b.fuse -= dt;
+      if (b.fuse <= 0) due.push(b);
+      if (b.slide > 0) {
+        b.slide = Math.max(0, b.slide - dt);
+        const t = 1 - b.slide / SLIDE_TIME;
+        b.x = lerp(b.fromX, b.tx + 0.5, t);
+        b.y = lerp(b.fromY, b.ty + 0.5, t);
       }
     }
     for (const b of due) this.detonate(b);
@@ -614,8 +596,8 @@ export class BombSquadGame extends BaseGame {
           this.breakCrate(x, y);
           break;
         }
-        const other = this.landedBombAt(x, y);
-        if (other && !other.dead) chain.push(other);
+        const other = this.bombAt(x, y);
+        if (other) chain.push(other);
       }
     }
 

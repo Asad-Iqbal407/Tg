@@ -129,7 +129,7 @@ export class Arena {
     return true;
   }
 
-  /** Breadth-first search over walkable floor, avoiding `occupied` tiles (1 = blocked). */
+  /** Breadth-first search over walkable floor, avoiding `occupied` tiles (1 = blocked, goal included). */
   findPath(fromX: number, fromY: number, toX: number, toY: number, occupied: Uint8Array): number[] | null {
     const start = this.index(fromX, fromY);
     const goal = this.index(toX, toY);
@@ -150,7 +150,7 @@ export class Arena {
         if (!this.inBounds(nx, ny)) continue;
         const k = this.index(nx, ny);
         if (this.seen[k] === this.stamp) continue;
-        if (k !== goal && (this.tiles[k] !== FLOOR || occupied[k])) continue;
+        if (this.tiles[k] !== FLOOR || occupied[k]) continue;
         this.seen[k] = this.stamp;
         this.parent[k] = cur;
         this.queue[tail++] = k;

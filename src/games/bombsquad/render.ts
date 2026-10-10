@@ -9,6 +9,7 @@ import {
   type Item,
   type ItemKind,
   LIVES,
+  PLAYER_RADIUS,
   type Player,
   WAVE_BANNER,
 } from './types';
@@ -46,7 +47,6 @@ export interface SceneView {
   bombs: readonly Bomb[];
   explosions: readonly Explosion[];
   items: readonly Item[];
-  aim: { x: number; y: number } | null;
   lives: number;
   wave: number;
   waveAge: number;
@@ -56,6 +56,8 @@ export interface SceneView {
 }
 
 const BG = '#0b1020';
+/** The sprite's feet sit this far below the player's tile centre, in tile units. */
+const FEET_DROP = 0.16;
 const WALKER_BODY = '#f87171';
 const BOMBER_BODY = '#94a3b8';
 const HEART = '#f43f5e';
@@ -76,12 +78,11 @@ export function drawScene(ctx: CanvasRenderingContext2D, v: SceneView): void {
   const rows = arena.rows;
 
   fillRoundRect(ctx, ox - 6, oy - 6, cols * ts + 12, rows * ts + 12, 10, shade(v.palette.stone, -0.5));
-  // Ground layer: floor, blast scorch and flames, pick-ups, aim marker and shadows.
+  // Ground layer: floor, blast scorch and flames, pick-ups and shadows.
   drawFloor(ctx, v);
   drawExplosionsOnFloor(ctx, v);
   drawExplosionFlames(ctx, v);
   drawItems(ctx, v);
-  drawAim(ctx, v);
   drawShadows(ctx, v);
 
   // Standing layer, row by row: blocks in the row, then the entities on it, so nearer rows overlap.
@@ -207,20 +208,6 @@ function drawExplosionFlames(ctx: CanvasRenderingContext2D, v: SceneView): void 
   ctx.globalAlpha = 1;
 }
 
-function drawAim(ctx: CanvasRenderingContext2D, v: SceneView): void {
-  if (!v.aim || v.preview) return;
-  const { ts, ox, oy } = v.layout;
-  const pulse = 0.55 + 0.25 * Math.sin(v.time * 8);
-  ctx.save();
-  ctx.globalAlpha = pulse;
-  ctx.strokeStyle = v.palette.fuse;
-  ctx.lineWidth = Math.max(2, ts * 0.06);
-  ctx.setLineDash([ts * 0.12, ts * 0.08]);
-  const pad = ts * 0.1;
-  ctx.strokeRect(ox + v.aim.x * ts + pad, oy + v.aim.y * ts + pad, ts - pad * 2, ts - pad * 2);
-  ctx.restore();
-}
-
 function drawItems(ctx: CanvasRenderingContext2D, v: SceneView): void {
   const { ts, ox, oy } = v.layout;
   for (let i = 0; i < v.items.length; i++) {
@@ -304,30 +291,65 @@ function drawItemIcon(ctx: CanvasRenderingContext2D, kind: ItemKind, x: number, 
 
 /** Draws the entities standing on tile row `row` (bots, bombs, player), in painter order. */
 function drawRowEntities(ctx: CanvasRenderingContext2D, v: SceneView, row: number): void {
-  for (const b of v.bombs) if (Math.floor(b.y) === row) drawBomb(ctx, v, b);
+  for (const b of v.bombs) if (Math.floor(b.y) === row && !underPlayer(v, b)) drawBomb(ctx, v, b, 0);
   for (const bot of v.bots) if (Math.floor(bot.y) === row) drawBot(ctx, v, bot);
-  if (v.player.respawn <= 0 && Math.floor(v.player.y) === row) drawPlayer(ctx, v);
+  if (v.player.respawn > 0 || Math.floor(v.player.y) !== row) return;
+  // A bomb under the player lies beneath the sprite, sunk to the feet so its lower half shows.
+  // Its fuse is drawn over the sprite so the spark stays visible.
+  for (const b of v.bombs) if (underPlayer(v, b)) drawBombBody(ctx, v, b, FEET_DROP);
+  drawPlayer(ctx, v);
+  for (const b of v.bombs) if (underPlayer(v, b)) drawBombFuse(ctx, v, b, FEET_DROP);
 }
 
-function drawBomb(ctx: CanvasRenderingContext2D, v: SceneView, b: Bomb): void {
+/** True when the player's body overlaps the bomb's tile, as it does for a bomb laid under them. */
+function underPlayer(v: SceneView, b: Bomb): boolean {
+  const p = v.player;
+  if (p.respawn > 0) return false;
+  const r = PLAYER_RADIUS;
+  return (
+    b.tx >= Math.floor(p.x - r) &&
+    b.tx <= Math.floor(p.x + r - 1e-9) &&
+    b.ty >= Math.floor(p.y - r) &&
+    b.ty <= Math.floor(p.y + r - 1e-9)
+  );
+}
+
+/** A bomb lies on its tile (a punched one slides along the floor). `sink` lowers it, in tile units. */
+function drawBomb(ctx: CanvasRenderingContext2D, v: SceneView, b: Bomb, sink: number): void {
+  drawBombBody(ctx, v, b, sink);
+  drawBombFuse(ctx, v, b, sink);
+}
+
+/** The bomb's round body with its glint. */
+function drawBombBody(ctx: CanvasRenderingContext2D, v: SceneView, b: Bomb, sink: number): void {
   const { ts, ox, oy } = v.layout;
-  const lift = b.flight > 0 ? Math.sin(Math.PI * (1 - b.flight / 0.25)) * ts * 0.35 : 0;
   const cx = ox + b.x * ts;
-  const cy = oy + b.y * ts - lift;
+  const cy = oy + (b.y + sink) * ts;
   const r = ts * 0.26;
   const owner = b.owner === 'bot' ? 0.85 : 1;
-  const body = v.palette.bomb;
-  ctx.fillStyle = body;
+  ctx.fillStyle = v.palette.bomb;
   ctx.globalAlpha = owner;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, TAU);
   ctx.fill();
+  // A faint light rim keeps the dark body readable on the dark floor.
+  ctx.strokeStyle = 'rgba(226,232,240,0.35)';
+  ctx.lineWidth = Math.max(1, ts * 0.03);
+  ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,0.22)';
   ctx.beginPath();
   ctx.arc(cx - r * 0.35, cy - r * 0.35, r * 0.28, 0, TAU);
   ctx.fill();
   ctx.globalAlpha = 1;
+}
 
+/** The fuse: a stem curling up from the body, and a spark that flickers faster as the fuse runs down. */
+function drawBombFuse(ctx: CanvasRenderingContext2D, v: SceneView, b: Bomb, sink: number): void {
+  const { ts, ox, oy } = v.layout;
+  const cx = ox + b.x * ts;
+  const cy = oy + (b.y + sink) * ts;
+  const r = ts * 0.26;
+  const body = v.palette.bomb;
   const stemX = cx + r * 0.55;
   const stemY = cy - r * 0.85;
   ctx.strokeStyle = shade(body, 0.35);
@@ -337,8 +359,7 @@ function drawBomb(ctx: CanvasRenderingContext2D, v: SceneView, b: Bomb): void {
   ctx.quadraticCurveTo(stemX, stemY - r * 0.1, stemX + r * 0.3, stemY - r * 0.35);
   ctx.stroke();
 
-  // The spark flickers faster as the fuse runs down; in flight it flickers at a steady rate.
-  const pace = b.flight > 0 ? 8 : 6 + 22 * (1 - Math.max(0, b.fuse) / Math.max(0.01, b.maxFuse));
+  const pace = 6 + 22 * (1 - Math.max(0, b.fuse) / Math.max(0.01, b.maxFuse));
   const pulse = 0.5 + 0.5 * Math.sin(v.time * pace * 2.2);
   const sr = ts * (0.07 + 0.04 * pulse);
   ctx.fillStyle = v.palette.fuse;
@@ -416,7 +437,7 @@ function drawPlayer(ctx: CanvasRenderingContext2D, v: SceneView): void {
   const pal = v.palette;
   if (p.invuln > 0 && Math.floor(v.time * 12) % 2 === 0) return;
   const cx = ox + p.x * ts;
-  const feet = oy + p.y * ts + ts * 0.16;
+  const feet = oy + p.y * ts + ts * FEET_DROP;
   const r = ts * 0.3;
   const swing = Math.sin(p.walk) * r * 0.25;
   const flip = p.facingX < 0 ? -1 : 1;

@@ -7,8 +7,10 @@ export const MAX_SPEED_UPS = 3;
 export const PLAYER_RADIUS = 0.34;
 export const LIVES = 3;
 export const PUNCH_COOLDOWN = 0.35;
-export const THROW_RANGE = 3;
-export const FLIGHT_TIME = 0.25;
+/** Tiles a punched bomb slides along the floor before it stops. */
+export const SLIDE_TILES = 3;
+/** Seconds a punched bomb takes to slide those tiles. */
+export const SLIDE_TIME = 0.15;
 export const FUSE = 2.2;
 export const BOT_FUSE = 2.0;
 export const BLAST_BASE = 2;
@@ -42,20 +44,21 @@ export interface Bomb {
   owner: 'player' | 'bot';
   /** Blast radius in tiles. */
   power: number;
-  /** Seconds left before detonation; only counts down once the bomb has landed. */
+  /** Seconds left before detonation. Counts down from the moment the bomb is laid. */
   fuse: number;
-  /** Fuse length the bomb was started with, used to pace its spark. */
+  /** Fuse length the bomb was laid with, used to pace its spark. */
   maxFuse: number;
-  /** Seconds left in flight; 0 once landed. */
-  flight: number;
-  /** Position in tile units: the flight position while in flight, the tile centre once landed. */
-  x: number;
-  y: number;
-  fromX: number;
-  fromY: number;
-  /** Landing tile. */
+  /** Tile the bomb lies on. */
   tx: number;
   ty: number;
+  /** Drawn position in tile units: the tile centre, or partway along a punch slide. */
+  x: number;
+  y: number;
+  /** Seconds left of the punch slide that carries the bomb to (tx, ty); 0 once it lies still. */
+  slide: number;
+  /** Where the current punch slide started, in tile units. */
+  fromX: number;
+  fromY: number;
   dead: boolean;
 }
 

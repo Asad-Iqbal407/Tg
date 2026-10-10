@@ -11,7 +11,7 @@ import {
 
 export interface BotEnv {
   arena: Arena;
-  /** 1 for tiles that hold a landed bomb. */
+  /** 1 for tiles that hold a live bomb. */
   occupied: Uint8Array;
   rng: Rng;
   /** Lets a bomber drop a bomb on its tile. Returns false when the tile cannot take one. */
@@ -41,8 +41,13 @@ export function stepBot(bot: Bot, env: BotEnv, px: number, py: number, dt: numbe
   }
 
   if (bot.goal < 0 && bot.path.length > 0) {
-    const next = bot.path.shift();
-    if (next !== undefined) {
+    const next = bot.path[0];
+    if (next !== undefined && env.occupied[next]) {
+      // A bomb was laid on the planned route: stop short of it and plan again on the next step.
+      bot.path = [];
+      bot.repath = 0;
+    } else if (next !== undefined) {
+      bot.path.shift();
       bot.goal = next;
       const gx = next % cols;
       const dx = gx + 0.5 - bot.x;
