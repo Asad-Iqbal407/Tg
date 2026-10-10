@@ -799,7 +799,7 @@ export class BombSquadGame extends BaseGame {
   private updateWaves(dt: number): void {
     if (this.spawnQueue.length > 0) {
       this.spawnTimer -= dt;
-      // A due bot stays queued until a spawn point clear of the player is free, never appearing on top of them.
+      // A due bot waits in the queue until a spawn point clear of the player is free.
       const at = this.spawnTimer <= 0 ? this.pickSpawn() : null;
       const kind = this.spawnQueue[0];
       if (at && kind) {
