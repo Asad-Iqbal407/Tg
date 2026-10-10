@@ -11,13 +11,16 @@ export const galaxyGame: GameDefinition = {
   inspiredBy: 'Galaga / Space Shooter',
   width: 540,
   height: 960,
+  viewport: { minWidth: 540, maxWidth: 720, minHeight: 900, maxHeight: 1200 },
+  // Right-drags and mouse steering keep working over the letterbox, so the ship never stops mid-fight.
+  pointerArea: 'stage',
   accent: '#b06bff',
   gradient: ['#b06bff', '#140a2e'],
   controls: [
     ['Arrows / WASD or mouse', 'Fly (weapons fire automatically)'],
-    ['X / B / Shift', 'Bomb — clears enemy fire'],
+    ['Space / X / B / Shift / Right click', 'Bomb — clears enemy fire'],
   ],
-  touchHint: 'Drag anywhere to fly — the ship stays above your finger. Tap BOMB to clear the screen.',
+  touchHint: 'Drag anywhere to fly — the ship moves with your finger. Tap BOMB to clear the screen.',
   touchButtons: [{ action: 'secondary', label: 'BOMB', side: 'right', slot: 0 }],
   scorePerCoin: 600,
   scorePerXp: 120,

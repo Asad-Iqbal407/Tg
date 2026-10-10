@@ -6,6 +6,7 @@ import type { GameServices } from '../types';
 type EnemyKind = 'scout' | 'fighter' | 'tank' | 'kamikaze' | 'boss';
 type Behavior = 'sine' | 'hover' | 'curve' | 'dive' | 'boss';
 type DropKind = 'power' | 'bomb' | 'shield' | 'coin';
+type Point = readonly [number, number];
 
 interface Enemy {
   kind: EnemyKind;
@@ -16,6 +17,7 @@ interface Enemy {
   vy: number;
   hp: number;
   maxHp: number;
+  /** Collision radius of ordinary enemies. The boss collides through BOSS_HIT instead. */
   r: number;
   t: number;
   x0: number;
@@ -30,6 +32,21 @@ interface Enemy {
   dur: number;
   targetY: number;
   heading: number;
+  /** Kamikaze: 0 = descending, 1 = locked and telegraphing, 2 = diving. */
+  stage: number;
+  /** Kamikaze: seconds left in the lock-on telegraph. */
+  lockT: number;
+  /** Kamikaze: unit direction of the dive, fixed at lock-on. */
+  dirX: number;
+  dirY: number;
+  /** Boss: rage level 0-2, reached at 66% and 33% HP. */
+  rage: number;
+  /** Boss: seconds left before the telegraphed volley fires, or 0. */
+  windT: number;
+  /** Boss: pattern of the volley being wound up. */
+  pattern: number;
+  /** Boss: white flash timer after a rage change. */
+  flashT: number;
 }
 
 interface Bullet {
@@ -64,25 +81,187 @@ const ENEMY_STATS: Record<EnemyKind, { hp: number; r: number; points: number }> 
   fighter: { hp: 4, r: 20, points: 250 },
   tank: { hp: 16, r: 32, points: 600 },
   kamikaze: { hp: 2, r: 16, points: 200 },
-  boss: { hp: 160, r: 70, points: 10000 },
+  // The boss takes its HP from bossHp(); its collision comes from BOSS_HIT.
+  boss: { hp: 0, r: 110, points: 10000 },
 };
 
+const ENEMY_COLOR: Record<EnemyKind, string> = {
+  scout: '#ff4d6d',
+  fighter: '#7b5cff',
+  tank: '#4a5568',
+  kamikaze: '#ff9f1c',
+  boss: '#b06bff',
+};
+
+/** Boss collision circles in hull units (the hull is about 220 wide): core, two wings, belly. */
+const BOSS_HIT: readonly { x: number; y: number; r: number }[] = [
+  { x: 0, y: 0, r: 48 },
+  { x: -70, y: -6, r: 36 },
+  { x: 70, y: -6, r: 36 },
+  { x: 0, y: 30, r: 26 },
+];
+
+const BOSS_HULL: readonly Point[] = [
+  [-110, -10],
+  [-70, -50],
+  [70, -50],
+  [110, -10],
+  [80, 30],
+  [30, 46],
+  [-30, 46],
+  [-80, 30],
+];
+const SCOUT_HULL: readonly Point[] = [
+  [0, 18],
+  [14, -10],
+  [0, -4],
+  [-14, -10],
+];
+const FIGHTER_HULL: readonly Point[] = [
+  [0, 22],
+  [10, 4],
+  [24, 8],
+  [20, -12],
+  [6, -6],
+  [0, -18],
+  [-6, -6],
+  [-20, -12],
+  [-24, 8],
+  [-10, 4],
+];
+const TANK_HULL: readonly Point[] = Array.from({ length: 6 }, (_, i): Point => {
+  const a = (i * TAU) / 6 + Math.PI / 6;
+  return [Math.cos(a) * 34, Math.sin(a) * 30];
+});
+const KAMI_HULL: readonly Point[] = Array.from({ length: 8 }, (_, i): Point => {
+  const a = (i * TAU) / 8;
+  const r = i % 2 === 0 ? 18 : 9;
+  return [Math.cos(a) * r, Math.sin(a) * r];
+});
+const SHIP_HULL: readonly Point[] = [
+  [0, -30],
+  [10, -8],
+  [26, 14],
+  [10, 18],
+  [0, 24],
+  [-10, 18],
+  [-26, 14],
+  [-10, -8],
+];
+const SHIP_VIPER: readonly Point[] = [
+  [0, -34],
+  [8, -6],
+  [28, 18],
+  [8, 14],
+  [0, 24],
+  [-8, 14],
+  [-28, 18],
+  [-8, -6],
+];
+const SHIP_TITAN: readonly Point[] = [
+  [0, -28],
+  [16, -14],
+  [32, 8],
+  [30, 22],
+  [10, 18],
+  [0, 26],
+  [-10, 18],
+  [-30, 22],
+  [-32, 8],
+  [-16, -14],
+];
+const SHIP_PHANTOM: readonly Point[] = [
+  [0, -32],
+  [10, -2],
+  [30, -12],
+  [22, 20],
+  [0, 12],
+  [-22, 20],
+  [-30, -12],
+  [-10, -2],
+];
+
+const OUTLINE = '#0b0614';
+const BULLET_RED = '#ff4d6d';
+const BULLET_ORANGE = '#ff9f1c';
+const BULLET_MAGENTA = '#ff4dd2';
+const BULLET_YELLOW = '#ffd23f';
+const NEBULA_COLORS = ['rgba(176,107,255,0.18)', 'rgba(77,217,255,0.14)', 'rgba(255,77,109,0.12)'];
+
 const MAX_WEAPON = 5;
+const SHOT_SPEED = 820;
+/** Seconds a boss should take to fall at the design weapon level. */
+const BOSS_SECONDS = 22;
+/** Expected effective boss damage per second at each weapon level (after spread and range losses). */
+const WEAPON_DPS = [7, 14, 24, 31, 46];
+/** Bosses gain HP per boss index, up to this multiplier. */
+const BOSS_GROWTH_CAP = 2;
+/** Scaling stops growing at this wave, so late waves push through mix rather than raw numbers. */
+const SCALE_WAVE_CAP = 15;
+const WIND_UP = 0.4;
+const OVERDRIVE_SEC = 6;
+const CHAIN_SEC = 1.2;
+/** Enemies only fire while they are at least this far above the ship. */
+const FIRE_CLEARANCE = 220;
+/** Kamikazes lock on once their centre is this far down the screen (on-screen). */
+const KAMI_LOCK_Y = 70;
+const KAMI_LOCK_SEC = 0.35;
+const RAM_PAD = 12;
+const BOSS_RAM_PAD = 8;
+/** Radius of the ship for bullet collisions; drawn as the hitbox marker. */
+const SHIP_HIT = 6;
+/** Mouse steering keeps the ship this far above the cursor so the cursor never covers it. */
+const MOUSE_LIFT = 60;
+
+/** Pick the ship hull for a skin style. */
+function shipHull(style: number): readonly Point[] {
+  if (style === 1) return SHIP_VIPER;
+  if (style === 2) return SHIP_TITAN;
+  if (style === 3) return SHIP_PHANTOM;
+  return SHIP_HULL;
+}
+
+/** Fill and outline a closed polygon in the current transform. */
+function paintPolygon(
+  ctx: CanvasRenderingContext2D,
+  pts: readonly Point[],
+  fill: string,
+  stroke = OUTLINE,
+  lineWidth = 2,
+): void {
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => {
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lineWidth;
+  ctx.stroke();
+}
 
 export class GalaxyGame extends BaseGame {
   private shipX: number;
   private shipY: number;
+  private bank = 0;
+  /** Offset from the ship to the finger when a touch drag started (relative steering). */
+  private touchDrag: { dx: number; dy: number } | null = null;
   private lives: number;
+  private readonly startLives: number;
   private bombs = 2;
   private weapon: number;
   private shield: boolean;
   private invuln = 2;
   private fireT = 0;
+  private overdriveT = 0;
+  private overdriveMax = 1;
   private wave = 0;
   private waveQueue: (() => void)[] = [];
   private spawnT = 0;
   private waveBannerT = 0;
-  private betweenWaves = 1.2;
+  private betweenWaves = 1;
   private chain = 0;
   private chainT = 0;
   private bombFlash = 0;
@@ -96,21 +275,96 @@ export class GalaxyGame extends BaseGame {
   private scroll = 0;
   private readonly speedMul: number;
   private boss: Enemy | null = null;
+  /** Hull scale for the Mothership: 1 on the narrowest layout, up to 1.33 on the widest. */
+  private readonly bossScale: number;
+  private readonly bgGradient: CanvasGradient;
+  /** Radial nebula gradients centred on the origin; drawn translated to each nebula's position. */
+  private readonly nebulae: CanvasGradient[] = [];
+  private readonly engineGlow: CanvasGradient;
 
   constructor(s: GameServices) {
     super(s);
     this.shipX = this.W / 2;
     this.shipY = this.H - 140;
-    this.lives = this.skinParam('lives', 3);
+    this.startLives = this.skinParam('lives', 3);
+    this.lives = this.startLives;
     this.speedMul = this.skinParam('speed', 1);
     this.weapon = clamp(this.skinParam('weapon', 1) + (this.hasBoost('head-start') ? 2 : 0), 1, MAX_WEAPON);
     this.shield = this.hasBoost('shield');
+    this.bossScale = clamp(this.W / 540, 1, 1.33);
+    // Starfield is cosmetic: it draws from the forked RNG so gameplay randomness is untouched.
     for (let i = 0; i < 140; i++)
       this.stars.push({
-        x: this.rng.range(0, this.W),
-        y: this.rng.range(0, this.H),
-        z: this.rng.range(0.2, 1),
+        x: this.fxRng.range(0, this.W),
+        y: this.fxRng.range(0, this.H),
+        z: this.fxRng.range(0.2, 1),
       });
+    this.bgGradient = this.ctx.createLinearGradient(0, 0, 0, this.H);
+    this.bgGradient.addColorStop(0, '#050816');
+    this.bgGradient.addColorStop(1, '#140a2e');
+    for (const color of NEBULA_COLORS) {
+      const g = this.ctx.createRadialGradient(0, 0, 10, 0, 0, 240);
+      g.addColorStop(0, color);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      this.nebulae.push(g);
+    }
+    this.engineGlow = this.ctx.createRadialGradient(0, 0, 2, 0, 0, 26);
+    this.engineGlow.addColorStop(0, this.skinColor('engine', '#ffb703'));
+    this.engineGlow.addColorStop(1, 'rgba(255,120,0,0)');
+  }
+
+  // ------------------------------------------------------------------ scaling
+
+  /** Wave number used for difficulty, capped so late waves stop growing numerically. */
+  private level(): number {
+    return Math.min(this.wave, SCALE_WAVE_CAP);
+  }
+
+  /** Vertical layout scale relative to the 960-px design height. */
+  private band(): number {
+    return this.H / 960;
+  }
+
+  private hpScale(): number {
+    return 1 + (this.level() - 1) * 0.08;
+  }
+
+  /** Boss HP that falls in about BOSS_SECONDS at the player's current weapon level. */
+  private bossHp(): number {
+    const index = Math.floor(this.wave / 5);
+    const dps = WEAPON_DPS[this.weapon - 1] ?? WEAPON_DPS[0] ?? 7;
+    return BOSS_SECONDS * dps * Math.min(BOSS_GROWTH_CAP, 1 + 0.25 * (index - 1));
+  }
+
+  private multiplier(): number {
+    return Math.min(8, 1 + Math.floor(this.chain / 5));
+  }
+
+  private fireInterval(): number {
+    const base = this.weapon >= 5 ? 0.09 : this.weapon >= 3 ? 0.11 : 0.13;
+    return this.overdriveT > 0 ? base * 0.65 : base;
+  }
+
+  private inField(x: number, y: number): boolean {
+    return x >= 0 && x <= this.W && y >= 0 && y <= this.H;
+  }
+
+  /** Whether a circle of radius `rad` at (x, y) touches enemy `e`'s hit shape. */
+  private touches(e: Enemy, x: number, y: number, rad: number): boolean {
+    if (e.kind !== 'boss') {
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const rr = e.r + rad;
+      return dx * dx + dy * dy < rr * rr;
+    }
+    const s = this.bossScale;
+    for (const c of BOSS_HIT) {
+      const dx = e.x + c.x * s - x;
+      const dy = e.y + c.y * s - y;
+      const rr = c.r * s + rad;
+      if (dx * dx + dy * dy < rr * rr) return true;
+    }
+    return false;
   }
 
   // ------------------------------------------------------------------ waves
@@ -120,12 +374,13 @@ export class GalaxyGame extends BaseGame {
     this.waveBannerT = 0;
     this.maxStat('wave', this.wave);
     const w = this.wave;
+    this.spawnT = 0.35;
     if (w % 5 === 0) {
       this.waveQueue = [() => this.spawnBoss()];
       this.audio.play('warning');
       return;
     }
-    const groups = 3 + Math.floor(w / 2);
+    const groups = Math.min(9, 3 + Math.floor(w / 2));
     const q: (() => void)[] = [];
     for (let g = 0; g < groups; g++) {
       const roll = this.rng.next();
@@ -137,16 +392,11 @@ export class GalaxyGame extends BaseGame {
       else q.push(() => this.groupSine());
     }
     this.waveQueue = q;
-    this.spawnT = 0.6;
-  }
-
-  private hpScale(): number {
-    return 1 + (this.wave - 1) * 0.12;
   }
 
   private makeEnemy(kind: EnemyKind, behavior: Behavior, x: number, y: number): Enemy {
     const st = ENEMY_STATS[kind];
-    const hp = Math.ceil(st.hp * (kind === 'boss' ? 1 + this.wave * 0.2 : this.hpScale()));
+    const hp = kind === 'boss' ? this.bossHp() : st.hp * this.hpScale();
     const e: Enemy = {
       kind,
       behavior,
@@ -169,6 +419,14 @@ export class GalaxyGame extends BaseGame {
       dur: 0,
       targetY: 0,
       heading: Math.PI / 2,
+      stage: 0,
+      lockT: 0,
+      dirX: 0,
+      dirY: 1,
+      rage: 0,
+      windT: 0,
+      pattern: 0,
+      flashT: 0,
     };
     this.enemies.push(e);
     return e;
@@ -176,11 +434,11 @@ export class GalaxyGame extends BaseGame {
 
   private groupSine(): void {
     const n = 5 + Math.min(4, Math.floor(this.wave / 3));
-    const x0 = this.rng.range(120, this.W - 120);
+    const x0 = this.rng.range(140, this.W - 140);
     const kind: EnemyKind = this.wave > 3 && this.rng.chance(0.35) ? 'fighter' : 'scout';
     for (let i = 0; i < n; i++) {
       const e = this.makeEnemy(kind, 'sine', x0, -40 - i * 55);
-      e.vy = 150 + this.wave * 6;
+      e.vy = 150 + this.level() * 5;
       e.phase = i * 0.5;
     }
   }
@@ -189,8 +447,9 @@ export class GalaxyGame extends BaseGame {
     const n = 3 + Math.min(3, Math.floor(this.wave / 3));
     for (let i = 0; i < n; i++) {
       const x = ((i + 1) / (n + 1)) * this.W;
-      const e = this.makeEnemy('fighter', 'hover', x, -40 - Math.abs(i - (n - 1) / 2) * 50);
-      e.targetY = 140 + Math.abs(i - (n - 1) / 2) * 40;
+      const offset = Math.abs(i - (n - 1) / 2);
+      const e = this.makeEnemy('fighter', 'hover', x, -40 - offset * 50);
+      e.targetY = (140 + offset * 40) * this.band();
       e.dur = 7 + this.rng.range(0, 2);
     }
   }
@@ -220,7 +479,7 @@ export class GalaxyGame extends BaseGame {
   private groupKamikaze(): void {
     const n = 2 + Math.min(4, Math.floor(this.wave / 3));
     for (let i = 0; i < n; i++) {
-      const e = this.makeEnemy('kamikaze', 'dive', this.rng.range(60, this.W - 60), -40 - i * 70);
+      const e = this.makeEnemy('kamikaze', 'dive', this.rng.range(60, this.W - 60), -40 - i * 50);
       e.vy = 140;
     }
   }
@@ -229,14 +488,14 @@ export class GalaxyGame extends BaseGame {
     const n = this.wave >= 7 ? 2 : 1;
     for (let i = 0; i < n; i++) {
       const e = this.makeEnemy('tank', 'hover', ((i + 1) / (n + 1)) * this.W, -60);
-      e.targetY = 190;
+      e.targetY = 190 * this.band();
       e.dur = 12;
     }
   }
 
   private spawnBoss(): void {
     const e = this.makeEnemy('boss', 'boss', this.W / 2, -120);
-    e.targetY = 170;
+    e.targetY = 170 * this.band();
     this.boss = e;
   }
 
@@ -246,30 +505,34 @@ export class GalaxyGame extends BaseGame {
     this.scroll += dt;
     this.bombFlash = Math.max(0, this.bombFlash - dt);
     this.waveBannerT += dt;
+    this.overdriveT = Math.max(0, this.overdriveT - dt);
     this.chainT -= dt;
-    if (this.chainT <= 0) this.chain = 0;
+    if (this.chainT <= 0 && this.chain > 0) {
+      if (this.chain >= 10) this.texts.add(this.shipX, this.shipY - 60, 'CHAIN LOST', '#ff6b6b', 18);
+      this.chain = 0;
+    }
     for (const s of this.stars) {
       s.y += (40 + 220 * s.z) * dt;
       if (s.y > this.H) {
         s.y -= this.H;
-        s.x = this.rng.range(0, this.W);
+        s.x = this.fxRng.range(0, this.W);
       }
     }
 
     if (!this.dead) this.updateShip(dt);
 
-    // Wave flow
+    // Wave flow: groups trickle in, and the next wave follows quickly once the field is clear.
     if (this.waveQueue.length > 0) {
+      if (this.enemies.length === 0) this.spawnT = Math.min(this.spawnT, 0.35);
       this.spawnT -= dt;
       if (this.spawnT <= 0) {
-        const spawn = this.waveQueue.shift();
-        spawn?.();
-        this.spawnT = Math.max(1.1, 2.6 - this.wave * 0.08);
+        this.waveQueue.shift()?.();
+        this.spawnT = Math.max(1.2, 2.4 - this.wave * 0.07);
       }
     } else if (this.enemies.length === 0 && !this.dead) {
       this.betweenWaves -= dt;
       if (this.betweenWaves <= 0) {
-        this.betweenWaves = 1.6;
+        this.betweenWaves = 1;
         this.nextWave();
       }
     }
@@ -285,21 +548,32 @@ export class GalaxyGame extends BaseGame {
   }
 
   private updateShip(dt: number): void {
-    const speed = 400 * this.speedMul;
     const ptr = this.input.pointer;
+    const speed = 400 * this.speedMul;
+    const prevX = this.shipX;
     const keyAxis = this.input.axisX() !== 0 || this.input.axisY() !== 0;
-    if (keyAxis) ptr.active = false;
-    if (!keyAxis && (ptr.touch ? ptr.down : ptr.active)) {
-      const tx = ptr.x;
-      const ty = ptr.y - (ptr.touch ? 80 : 0);
-      const k = damp(ptr.touch ? 18 : 14, dt);
-      const nx = this.shipX + (tx - this.shipX) * k;
-      const ny = this.shipY + (ty - this.shipY) * k;
+    let target: { x: number; y: number; rate: number } | null = null;
+    if (keyAxis) {
+      // Keys take over from the pointer until the mouse moves again.
+      ptr.active = false;
+      this.touchDrag = null;
+    } else if (ptr.touch) {
+      // Touch steering is relative: the ship keeps the offset it had when the finger went down.
+      if (!ptr.down || ptr.released) this.touchDrag = null;
+      else {
+        if (!this.touchDrag) this.touchDrag = { dx: this.shipX - ptr.x, dy: this.shipY - ptr.y };
+        target = { x: ptr.x + this.touchDrag.dx, y: ptr.y + this.touchDrag.dy, rate: 24 };
+      }
+    } else if (ptr.active && ptr.inside && this.inField(ptr.x, ptr.y)) {
+      // Mouse: hover just above the cursor, so the pointer never covers the ship.
+      target = { x: ptr.x, y: ptr.y - MOUSE_LIFT, rate: 14 };
+    }
+
+    if (target) {
+      const k = damp(target.rate, dt);
       const maxStep = speed * 1.6 * dt;
-      const dx = clamp(nx - this.shipX, -maxStep, maxStep);
-      const dy = clamp(ny - this.shipY, -maxStep, maxStep);
-      this.shipX += dx;
-      this.shipY += dy;
+      this.shipX += clamp((target.x - this.shipX) * k, -maxStep, maxStep);
+      this.shipY += clamp((target.y - this.shipY) * k, -maxStep, maxStep);
     } else {
       let ax = this.input.axisX();
       let ay = this.input.axisY();
@@ -310,16 +584,19 @@ export class GalaxyGame extends BaseGame {
       this.shipX += ax * speed * dt;
       this.shipY += ay * speed * dt;
     }
+    // Keep the ship out of the touch-control band at the bottom, and out of the top quarter so
+    // formations never spawn on top of it.
     this.shipX = clamp(this.shipX, 24, this.W - 24);
-    this.shipY = clamp(this.shipY, 120, this.H - 40);
+    this.shipY = clamp(this.shipY, this.H * 0.25, this.H - 40 - this.insets.bottom);
+    if (dt > 0) this.bank += (clamp((this.shipX - prevX) / dt / 300, -1, 1) - this.bank) * damp(10, dt);
     this.invuln = Math.max(0, this.invuln - dt);
 
     this.fireT -= dt;
     if (this.fireT <= 0) {
       this.fire();
-      this.fireT = this.weapon >= 5 ? 0.09 : this.weapon >= 3 ? 0.11 : 0.13;
+      this.fireT = this.fireInterval();
     }
-    if (this.input.wasPressed('secondary')) this.useBomb();
+    if (this.input.wasPressed('secondary') || this.input.wasPressed('primary')) this.useBomb();
 
     if (this.time % 0.04 < dt) {
       this.particles.emit({
@@ -339,17 +616,19 @@ export class GalaxyGame extends BaseGame {
   private fire(): void {
     const x = this.shipX;
     const y = this.shipY - 26;
+    const od = this.overdriveT > 0;
     const shot = (dx: number, angle: number, dmg = 1) => {
-      const sp = 820;
+      // Heavy centre rounds are white; overdrive lights every round yellow and doubles damage.
+      const color = dmg > 1 ? '#fff' : od ? '#ffe066' : '#9ff';
       this.shots.push({
         x: x + dx,
         y,
-        vx: Math.sin(angle) * sp,
-        vy: -Math.cos(angle) * sp,
+        vx: Math.sin(angle) * SHOT_SPEED,
+        vy: -Math.cos(angle) * SHOT_SPEED,
         r: 4,
-        dmg,
+        dmg: od ? dmg * 2 : dmg,
         alive: true,
-        color: '#9ff',
+        color,
       });
     };
     switch (this.weapon) {
@@ -362,23 +641,23 @@ export class GalaxyGame extends BaseGame {
         break;
       case 3:
         shot(0, 0);
-        shot(-10, -0.12);
-        shot(10, 0.12);
+        shot(-10, -0.06);
+        shot(10, 0.06);
         break;
       case 4:
         shot(-6, 0);
         shot(6, 0);
-        shot(-12, -0.18);
-        shot(12, 0.18);
+        shot(-12, -0.12);
+        shot(12, 0.12);
         break;
       default:
         shot(0, 0, 2);
-        shot(-8, -0.1);
-        shot(8, 0.1);
-        shot(-14, -0.26);
-        shot(14, 0.26);
+        shot(-8, -0.06);
+        shot(8, 0.06);
+        shot(-14, -0.16);
+        shot(14, 0.16);
     }
-    this.audio.play('shoot', { volume: 0.25 });
+    this.audio.play('shoot', { volume: 0.25, pitch: od ? 1.25 : 1 });
   }
 
   private useBomb(): void {
@@ -393,7 +672,7 @@ export class GalaxyGame extends BaseGame {
     for (const b of this.enemyShots) b.alive = false;
     for (const e of this.enemies) {
       if (!e.alive || e.y < -20) continue;
-      this.damage(e, e.kind === 'boss' ? Math.ceil(e.maxHp * 0.08) : 30);
+      this.damage(e, e.kind === 'boss' ? e.maxHp * 0.08 : 30);
     }
   }
 
@@ -402,6 +681,7 @@ export class GalaxyGame extends BaseGame {
       if (!e.alive) continue;
       e.t += dt;
       e.hitT = Math.max(0, e.hitT - dt);
+      e.flashT = Math.max(0, e.flashT - dt);
       const lastX = e.x;
       const lastY = e.y;
       this.moveEnemy(e, dt);
@@ -412,29 +692,30 @@ export class GalaxyGame extends BaseGame {
         if (e.t > 1) e.alive = false;
       }
 
-      // Firing
+      // Firing: only once on screen and well clear of the ship, so shots are never point-blank.
       if (
+        !this.dead &&
         e.y > 20 &&
-        e.y < this.H * 0.75 &&
+        e.y < this.shipY - FIRE_CLEARANCE &&
         e.kind !== 'scout' &&
         e.kind !== 'kamikaze' &&
-        e.kind !== 'boss' &&
-        !this.dead
+        e.kind !== 'boss'
       ) {
         e.fireT -= dt;
         if (e.fireT <= 0) {
-          e.fireT =
-            Math.max(0.7, (e.kind === 'tank' ? 2.4 : 2.0) - this.wave * 0.06) * this.rng.range(0.8, 1.3);
+          const base = e.kind === 'tank' ? 2.4 : 2.0;
+          e.fireT = Math.max(0.8, base - this.wave * 0.05) * this.rng.range(0.8, 1.3);
           const a = Math.atan2(this.shipY - e.y, this.shipX - e.x);
-          const sp = 220 + this.wave * 6;
+          const sp = 220 + 7 * this.level();
           if (e.kind === 'tank')
-            for (let k = -2; k <= 2; k++) this.enemyShot(e.x, e.y + 20, a + k * 0.2, sp, '#ff9f1c');
-          else this.enemyShot(e.x, e.y + 14, a, sp, '#ff4d6d');
+            for (let k = -2; k <= 2; k++) this.enemyShot(e.x, e.y + 20, a + k * 0.2, sp, BULLET_ORANGE);
+          else this.enemyShot(e.x, e.y + 14, a, sp, BULLET_RED);
         }
       }
 
       // Ramming
-      if (!this.dead && this.invuln <= 0 && Math.hypot(e.x - this.shipX, e.y - this.shipY) < e.r + 12) {
+      const pad = e.kind === 'boss' ? BOSS_RAM_PAD : RAM_PAD;
+      if (!this.dead && this.invuln <= 0 && this.touches(e, this.shipX, this.shipY, pad)) {
         if (e.kind !== 'boss') this.damage(e, 99);
         this.hitShip();
       }
@@ -446,7 +727,7 @@ export class GalaxyGame extends BaseGame {
     switch (e.behavior) {
       case 'sine':
         e.y += e.vy * dt;
-        e.x = e.x0 + Math.sin(e.t * 2.2 + e.phase) * 110;
+        e.x = e.x0 + Math.sin(e.t * 2.2 + e.phase) * 100;
         break;
       case 'hover': {
         if (e.t < e.dur) {
@@ -474,27 +755,44 @@ export class GalaxyGame extends BaseGame {
         e.y = v * v * v * c[1] + 3 * v * v * u * c[3] + 3 * v * u * u * c[5] + u * u * u * c[7];
         break;
       }
-      case 'dive': {
-        if (e.t < 1.1) {
-          e.y += e.vy * dt;
-        } else {
-          if (e.phase === 0) {
-            e.phase = 1;
-            const a = Math.atan2(this.shipY - e.y, this.shipX - e.x);
-            const sp = 420 + this.wave * 10;
-            e.vx = Math.cos(a) * sp;
-            e.vy = Math.sin(a) * sp;
-            this.audio.play('whoosh', { volume: 0.4, pitch: 1.6 });
-          }
-          e.x += e.vx * dt;
-          e.y += e.vy * dt;
-        }
+      case 'dive':
+        this.updateKamikaze(e, dt);
         break;
-      }
       case 'boss':
         this.updateBoss(e, dt);
         break;
     }
+  }
+
+  /** Descend until on screen, lock on and telegraph for a moment, then dive along the locked line. */
+  private updateKamikaze(e: Enemy, dt: number): void {
+    if (e.stage === 0) {
+      e.y += e.vy * dt;
+      if (e.y >= KAMI_LOCK_Y) {
+        e.stage = 1;
+        e.lockT = KAMI_LOCK_SEC;
+        const dx = this.shipX - e.x;
+        const dy = this.shipY - e.y;
+        const d = Math.hypot(dx, dy) || 1;
+        e.dirX = dx / d;
+        e.dirY = dy / d;
+        this.audio.play('select', { volume: 0.4, pitch: 0.6 });
+      }
+      return;
+    }
+    if (e.stage === 1) {
+      e.lockT -= dt;
+      if (e.lockT <= 0) {
+        e.stage = 2;
+        const sp = Math.min(540, 420 + 8 * this.level());
+        e.vx = e.dirX * sp;
+        e.vy = e.dirY * sp;
+        this.audio.play('whoosh', { volume: 0.4, pitch: 1.6 });
+      }
+      return;
+    }
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
   }
 
   private updateBoss(e: Enemy, dt: number): void {
@@ -502,28 +800,45 @@ export class GalaxyGame extends BaseGame {
       e.y += (e.targetY - e.y) * damp(1.4, dt);
       return;
     }
-    const rage = e.hp / e.maxHp < 0.33 ? 2 : e.hp / e.maxHp < 0.66 ? 1 : 0;
-    e.x = this.W / 2 + Math.sin(e.t * (0.5 + rage * 0.15)) * (this.W / 2 - 110);
+    const s = this.bossScale;
+    // The sway runs on an accumulated phase, so a rage change alters its speed, never its position.
+    e.phase += dt * (0.5 + e.rage * 0.15);
+    e.x = this.W / 2 + Math.sin(e.phase) * (this.W / 2 - 110 * s);
     e.y = e.targetY + Math.sin(e.t * 1.3) * 20;
+    if (this.dead) return;
+    if (e.windT > 0) {
+      e.windT -= dt;
+      if (e.windT <= 0) this.bossVolley(e);
+      return;
+    }
     e.fireT -= dt;
-    if (e.fireT > 0 || this.dead) return;
-    const pattern = Math.floor(e.t / 4) % 3;
-    if (pattern === 0) {
+    if (e.fireT > 0) return;
+    // Every volley is telegraphed for WIND_UP seconds before it leaves the hull.
+    e.pattern = Math.floor(e.t / 4) % 3;
+    e.windT = WIND_UP;
+    this.audio.play('select', { volume: 0.5, pitch: 0.5 });
+  }
+
+  private bossVolley(e: Enemy): void {
+    const s = this.bossScale;
+    const rage = e.rage;
+    if (e.pattern === 0) {
       // Rotating spiral
       const n = 10 + rage * 4;
       for (let i = 0; i < n; i++)
-        this.enemyShot(e.x, e.y + 30, e.t * 1.7 + (i * TAU) / n, 180 + rage * 30, '#ff4dd2');
+        this.enemyShot(e.x, e.y + 30 * s, e.t * 1.7 + (i * TAU) / n, 180 + rage * 30, BULLET_MAGENTA);
       e.fireT = 0.55 - rage * 0.1;
-    } else if (pattern === 1) {
+    } else if (e.pattern === 1) {
       // Aimed burst
       const a = Math.atan2(this.shipY - e.y, this.shipX - e.x);
-      for (let k = -2; k <= 2; k++) this.enemyShot(e.x, e.y + 40, a + k * 0.12, 300 + rage * 40, '#ff9f1c');
+      for (let k = -2; k <= 2; k++)
+        this.enemyShot(e.x, e.y + 40 * s, a + k * 0.12, 300 + rage * 40, BULLET_ORANGE);
       e.fireT = 0.7 - rage * 0.12;
     } else {
       // Twin cannons fan
       for (const side of [-1, 1]) {
         for (let k = 0; k < 3 + rage; k++)
-          this.enemyShot(e.x + side * 60, e.y + 20, Math.PI / 2 + side * 0.15 * k, 240, '#4dd9ff');
+          this.enemyShot(e.x + side * 60 * s, e.y + 44 * s, Math.PI / 2 + side * 0.15 * k, 240, BULLET_YELLOW);
       }
       e.fireT = 0.45 - rage * 0.06;
     }
@@ -554,10 +869,7 @@ export class GalaxyGame extends BaseGame {
       }
       for (const e of this.enemies) {
         if (!e.alive || e.y < -10) continue;
-        const dx = e.x - b.x;
-        const dy = e.y - b.y;
-        const rr = e.r + b.r;
-        if (dx * dx + dy * dy < rr * rr) {
+        if (this.touches(e, b.x, b.y, b.r)) {
           b.alive = false;
           this.damage(e, b.dmg);
           this.particles.emit({
@@ -584,7 +896,7 @@ export class GalaxyGame extends BaseGame {
       if (!this.dead && this.invuln <= 0) {
         const dx = b.x - this.shipX;
         const dy = b.y - this.shipY;
-        if (dx * dx + dy * dy < (b.r + 6) ** 2) {
+        if (dx * dx + dy * dy < (b.r + SHIP_HIT) ** 2) {
           b.alive = false;
           this.hitShip();
         }
@@ -593,20 +905,43 @@ export class GalaxyGame extends BaseGame {
     this.enemyShots = this.enemyShots.filter((b) => b.alive);
   }
 
+  /** The boss escalates at 66% and 33% HP: a power-up drop, a rage ring, a pause and a bullet wipe. */
+  private bossThreshold(e: Enemy): void {
+    const frac = e.hp / e.maxHp;
+    const level = frac <= 0.33 ? 2 : frac <= 0.66 ? 1 : 0;
+    const s = this.bossScale;
+    while (e.rage < level) {
+      e.rage++;
+      this.drops.push({ kind: 'power', x: e.x, y: e.y + 30 * s, vy: 90, alive: true });
+      e.fireT = Math.max(e.fireT, 0.6);
+      e.flashT = 0.5;
+      this.shake.add(0.5);
+      this.rings.push({ x: e.x, y: e.y, r: e.r * 0.6, life: 0.6, color: BULLET_MAGENTA });
+      for (const b of this.enemyShots) if (Math.hypot(b.x - e.x, b.y - e.y) < 160) b.alive = false;
+      this.texts.add(this.W / 2, this.H * 0.3, e.rage === 2 ? 'RAGE II' : 'RAGE I', BULLET_MAGENTA, 26);
+      this.audio.play('warning', { volume: 0.6 });
+    }
+  }
+
   private damage(e: Enemy, amount: number): void {
     if (!e.alive) return;
     e.hp -= amount;
     e.hitT = 0.08;
+    if (e.kind === 'boss' && e.hp > 0) this.bossThreshold(e);
     if (e.hp > 0) return;
     e.alive = false;
+    const prevMult = this.multiplier();
     this.chain++;
-    this.chainT = 1.2;
-    const mult = Math.min(8, 1 + Math.floor(this.chain / 5));
-    const pts = Math.round(e.points * (1 + (this.wave - 1) * 0.05)) * mult;
+    this.chainT = CHAIN_SEC;
+    const mult = this.multiplier();
+    const pts = Math.round(e.points * (1 + (this.level() - 1) * 0.05)) * mult;
     this.score += pts;
     this.addStat('enemies');
     const big = e.kind === 'boss' || e.kind === 'tank';
-    this.audio.play(big ? 'bomb' : 'explode', { volume: big ? 1 : 0.5 });
+    this.audio.play(big ? 'bomb' : 'explode', {
+      volume: big ? 1 : 0.5,
+      pitch: 0.9 + this.fxRng.next() * 0.2,
+    });
     this.shake.add(big ? 0.7 : 0.12);
     this.particles.emit({
       x: e.x,
@@ -617,9 +952,25 @@ export class GalaxyGame extends BaseGame {
       size: big ? 6 : 4,
       colors: ['#fff', '#ffd166', '#ff6b35', '#ef476f'],
     });
+    // Tumbling hull shards in the enemy's own colour
+    this.particles.emit({
+      x: e.x,
+      y: e.y,
+      count: big ? 8 : 4,
+      speed: 300,
+      speedVar: 0.5,
+      life: 0.7,
+      size: 5,
+      shape: 'square',
+      gravity: 260,
+      colors: [ENEMY_COLOR[e.kind], '#fff'],
+    });
     this.rings.push({ x: e.x, y: e.y, r: e.r * 0.5, life: 0.4, color: '#ffd166' });
+    this.rings.push({ x: e.x, y: e.y, r: e.r * 0.3, life: 0.12, color: '#fff' });
+    if (big) this.rings.push({ x: e.x, y: e.y, r: e.r * 0.9, life: 0.6, color: ENEMY_COLOR[e.kind] });
     if (mult > 1 || big)
       this.texts.add(e.x, e.y - 20, mult > 1 ? `${pts} x${mult}` : `${pts}`, '#ffd23f', big ? 28 : 18);
+    if (mult > prevMult) this.texts.add(e.x, e.y + 26, `CHAIN x${mult}!`, BULLET_ORANGE, 16);
     if (e.kind === 'boss') {
       this.boss = null;
       this.addStat('bosses');
@@ -633,6 +984,10 @@ export class GalaxyGame extends BaseGame {
         });
       this.drops.push({ kind: 'power', x: e.x, y: e.y, vy: 90, alive: true });
       this.drops.push({ kind: 'bomb', x: e.x + 40, y: e.y, vy: 90, alive: true });
+      if (this.lives < this.startLives) {
+        this.lives++;
+        this.texts.add(this.W / 2, this.H / 2 - 60, '1UP', '#7CFC00', 30);
+      }
       this.texts.add(this.W / 2, this.H / 2 - 100, 'BOSS DEFEATED!', '#7CFC00', 36);
       return;
     }
@@ -701,17 +1056,18 @@ export class GalaxyGame extends BaseGame {
         this.audio.play('coin', { volume: 0.5 });
         break;
       case 'power':
-        if (this.weapon < MAX_WEAPON) this.weapon++;
-        else this.score += 2000;
         this.addStat('powerups');
         this.audio.play('powerup');
-        this.texts.add(
-          this.shipX,
-          this.shipY - 50,
-          this.weapon < MAX_WEAPON ? 'POWER UP!' : 'MAX POWER +2000',
-          '#4dd9ff',
-          22,
-        );
+        if (this.weapon < MAX_WEAPON) {
+          this.weapon++;
+          this.texts.add(this.shipX, this.shipY - 50, 'POWER UP!', '#4dd9ff', 22);
+        } else {
+          // Surplus power becomes Overdrive: faster fire and double damage, lengthened by Overclock.
+          this.overdriveMax = this.powerTime(OVERDRIVE_SEC);
+          this.overdriveT = this.overdriveMax;
+          this.score += 300;
+          this.texts.add(this.shipX, this.shipY - 50, 'OVERDRIVE!', '#ffd23f', 22);
+        }
         break;
       case 'bomb':
         this.bombs = Math.min(5, this.bombs + 1);
@@ -719,9 +1075,15 @@ export class GalaxyGame extends BaseGame {
         this.texts.add(this.shipX, this.shipY - 50, '+1 BOMB', '#ff9f1c', 22);
         break;
       case 'shield':
-        this.shield = true;
+        if (this.shield) {
+          // Already shielded: the spare becomes a bomb instead of being wasted.
+          this.bombs = Math.min(5, this.bombs + 1);
+          this.texts.add(this.shipX, this.shipY - 50, '+1 BOMB', '#ff9f1c', 22);
+        } else {
+          this.shield = true;
+          this.texts.add(this.shipX, this.shipY - 50, 'SHIELD', '#7cf', 22);
+        }
         this.audio.play('powerup');
-        this.texts.add(this.shipX, this.shipY - 50, 'SHIELD', '#7cf', 22);
         break;
     }
   }
@@ -735,23 +1097,10 @@ export class GalaxyGame extends BaseGame {
     this.drawSpace();
     for (const d of this.drops) this.drawDrop(d);
     for (const e of this.enemies) this.drawEnemy(e);
-    for (const b of this.shots) {
-      ctx.fillStyle = b.color;
-      fillRoundRect(ctx, b.x - 2.5, b.y - 9, 5, 18, 2.5, b.dmg > 1 ? '#fff' : b.color);
-    }
+    for (const b of this.shots) this.drawShot(b);
     this.particles.render(ctx);
     if (!this.dead && !(this.invuln > 0 && Math.floor(this.time * 15) % 2 === 0))
       this.drawShip(this.shipX, this.shipY);
-    for (const b of this.enemyShots) {
-      ctx.fillStyle = b.color;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r * 0.45, 0, TAU);
-      ctx.fill();
-    }
     for (const r of this.rings) {
       ctx.globalAlpha = Math.max(0, r.life * 2);
       ctx.strokeStyle = r.color;
@@ -762,31 +1111,31 @@ export class GalaxyGame extends BaseGame {
     }
     ctx.globalAlpha = 1;
     this.texts.render(ctx);
+    // Enemy fire goes last, so it is never hidden behind player shots, rings or popups.
+    for (const b of this.enemyShots) this.drawEnemyShot(b);
     ctx.restore();
     if (this.bombFlash > 0 && !this.services.reducedMotion) {
       ctx.fillStyle = `rgba(255,255,255,${this.bombFlash})`;
       ctx.fillRect(0, 0, this.W, this.H);
     }
-    this.drawHud();
+    if (!this.services.preview) this.drawHud();
   }
 
   private drawSpace(): void {
     const ctx = this.ctx;
-    const g = ctx.createLinearGradient(0, 0, 0, this.H);
-    g.addColorStop(0, '#050816');
-    g.addColorStop(1, '#140a2e');
-    ctx.fillStyle = g;
+    ctx.fillStyle = this.bgGradient;
     ctx.fillRect(-20, -20, this.W + 40, this.H + 40);
     // Drifting nebulae
-    for (let i = 0; i < 3; i++) {
-      const y = ((this.scroll * 18 + i * 420) % (this.H + 600)) - 300;
-      const x = hash1(i + Math.floor((this.scroll * 18 + i * 420) / (this.H + 600)) * 7) * this.W;
-      const colors = ['rgba(176,107,255,0.18)', 'rgba(77,217,255,0.14)', 'rgba(255,77,109,0.12)'];
-      const ng = ctx.createRadialGradient(x, y, 10, x, y, 240);
-      ng.addColorStop(0, colors[i] as string);
-      ng.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = ng;
-      ctx.fillRect(x - 240, y - 240, 480, 480);
+    const cycle = this.H + 600;
+    for (let i = 0; i < this.nebulae.length; i++) {
+      const travel = this.scroll * 18 + i * 420;
+      const x = hash1(i + Math.floor(travel / cycle) * 7) * this.W;
+      const y = (travel % cycle) - 300;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.fillStyle = this.nebulae[i] ?? this.bgGradient;
+      ctx.fillRect(-240, -240, 480, 480);
+      ctx.restore();
     }
     for (const s of this.stars) {
       ctx.globalAlpha = 0.3 + s.z * 0.7;
@@ -797,70 +1146,60 @@ export class GalaxyGame extends BaseGame {
     ctx.globalAlpha = 1;
   }
 
+  private drawShot(b: Bullet): void {
+    const ctx = this.ctx;
+    // Player fire is translucent so it never hides enemy rounds.
+    ctx.globalAlpha = 0.55;
+    fillRoundRect(ctx, b.x - 2, b.y - 9, 4, 18, 2, b.color);
+    ctx.globalAlpha = 1;
+  }
+
+  /** Warm, outlined rounds with a glow, so they read at phone scale against any background. */
+  private drawEnemyShot(b: Bullet): void {
+    const ctx = this.ctx;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r + 4, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.fillStyle = b.color;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = OUTLINE;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r * 0.4, 0, TAU);
+    ctx.fill();
+  }
+
   private drawShip(x: number, y: number): void {
     const ctx = this.ctx;
     const body = this.skinColor('body', '#4dd9ff');
     const accent = this.skinColor('accent', '#ffffff');
-    const style = this.skinParam('style', 0);
+    const hull = shipHull(this.skinParam('style', 0));
+    // Engine glow, pulsing with the flame
+    ctx.save();
+    ctx.translate(x, y + 26);
+    ctx.globalAlpha = 0.6 + 0.4 * Math.sin(this.time * 40);
+    ctx.fillStyle = this.engineGlow;
+    ctx.fillRect(-30, -26, 60, 52);
+    ctx.restore();
     ctx.save();
     ctx.translate(x, y);
-    const tilt = clamp(this.input.axisX(), -1, 1) * 0.12;
-    ctx.rotate(tilt);
-    // Engine glow
-    const eg = ctx.createRadialGradient(0, 26, 2, 0, 26, 26 + Math.sin(this.time * 40) * 4);
-    eg.addColorStop(0, this.skinColor('engine', '#ffb703'));
-    eg.addColorStop(1, 'rgba(255,120,0,0)');
-    ctx.fillStyle = eg;
-    ctx.fillRect(-30, 6, 60, 50);
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    if (style === 1) {
-      // Viper: needle hull with swept wings
-      ctx.moveTo(0, -34);
-      ctx.lineTo(8, -6);
-      ctx.lineTo(28, 18);
-      ctx.lineTo(8, 14);
-      ctx.lineTo(0, 24);
-      ctx.lineTo(-8, 14);
-      ctx.lineTo(-28, 18);
-      ctx.lineTo(-8, -6);
-    } else if (style === 2) {
-      // Titan: broad armoured hull
-      ctx.moveTo(0, -28);
-      ctx.lineTo(16, -14);
-      ctx.lineTo(32, 8);
-      ctx.lineTo(30, 22);
-      ctx.lineTo(10, 18);
-      ctx.lineTo(0, 26);
-      ctx.lineTo(-10, 18);
-      ctx.lineTo(-30, 22);
-      ctx.lineTo(-32, 8);
-      ctx.lineTo(-16, -14);
-    } else if (style === 3) {
-      // Phantom: forward-swept stealth wing
-      ctx.moveTo(0, -32);
-      ctx.lineTo(10, -2);
-      ctx.lineTo(30, -12);
-      ctx.lineTo(22, 20);
-      ctx.lineTo(0, 12);
-      ctx.lineTo(-22, 20);
-      ctx.lineTo(-30, -12);
-      ctx.lineTo(-10, -2);
-    } else {
-      ctx.moveTo(0, -30);
-      ctx.lineTo(10, -8);
-      ctx.lineTo(26, 14);
-      ctx.lineTo(10, 18);
-      ctx.lineTo(0, 24);
-      ctx.lineTo(-10, 18);
-      ctx.lineTo(-26, 14);
-      ctx.lineTo(-10, -8);
+    ctx.rotate(this.bank * 0.2);
+    if (this.overdriveT > 0) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(255,210,63,${0.14 + 0.08 * Math.sin(this.time * 14)})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, 40, 0, TAU);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
     }
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    paintPolygon(ctx, hull, body, accent, 2);
     ctx.fillStyle = '#0b1d3a';
     ctx.beginPath();
     ctx.ellipse(0, -6, 5, 10, 0, 0, TAU);
@@ -879,29 +1218,38 @@ export class GalaxyGame extends BaseGame {
       ctx.fillStyle = 'rgba(120,200,255,0.1)';
       ctx.fill();
     }
-    // Hitbox indicator
-    ctx.fillStyle = '#fff';
+    // Hitbox marker at the real collision radius, so near misses look like near misses.
     ctx.beginPath();
-    ctx.arc(x, y, 3, 0, TAU);
+    ctx.arc(x, y, SHIP_HIT, 0, TAU);
+    ctx.fillStyle = '#fff';
     ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = OUTLINE;
+    ctx.stroke();
   }
 
   private drawEnemy(e: Enemy): void {
+    if (e.kind === 'boss') {
+      this.drawBoss(e);
+      return;
+    }
     const ctx = this.ctx;
+    const base = ENEMY_COLOR[e.kind];
+    const flash = e.hitT > 0;
+    const body = flash ? shade(base, 0.45) : base;
     ctx.save();
     ctx.translate(e.x, e.y);
-    const flash = e.hitT > 0;
+    // Soft halo so silhouettes read against the nebulae
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = base;
+    ctx.beginPath();
+    ctx.arc(0, 0, e.r * 1.5, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
     switch (e.kind) {
       case 'scout': {
         ctx.rotate(e.heading - Math.PI / 2);
-        ctx.fillStyle = flash ? shade('#ff4d6d', 0.45) : '#ff4d6d';
-        ctx.beginPath();
-        ctx.moveTo(0, 18);
-        ctx.lineTo(14, -10);
-        ctx.lineTo(0, -4);
-        ctx.lineTo(-14, -10);
-        ctx.closePath();
-        ctx.fill();
+        paintPolygon(ctx, SCOUT_HULL, body);
         ctx.fillStyle = '#ffd6de';
         ctx.beginPath();
         ctx.arc(0, 2, 4, 0, TAU);
@@ -909,20 +1257,7 @@ export class GalaxyGame extends BaseGame {
         break;
       }
       case 'fighter': {
-        ctx.fillStyle = flash ? shade('#7b5cff', 0.45) : '#7b5cff';
-        ctx.beginPath();
-        ctx.moveTo(0, 22);
-        ctx.lineTo(10, 4);
-        ctx.lineTo(24, 8);
-        ctx.lineTo(20, -12);
-        ctx.lineTo(6, -6);
-        ctx.lineTo(0, -18);
-        ctx.lineTo(-6, -6);
-        ctx.lineTo(-20, -12);
-        ctx.lineTo(-24, 8);
-        ctx.lineTo(-10, 4);
-        ctx.closePath();
-        ctx.fill();
+        paintPolygon(ctx, FIGHTER_HULL, body);
         ctx.fillStyle = '#7CFC00';
         ctx.beginPath();
         ctx.arc(0, 2, 5, 0, TAU);
@@ -930,76 +1265,126 @@ export class GalaxyGame extends BaseGame {
         break;
       }
       case 'tank': {
-        ctx.fillStyle = flash ? shade('#4a5568', 0.45) : '#4a5568';
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const a = (i * TAU) / 6 + Math.PI / 6;
-          ctx.lineTo(Math.cos(a) * 34, Math.sin(a) * 30);
-        }
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = '#ff9f1c';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        ctx.fillStyle = '#ff9f1c';
+        paintPolygon(ctx, TANK_HULL, body, BULLET_ORANGE, 3);
+        ctx.fillStyle = BULLET_ORANGE;
         ctx.beginPath();
         ctx.arc(0, 0, 10 + Math.sin(this.time * 6) * 2, 0, TAU);
         ctx.fill();
         fillRoundRect(ctx, -26, 14, 10, 16, 3, '#2d3748');
         fillRoundRect(ctx, 16, 14, 10, 16, 3, '#2d3748');
-        progressBar(ctx, -26, -42, 52, 5, e.hp / e.maxHp, '#ff9f1c');
+        progressBar(ctx, -26, -42, 52, 5, e.hp / e.maxHp, BULLET_ORANGE);
         break;
       }
       case 'kamikaze': {
-        ctx.rotate(e.phase === 1 ? e.heading - Math.PI / 2 : this.time * 8);
-        ctx.fillStyle = flash ? shade('#ff9f1c', 0.45) : '#ff9f1c';
-        ctx.beginPath();
-        for (let i = 0; i < 8; i++) {
-          const a = (i * TAU) / 8;
-          const r = i % 2 === 0 ? 18 : 9;
-          ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        if (e.stage === 1) {
+          // Telegraph: a dashed line along the locked dive path.
+          ctx.strokeStyle = 'rgba(255,77,109,0.8)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 8]);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(e.dirX * 600, e.dirY * 600);
+          ctx.stroke();
+          ctx.setLineDash([]);
         }
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#ff4d6d';
+        ctx.rotate(e.stage === 2 ? e.heading - Math.PI / 2 : this.time * 8);
+        const blink = e.stage === 1 && Math.floor(this.time * 14) % 2 === 0;
+        paintPolygon(ctx, KAMI_HULL, blink ? '#fff' : body);
+        ctx.fillStyle = BULLET_RED;
         ctx.beginPath();
         ctx.arc(0, 0, 5, 0, TAU);
         ctx.fill();
         break;
       }
-      case 'boss': {
-        const body = flash ? shade('#3b1f5c', 0.45) : '#3b1f5c';
-        ctx.fillStyle = body;
+    }
+    ctx.restore();
+  }
+
+  private drawBoss(e: Enemy): void {
+    const ctx = this.ctx;
+    const s = this.bossScale;
+    const enraged = e.rage >= 2;
+    const hot = e.hitT > 0 || (e.flashT > 0 && Math.floor(this.time * 20) % 2 === 0);
+    const hull = enraged ? '#5a1b4a' : '#3b1f5c';
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.scale(s, s);
+    if (e.windT > 0) this.drawBossWarning(e);
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = enraged ? BULLET_RED : '#b06bff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 130, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    paintPolygon(ctx, BOSS_HULL, hot ? shade(hull, 0.45) : hull, '#b06bff', 3);
+    if (e.rage >= 1) {
+      // Hull cracks open at 66% and 33% HP
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-44, -30);
+      ctx.lineTo(-24, -14);
+      ctx.lineTo(-36, -2);
+      ctx.lineTo(-18, 12);
+      ctx.moveTo(40, -36);
+      ctx.lineTo(26, -20);
+      ctx.lineTo(34, -6);
+      if (e.rage >= 2) {
+        ctx.moveTo(-70, 0);
+        ctx.lineTo(-56, 14);
+        ctx.moveTo(66, 10);
+        ctx.lineTo(54, 26);
+        ctx.lineTo(62, 38);
+      }
+      ctx.stroke();
+    }
+    for (const side of [-1, 1]) {
+      fillRoundRect(ctx, side * 60 - 10, 16, 20, 30, 5, '#22163a');
+      const lit = e.windT > 0 && e.pattern === 2;
+      ctx.fillStyle = lit ? BULLET_YELLOW : '#4dd9ff';
+      ctx.beginPath();
+      ctx.arc(side * 60, 44, lit ? 8 : 5, 0, TAU);
+      ctx.fill();
+    }
+    const pulse = Math.sin(this.time * (enraged ? 9 : 5));
+    ctx.fillStyle = enraged ? BULLET_RED : BULLET_MAGENTA;
+    ctx.beginPath();
+    ctx.arc(0, 0, 30 + pulse * 4, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** Wind-up telegraph for the next volley, in hull units (called inside the boss transform). */
+  private drawBossWarning(e: Enemy): void {
+    const ctx = this.ctx;
+    const s = this.bossScale;
+    const p = 1 - e.windT / WIND_UP;
+    ctx.save();
+    ctx.globalAlpha = 0.3 + 0.6 * p;
+    if (e.pattern === 0) {
+      ctx.strokeStyle = BULLET_MAGENTA;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 30, 40 + 60 * p, 0, TAU);
+      ctx.stroke();
+    } else if (e.pattern === 1) {
+      ctx.strokeStyle = BULLET_ORANGE;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 10]);
+      ctx.beginPath();
+      ctx.moveTo(0, 40);
+      ctx.lineTo((this.shipX - e.x) / s, (this.shipY - e.y) / s);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = BULLET_YELLOW;
+      for (const side of [-1, 1]) {
         ctx.beginPath();
-        ctx.moveTo(-110, -10);
-        ctx.lineTo(-70, -50);
-        ctx.lineTo(70, -50);
-        ctx.lineTo(110, -10);
-        ctx.lineTo(80, 30);
-        ctx.lineTo(30, 46);
-        ctx.lineTo(-30, 46);
-        ctx.lineTo(-80, 30);
-        ctx.closePath();
+        ctx.arc(side * 60, 44, 6 + 8 * p, 0, TAU);
         ctx.fill();
-        ctx.strokeStyle = '#b06bff';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        for (const side of [-1, 1]) {
-          fillRoundRect(ctx, side * 60 - 10, 16, 20, 30, 5, '#22163a');
-          ctx.fillStyle = '#4dd9ff';
-          ctx.beginPath();
-          ctx.arc(side * 60, 44, 5, 0, TAU);
-          ctx.fill();
-        }
-        const core = ctx.createRadialGradient(0, 0, 4, 0, 0, 34);
-        core.addColorStop(0, '#fff');
-        core.addColorStop(0.4, '#ff4dd2');
-        core.addColorStop(1, 'rgba(255,77,210,0)');
-        ctx.fillStyle = core;
-        ctx.beginPath();
-        ctx.arc(0, 0, 30 + Math.sin(this.time * 5) * 4, 0, TAU);
-        ctx.fill();
-        break;
       }
     }
     ctx.restore();
@@ -1026,21 +1411,27 @@ export class GalaxyGame extends BaseGame {
 
   private drawHud(): void {
     const ctx = this.ctx;
-    hudPill(ctx, 12, 12, 220, 40);
-    text(ctx, Math.floor(this.score).toLocaleString('en-US'), 30, 33, { size: 22 });
-    if (this.chain >= 5)
-      text(ctx, `x${Math.min(8, 1 + Math.floor(this.chain / 5))}`, 222, 33, {
-        size: 18,
-        align: 'right',
-        color: '#ffd23f',
-      });
-    hudPill(ctx, this.W - 132, 12, 120, 40);
-    drawCoin(ctx, this.W - 108, 32, 11);
-    text(ctx, `${this.coins}`, this.W - 90, 33, { size: 20 });
-    // Lives and bombs
+    const W = this.W;
+    const { top, right, bottom, left } = this.insets;
+    // Bottom row sits above touch controls; the top row starts below them.
+    const row = this.H - 31 - bottom;
+
+    hudPill(ctx, 12 + left, 12 + top, 220, 40);
+    text(ctx, Math.floor(this.score).toLocaleString('en-US'), 30 + left, 33 + top, { size: 22 });
+    hudPill(ctx, W - 132 - right, 12 + top, 120, 40);
+    drawCoin(ctx, W - 108 - right, 32 + top, 11);
+    text(ctx, `${this.coins}`, W - 90 - right, 33 + top, { size: 20 });
+    if (this.chain >= 2) this.drawChain(12 + left, 60 + top);
+
+    if (this.boss) {
+      progressBar(ctx, 12 + left, 96 + top, W - 24 - left - right, 10, this.boss.hp / this.boss.maxHp, '#ff4dd2');
+      text(ctx, 'MOTHERSHIP', W / 2, 118 + top, { size: 12, align: 'center', color: '#ffb3ec' });
+    }
+
+    // Lives (bottom left)
     for (let i = 0; i < Math.max(0, this.lives); i++) {
       ctx.save();
-      ctx.translate(26 + i * 28, this.H - 30);
+      ctx.translate(26 + left + i * 28, row);
       ctx.scale(0.5, 0.5);
       ctx.fillStyle = this.skinColor('body', '#4dd9ff');
       ctx.beginPath();
@@ -1052,41 +1443,38 @@ export class GalaxyGame extends BaseGame {
       ctx.fill();
       ctx.restore();
     }
+    // Bombs (bottom right)
     for (let i = 0; i < this.bombs; i++) {
+      const bx = W - 26 - right - i * 26;
       ctx.fillStyle = '#ff9f1c';
       ctx.beginPath();
-      ctx.arc(this.W - 26 - i * 26, this.H - 30, 9, 0, TAU);
+      ctx.arc(bx, row, 9, 0, TAU);
       ctx.fill();
-      text(ctx, 'B', this.W - 26 - i * 26, this.H - 29, {
-        size: 11,
-        align: 'center',
-        color: '#3a1a00',
-        stroke: null,
-      });
+      text(ctx, 'B', bx, row + 1, { size: 11, align: 'center', color: '#3a1a00', stroke: null });
     }
-    // Weapon level
-    hudPill(ctx, this.W / 2 - 70, this.H - 48, 140, 34);
-    text(ctx, 'PWR', this.W / 2 - 54, this.H - 31, { size: 13, color: '#9ff' });
+    // Weapon level (bottom centre)
+    hudPill(ctx, W / 2 - 70, row - 17, 140, 34);
+    text(ctx, 'PWR', W / 2 - 54, row, { size: 13, color: '#9ff' });
     for (let i = 0; i < MAX_WEAPON; i++) {
       fillRoundRect(
         ctx,
-        this.W / 2 - 18 + i * 16,
-        this.H - 38,
+        W / 2 - 18 + i * 16,
+        row - 7,
         12,
         14,
         3,
         i < this.weapon ? '#4dd9ff' : 'rgba(255,255,255,0.15)',
       );
     }
-    if (this.boss) {
-      progressBar(ctx, 40, 64, this.W - 80, 10, this.boss.hp / this.boss.maxHp, '#ff4dd2');
-      text(ctx, 'MOTHERSHIP', this.W / 2, 86, { size: 13, align: 'center', color: '#ffb3ec' });
+    if (this.overdriveT > 0) {
+      text(ctx, 'OVERDRIVE', W / 2, row - 34, { size: 12, align: 'center', color: '#ffd23f' });
+      progressBar(ctx, W / 2 - 70, row - 28, 140, 6, this.overdriveT / this.overdriveMax, '#ffd23f');
     }
     if (this.waveBannerT < 2.2 && this.wave > 0) {
       const isBoss = this.wave % 5 === 0;
       banner(
         ctx,
-        this.W,
+        W,
         this.H,
         isBoss ? 'WARNING!' : `WAVE ${this.wave}`,
         isBoss ? 'Mothership approaching' : 'Get ready',
@@ -1094,5 +1482,16 @@ export class GalaxyGame extends BaseGame {
         isBoss ? '#ff4d6d' : '#4dd9ff',
       );
     }
+  }
+
+  /** Chain meter under the score: the count, a bar that drains until the chain breaks, and the multiplier. */
+  private drawChain(x: number, y: number): void {
+    const ctx = this.ctx;
+    const mult = this.multiplier();
+    const hot = mult > 1;
+    hudPill(ctx, x, y, 220, 26);
+    text(ctx, `CHAIN ${this.chain}`, x + 12, y + 13, { size: 13, color: hot ? '#ffd23f' : '#cfe8ff' });
+    progressBar(ctx, x + 104, y + 10, 84, 6, this.chainT / CHAIN_SEC, hot ? '#ffd23f' : '#9ff');
+    text(ctx, `x${mult}`, x + 208, y + 13, { size: 15, align: 'right', color: '#ffd23f' });
   }
 }
