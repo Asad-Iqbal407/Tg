@@ -70,6 +70,8 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   // PD on the chassis angle against the ground under the car: brake pitches nose-down, gas nose-up.
   const err = wrap(p.angle - p.groundAngle(p.x));
   const u = -(6 * err + 3.5 * w);
+  (globalThis as unknown as { __r?: number }).__r = st.airRot;
+  (globalThis as unknown as { __dbg?: string[] }).__dbg?.push(`x=${p.x.toFixed(1)} a=${p.angle.toFixed(4)} err=${err.toFixed(4)} w=${w.toFixed(4)} u=${u.toFixed(3)} airRot=${st.airRot.toFixed(3)} onJump=${onJump}`);
   if (u > 0.5) return { gas: false, brake: true };
   if (u < -0.5) return { gas: true, brake: false };
   return { gas: false, brake: false };

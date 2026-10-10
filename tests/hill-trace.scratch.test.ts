@@ -10,20 +10,20 @@ it('trace', () => {
   const r = runBot({
     seed: Number(process.env.SEED ?? 1),
     skinId: process.env.SKIN ?? 'car-jeep',
-    mode: (process.env.MODE ?? 'flip') as 'flip',
+    mode: (process.env.BOT_MODE ?? 'flip') as 'flip',
     flips: 1,
     seconds: Number(process.env.SECS ?? 60),
     trace: (p, step, want) => {
       if (p.airT > 0 && prevAir === 0) {
         startAngle = p.angle;
         airRotMax = 0;
-        out.push(`--- jump at step ${step} x=${p.x.toFixed(0)} speed=${p.speed.toFixed(0)} angle0=${p.angle.toFixed(2)} slope=${p.groundAngle(p.x).toFixed(2)}`);
+        out.push(`--- jump at step ${step} x=${p.x.toFixed(0)} speed=${p.speed.toFixed(0)} angle0=${p.angle.toFixed(2)}`);
       }
       if (p.airT > 0) {
         const rot = p.angle - startAngle;
-        out.push(`  s=${step} t=${p.airT.toFixed(2)} ang=${p.angle.toFixed(2)} rot=${rot.toFixed(2)} w=${p.angularVelocity.toFixed(2)} y=${p.y.toFixed(0)} gas=${JSON.stringify(want)} airT=${p.airT} vx=${p.vx.toFixed(0)}`);
+        out.push(`  s=${step} t=${p.airT.toFixed(2)} ang=${p.angle.toFixed(2)} rot=${rot.toFixed(2)} w=${p.angularVelocity.toFixed(2)} y=${p.y.toFixed(0)} gas=${JSON.stringify(want)} airT=${p.airT} vx=${p.vx.toFixed(0)} x=${p.x} nk=${p.kickers.length} k0=${p.kickers[0]?.start}-${p.kickers[0]?.end} rot=${(globalThis as unknown as {__r?: number}).__r}`);
       } else if (prevAir > 0) {
-        out.push(`  LAND ang=${p.angle.toFixed(2)} slope=${p.groundAngle(p.x).toFixed(2)} stats=${JSON.stringify(r0(p))}`);
+        out.push(`  LAND ang=${p.angle.toFixed(2)} stats=${JSON.stringify(r0(p))}`);
       }
       prevAir = p.airT;
     },
