@@ -469,19 +469,28 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
   const shown = Math.min(v.ammoMax, 10);
   for (let i = 0; i < shown; i++) {
     const filled = i < v.ammo;
-    ctx.fillStyle = filled ? v.palette.bomb : 'rgba(255,255,255,0.12)';
+    const bx = 24 + i * 15;
+    // Dark bombs need a light rim to read on the dark HUD pill.
     ctx.beginPath();
-    ctx.arc(24 + i * 13, 40, 5, 0, TAU);
-    ctx.fill();
+    ctx.arc(bx, 40, 6.5, 0, TAU);
     if (filled) {
+      ctx.fillStyle = v.palette.bomb;
+      ctx.fill();
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
       ctx.fillStyle = v.palette.fuse;
       ctx.beginPath();
-      ctx.arc(24 + i * 13 + 3, 36, 1.8, 0, TAU);
+      ctx.arc(bx + 3, 33.5, 2, 0, TAU);
       ctx.fill();
+    } else {
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
   }
   if (v.ammoMax > shown)
-    text(ctx, `+${v.ammoMax - shown}`, 24 + shown * 13, 41, { size: 11, color: '#e2e8f0' });
+    text(ctx, `+${v.ammoMax - shown}`, 24 + shown * 15, 41, { size: 11, color: '#e2e8f0' });
 
   hudPill(ctx, v.W / 2 - 62, 6, 124, 36);
   text(ctx, `WAVE ${v.wave}`, v.W / 2, 24, { size: 18, align: 'center', color: '#fde68a' });
