@@ -58,16 +58,20 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
     if (mode !== 'hold' && p.angle < -0.5) return { gas: false, brake: true };
     return { gas: true, brake: false };
   }
-  st.airRot += wrap(p.angle - st.lastAngle);
+  const delta = wrap(p.angle - st.lastAngle);
+  st.airRot += delta;
+  const w = delta / DT;
   st.lastAngle = p.angle;
-  // Only spin on a jump, once clearly airborne (not on a micro-hop).
+  // Only spin on a jump, once clearly airborne (not on a micro-hop). Stop short of the turn and
+  // let the controller finish it, so the car lands level with the slope instead of on its head.
   const onJump = p.kickers.some((k) => p.x >= k.start && p.x <= k.end);
-  if (mode === 'flip' && onJump && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 0.25)
+  if (mode === 'flip' && onJump && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 1.2)
     return { gas: false, brake: true };
-  // Level out for the landing: brake tilts nose down, gas tilts nose up.
+  // PD on the chassis angle against the ground under the car: brake pitches nose-down, gas nose-up.
   const err = wrap(p.angle - p.groundAngle(p.x));
-  if (err < -0.18) return { gas: false, brake: true };
-  if (err > 0.18) return { gas: true, brake: false };
+  const u = -(6 * err + 3.5 * w);
+  if (u > 0.5) return { gas: false, brake: true };
+  if (u < -0.5) return { gas: true, brake: false };
   return { gas: false, brake: false };
 }
 
