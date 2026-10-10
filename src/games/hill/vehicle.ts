@@ -121,7 +121,7 @@ export class Vehicle {
     private readonly terrain: Terrain,
     readonly spec: VehicleSpec,
   ) {
-    this.mu = Math.tan((30 * Math.PI) / 180) * (spec.grip / 0.32);
+    this.mu = Math.tan((30 * Math.PI) / 180) * Math.sqrt(spec.grip / 0.32);
     this.spinCap = 5 + 1.5 * spec.airControl;
     // Body mass is fixed by the layout below; derive the spring from a target bounce frequency.
     const bodyMass = 4 + 1 / 2.4;

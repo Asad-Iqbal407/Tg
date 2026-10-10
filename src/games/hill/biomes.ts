@@ -41,7 +41,7 @@ export const BIOMES: readonly Biome[] = [
     night: false,
     gravity: 1,
     grip: 0.9,
-    slope: 1,
+    slope: 0.95,
     hint: 'Loose sand: less grip',
   },
   {
@@ -54,7 +54,7 @@ export const BIOMES: readonly Biome[] = [
     night: false,
     gravity: 1,
     grip: 0.72,
-    slope: 0.85,
+    slope: 0.8,
     hint: 'Slippery ice!',
   },
   {

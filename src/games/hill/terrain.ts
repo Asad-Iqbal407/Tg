@@ -11,9 +11,9 @@ const LOOK = 80;
 /** Largest slope change per px: keeps crests and dips rounded (radius >= ~170 px). */
 const CURVATURE = 0.006;
 /** The baseline offset left behind by a jump decays back to the noise over a few thousand px. */
-const OFFSET_DECAY = Math.exp(-STEP / 2800);
+const OFFSET_DECAY = Math.exp(-STEP / 6000);
 /** Hard ceiling for the slope cap: below the static tip-over angle of every vehicle. */
-const MAX_CAP_DEG = 35;
+const MAX_CAP_DEG = 33;
 /** Gentle downhill the run-in eases into, so the car arrives at the ramp with speed. */
 const RUN_IN_SLOPE = Math.tan(5 * DEG);
 /** Biome cycle length in metres. */

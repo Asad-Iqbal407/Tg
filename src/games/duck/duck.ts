@@ -88,6 +88,8 @@ interface BarLayout {
 const HOLE_LIFE = 0.4;
 /** Zig-zag ducks climb or dive at this angle (radians) from the horizontal. */
 const ZIGZAG_ANGLE = 0.55;
+/** Minimum horizontal gap between ducks of the same wave when they take off. */
+const MIN_SPAWN_GAP = 110;
 /** Seconds between ambient quacks while ducks are in the air. */
 const QUACK_EVERY = 2.2;
 
@@ -233,7 +235,14 @@ export class DuckGame extends BaseGame {
     const pattern: FlightPattern = this.rng.chance(zigzagChance(this.round)) ? 'zigzag' : 'wander';
     const speed = DUCK_INFO[kind].speed * speedScale(this.round);
     const angle = -Math.PI / 2 + this.rng.range(-0.9, 0.9);
-    const x = this.rng.range(140, this.W - 140);
+    const lo = 140;
+    const hi = this.W - 140;
+    let x = this.rng.range(lo, hi);
+    // Keep wave-mates apart at take-off (no extra RNG draws, so seeds play the same).
+    for (const other of this.ducks) {
+      if (Math.abs(other.x - x) < MIN_SPAWN_GAP)
+        x = x + MIN_SPAWN_GAP * 2 > hi ? x - MIN_SPAWN_GAP * 2 : x + MIN_SPAWN_GAP * 2;
+    }
     const y = this.grassTop + 30;
     return {
       kind,
@@ -269,7 +278,8 @@ export class DuckGame extends BaseGame {
       if (c.x > this.W + 120) c.x = -160;
     }
     for (const h of this.holes) h.life -= dt;
-    if (this.holes.some((h) => h.life <= 0)) this.holes = this.holes.filter((h) => h.life > 0);
+    if (this.holes.length > 0 && (this.holes[0]?.life ?? 1) <= 0)
+      this.holes = this.holes.filter((h) => h.life > 0);
     this.updateDogVoice();
 
     const ptr = this.input.pointer;
@@ -283,7 +293,7 @@ export class DuckGame extends BaseGame {
     this.updateDucks(this.ducks, dt * slow);
     this.updateDucks(this.leaving, dt * slow);
     this.updateCrates(dt);
-    if (this.dogPending && this.leaving.every((d) => d.state === 'gone')) this.showDog();
+    if (this.dogPending && countState(this.leaving, 'gone') === this.leaving.length) this.showDog();
 
     switch (this.phase) {
       case 'intro':
@@ -599,7 +609,7 @@ export class DuckGame extends BaseGame {
   }
 
   private checkWaveEnd(): void {
-    if (this.ducks.some((d) => d.state === 'fly')) {
+    if (countState(this.ducks, 'fly') > 0) {
       if (!this.hurryWarned && this.waveT > this.waveFly - PACE.hurry) {
         this.hurryWarned = true;
         this.audio.play('warning', { volume: 0.5 });
@@ -607,7 +617,7 @@ export class DuckGame extends BaseGame {
       // Out of shells: the rest fly off right away instead of idling until the clock runs out.
       const dry = this.shots <= 0 && this.shotT >= PACE.outOfShells;
       if (this.waveT > this.waveFly || dry) this.escapeAll();
-      if (this.ducks.some((d) => d.state === 'fly')) return;
+      if (countState(this.ducks, 'fly') > 0) return;
     }
     // Every duck of the wave was shot or fled: hand them over to the dog and move on.
     for (const d of this.ducks) this.leaving.push(d);
@@ -908,7 +918,7 @@ export class DuckGame extends BaseGame {
     if (
       this.phase === 'wave' &&
       this.waveT > this.waveFly - PACE.hurry &&
-      this.ducks.some((d) => d.state === 'fly')
+      countState(this.ducks, 'fly') > 0
     ) {
       const pulse = 1 + 0.08 * Math.sin(this.time * 14);
       text(ctx, 'HURRY!', this.W / 2, b.y - 66 * s, {
@@ -1035,6 +1045,12 @@ export class DuckGame extends BaseGame {
       banner(ctx, this.W, this.H, 'GAME OVER', '', Math.min(0.5, this.phaseT / 1.5), '#ff6b6b');
     }
   }
+}
+
+function countState(ducks: readonly Duck[], state: Duck['state']): number {
+  let n = 0;
+  for (const d of ducks) if (d.state === state) n++;
+  return n;
 }
 
 /** Shot circle (x, y, r) against the crate box or its balloon. */

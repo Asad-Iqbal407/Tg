@@ -49,7 +49,7 @@ export interface HillProbe {
 }
 
 const FUEL_IDLE = 1.2;
-const FUEL_BURN = 2.2;
+const FUEL_BURN = 3;
 /** Out of fuel: the run ends once the car is this slow for SLOW_END s, or stops gaining ground. */
 const SLOW_SPEED = 25;
 const SLOW_END = 1;
@@ -266,9 +266,9 @@ export class HillGame extends BaseGame {
       this.audio.play('levelup');
     }
     if (this.meters >= this.nextMilestone) {
-      const bonus = Math.floor(this.nextMilestone / 100);
+      const bonus = 5 * Math.min(3, this.nextMilestone / 500);
       this.coins += bonus;
-      this.score += this.nextMilestone;
+      this.score += 500;
       this.texts.add(this.W / 2, this.H * 0.36, `${this.nextMilestone} m! +${bonus} coins`, '#ffd23f', 28, 1.4);
       this.audio.play('reward');
       this.nextMilestone += 500;
@@ -430,7 +430,7 @@ export class HillGame extends BaseGame {
       this.arcsSpawned++;
     }
     while (this.spawnedTo < toX) {
-      let x = Math.max(this.startX + 400, this.spawnedTo) + this.rng.range(450, 900);
+      let x = Math.max(this.startX + 400, this.spawnedTo) + this.rng.range(900, 1700);
       const k = this.terrain.kickerAt(x);
       if (k) x = k.end + 60;
       const m = this.metersAt(x);
@@ -442,9 +442,9 @@ export class HillGame extends BaseGame {
         this.spawnedTo = x + 60;
         continue;
       }
-      const n = this.rng.int(4, 7);
+      const n = this.rng.int(3, 6);
       const roll = this.rng.next();
-      const value = roll < 0.05 ? 5 : roll < 0.2 ? 2 : 1;
+      const value = roll < 0.04 ? 5 : roll < 0.16 ? 2 : 1;
       let cx = x;
       for (let i = 0; i < n; i++, cx += 34) {
         if (this.terrain.kickerAt(cx)) break;
@@ -456,7 +456,7 @@ export class HillGame extends BaseGame {
 
   /** Spacing (m) to the next fuel can: grows with each can, scaled by the tank size. */
   private fuelGap(): number {
-    return Math.min(430, 250 + 20 * this.fuelCount) * this.fuelRange;
+    return Math.min(450, 260 + 25 * this.fuelCount) * this.fuelRange;
   }
 
   /** Bonus coins along the flight path of a well-taken jump. */
@@ -471,7 +471,7 @@ export class HillGame extends BaseGame {
       const x = k.lip + vx * t;
       const y = lipY - 34 + vy * t + 0.5 * g * t * t;
       if (y > this.terrain.heightAt(x) - 40) break;
-      this.pickups.push({ kind: 'coin', value: 2, x, y, taken: false });
+      this.pickups.push({ kind: 'coin', value: 1, x, y, taken: false });
     }
   }
 
