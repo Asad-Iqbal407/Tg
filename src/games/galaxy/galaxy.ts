@@ -82,7 +82,7 @@ const ENEMY_STATS: Record<EnemyKind, { hp: number; r: number; points: number }> 
   tank: { hp: 16, r: 32, points: 600 },
   kamikaze: { hp: 2, r: 16, points: 200 },
   // The boss takes its HP from bossHp(); its collision comes from BOSS_HIT.
-  boss: { hp: 0, r: 110, points: 10000 },
+  boss: { hp: 0, r: 110, points: 5000 },
 };
 
 const ENEMY_COLOR: Record<EnemyKind, string> = {
@@ -584,10 +584,10 @@ export class GalaxyGame extends BaseGame {
       this.shipX += ax * speed * dt;
       this.shipY += ay * speed * dt;
     }
-    // Keep the ship out of the touch-control band at the bottom, and out of the top quarter so
+    // Keep the ship above the bottom HUD row and touch controls, and out of the top quarter so
     // formations never spawn on top of it.
     this.shipX = clamp(this.shipX, 24, this.W - 24);
-    this.shipY = clamp(this.shipY, this.H * 0.25, this.H - 40 - this.insets.bottom);
+    this.shipY = clamp(this.shipY, this.H * 0.25, this.H - 96 - this.insets.bottom);
     if (dt > 0) this.bank += (clamp((this.shipX - prevX) / dt / 300, -1, 1) - this.bank) * damp(10, dt);
     this.invuln = Math.max(0, this.invuln - dt);
 

@@ -97,7 +97,8 @@ export class Terrain {
     const ramp = clamp((x - 250) / 900, 0, 1);
     const amp = ramp * (0.5 + Math.min(1.2, Math.max(0, m) / 2200));
     const hills =
-      this.noise(x / 1100, 1) * 170 + this.noise(x / 420, 7) * 70 * Math.min(1.4, 0.6 + Math.max(0, m) / 2500);
+      this.noise(x / 1100, 1) * 170 +
+      this.noise(x / 420, 7) * 70 * Math.min(1.4, 0.6 + Math.max(0, m) / 2500);
     const bumps = this.noise(x / 95, 13) * 4 * ramp;
     return this.baseY + hills * amp + bumps;
   }

@@ -22,8 +22,8 @@ export const galaxyGame: GameDefinition = {
   ],
   touchHint: 'Drag anywhere to fly — the ship moves with your finger. Tap BOMB to clear the screen.',
   touchButtons: [{ action: 'secondary', label: 'BOMB', side: 'right', slot: 0 }],
-  scorePerCoin: 600,
-  scorePerXp: 120,
+  scorePerCoin: 1200,
+  scorePerXp: 240,
   music: { bpm: 150, root: 50, scale: 'minor', progression: [0, 5, 6, 4], seed: 55, lead: 'sawtooth' },
   statLabels: {
     enemies: 'Enemies destroyed',

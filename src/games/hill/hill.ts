@@ -217,7 +217,8 @@ export class HillGame extends BaseGame {
       this.engine = this.audio.engine();
 
     const live = !this.crashed;
-    const gas = live && (this.input.isDown('right') || this.input.isDown('up') || this.input.isDown('primary'));
+    const gas =
+      live && (this.input.isDown('right') || this.input.isDown('up') || this.input.isDown('primary'));
     const brk =
       live && (this.input.isDown('left') || this.input.isDown('down') || this.input.isDown('secondary'));
     const hasFuel = this.fuel > 0;
@@ -276,7 +277,14 @@ export class HillGame extends BaseGame {
       const bonus = 5 * Math.min(3, this.nextMilestone / 500);
       this.coins += bonus;
       this.score += 500;
-      this.texts.add(this.W / 2, this.H * 0.36, `${this.nextMilestone} m! +${bonus} coins`, '#ffd23f', 28, 1.4);
+      this.texts.add(
+        this.W / 2,
+        this.H * 0.36,
+        `${this.nextMilestone} m! +${bonus} coins`,
+        '#ffd23f',
+        28,
+        1.4,
+      );
       this.audio.play('reward');
       this.nextMilestone += 500;
     }
@@ -284,7 +292,9 @@ export class HillGame extends BaseGame {
     const k = this.terrain.kickers[0];
     if (!this.airHintShown && k && this.maxX > k.start - 300) {
       this.airHintShown = true;
-      this.hint = this.touchUi ? 'In the air: GAS tilts back, BRAKE tilts forward' : 'In the air: → tilts back, ← tilts forward';
+      this.hint = this.touchUi
+        ? 'In the air: GAS tilts back, BRAKE tilts forward'
+        : 'In the air: → tilts back, ← tilts forward';
       this.hintT = 4;
     }
   }
@@ -445,7 +455,7 @@ export class HillGame extends BaseGame {
       this.arcsSpawned++;
     }
     while (this.spawnedTo < toX) {
-      let x = Math.max(this.startX + 400, this.spawnedTo) + this.rng.range(900, 1700);
+      let x = Math.max(this.startX + 400, this.spawnedTo) + this.rng.range(1200, 2000);
       const k = this.terrain.kickerAt(x);
       if (k) x = k.end + 60;
       const m = this.metersAt(x);
@@ -457,7 +467,7 @@ export class HillGame extends BaseGame {
         this.spawnedTo = x + 60;
         continue;
       }
-      const n = this.rng.int(3, 6);
+      const n = this.rng.int(2, 4);
       const roll = this.rng.next();
       const value = roll < 0.04 ? 5 : roll < 0.16 ? 2 : 1;
       let cx = x;
@@ -527,7 +537,10 @@ export class HillGame extends BaseGame {
       } else {
         this.coins += pk.value;
         this.score += pk.value * 10;
-        this.audio.play('coin', { volume: 0.6, pitch: pk.value > 1 ? 0.8 : 1 + 0.02 * (this.flyers.length % 6) });
+        this.audio.play('coin', {
+          volume: 0.6,
+          pitch: pk.value > 1 ? 0.8 : 1 + 0.02 * (this.flyers.length % 6),
+        });
         if (pk.value > 1) this.worldTexts.add(pk.x, pk.y - 18, `+${pk.value}`, '#ffd23f', 20);
         if (this.flyers.length < 12)
           this.flyers.push({ x: (pk.x - this.camX) * this.zoom, y: (pk.y - this.camY) * this.zoom, t: 0 });
@@ -593,7 +606,11 @@ export class HillGame extends BaseGame {
 
   private effects(dt: number): void {
     const speed = this.car.speed();
-    const rpm = clamp((Math.abs(this.car.wheelSpin[0] ?? 0) * this.car.spec.wheelR) / this.car.spec.maxSpeed, 0, 1);
+    const rpm = clamp(
+      (Math.abs(this.car.wheelSpin[0] ?? 0) * this.car.spec.wheelR) / this.car.spec.maxSpeed,
+      0,
+      1,
+    );
     this.engine?.set(rpm, this.throttle);
     if (this.crashed || this.time % 0.06 >= dt) return;
     const biome = biomeAt(this.metersAt(this.car.center().x));
@@ -659,7 +676,12 @@ export class HillGame extends BaseGame {
         const r = pk.value >= 5 ? 16 : pk.value === 2 ? 13 : 10;
         drawCoin(ctx, pk.x, sy, r, Math.cos(this.time * 4 + pk.x * 0.05));
         if (pk.value > 1)
-          text(ctx, `${pk.value}`, pk.x, sy + 1, { size: r * 0.9, align: 'center', color: '#7a4a00', stroke: null });
+          text(ctx, `${pk.value}`, pk.x, sy + 1, {
+            size: r * 0.9,
+            align: 'center',
+            color: '#7a4a00',
+            stroke: null,
+          });
       } else {
         const pulse = 0.5 + 0.5 * Math.sin(this.time * 5);
         ctx.fillStyle = `rgba(255,80,80,${0.18 + 0.14 * pulse})`;
@@ -775,7 +797,15 @@ export class HillGame extends BaseGame {
       : -1;
     if (nextM >= 0 || low) {
       const blinkOn = low && f > 0 && Math.floor(this.time * 3) % 2 === 0;
-      fillRoundRect(ctx, left, chipY, 150 * s, chipH, chipH / 2, blinkOn ? 'rgba(200,30,40,0.8)' : 'rgba(8,10,30,0.55)');
+      fillRoundRect(
+        ctx,
+        left,
+        chipY,
+        150 * s,
+        chipH,
+        chipH / 2,
+        blinkOn ? 'rgba(200,30,40,0.8)' : 'rgba(8,10,30,0.55)',
+      );
       drawJerrycan(ctx, left + 14 * s, chipY + chipH / 2, 16 * s);
       const label = nextM >= 0 ? `next ${nextM} m` : 'LOW FUEL';
       text(ctx, low && f > 0 && blinkOn ? 'LOW FUEL' : label, left + 28 * s, chipY + chipH / 2 + 1, {
@@ -820,12 +850,19 @@ export class HillGame extends BaseGame {
 
     const bannerY = Math.max(this.hudTop() + 30, this.H * 0.24);
     if (this.crashed && this.crashReason) {
-      this.drawBanner(this.crashReason.toUpperCase(), `${Math.floor(this.meters)} m`, 0.5, '#ff6b6b', bannerY);
+      this.drawBanner(
+        this.crashReason.toUpperCase(),
+        `${Math.floor(this.meters)} m`,
+        0.5,
+        '#ff6b6b',
+        bannerY,
+      );
     } else if (this.fuel <= 0) {
       this.drawOutOfFuel(bannerY);
     } else if (this.bannerT < BANNER_TIME) {
       const sub =
-        this.bannerSub || (this.touchUi ? 'Hold GAS to drive, BRAKE to slow down' : 'Hold → or D to drive, ← to brake');
+        this.bannerSub ||
+        (this.touchUi ? 'Hold GAS to drive, BRAKE to slow down' : 'Hold → or D to drive, ← to brake');
       this.drawBanner(this.bannerTitle, sub, this.bannerT / BANNER_TIME, '#ffd23f', bannerY);
     }
     if (this.hintT > 0 && !this.crashed) {
@@ -864,7 +901,8 @@ export class HillGame extends BaseGame {
     ctx.translate(this.W / 2, y);
     ctx.scale(sc, sc);
     text(ctx, title, 0, 0, { size, align: 'center', color, strokeWidth: 7 });
-    if (sub) text(ctx, sub, 0, size * 0.85, { size: Math.min(22, this.W / 34), align: 'center', weight: 700 });
+    if (sub)
+      text(ctx, sub, 0, size * 0.85, { size: Math.min(22, this.W / 34), align: 'center', weight: 700 });
     ctx.restore();
   }
 
@@ -888,5 +926,3 @@ export class HillGame extends BaseGame {
     drawJerrycan(ctx, this.W / 2, cy, 18);
   }
 }
-
-

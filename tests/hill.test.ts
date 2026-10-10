@@ -210,7 +210,8 @@ describe('Hill Rider driving', () => {
   });
 
   it('runs out of fuel a few seconds after the tank empties, once the car has stopped', () => {
-    const { game, input } = createGame(hillDef, { seed: 3 });
+    const { game: instance, input } = createGame(hillDef, { seed: 3 });
+    const game = instance as HillGame;
     let emptyAt = -1;
     let t = 0;
     while (!game.isOver() && t < 150) {

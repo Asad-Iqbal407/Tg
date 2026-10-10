@@ -363,7 +363,11 @@ export class Vehicle {
     const lambda = -c / (p.invMass + wb);
     p.x += nx * lambda * p.invMass;
     p.y += ny * lambda * p.invMass;
-    this.moveBody((-nx * lambda) / this.bodyMass, (-ny * lambda) / this.bodyMass, (-lambda * rn) / this.bodyInertia);
+    this.moveBody(
+      (-nx * lambda) / this.bodyMass,
+      (-ny * lambda) / this.bodyMass,
+      (-lambda * rn) / this.bodyInertia,
+    );
   }
 
   /** Keep each wheel on its strut axis and within its travel. */
@@ -497,7 +501,7 @@ export class Vehicle {
     // Traction limit: friction coefficient times the normal load (cos of the slope).
     const traction = this.mu * env.grip * GRAVITY * env.gravity * Math.abs(this.tangent.x) * share;
     const max = this.spec.maxSpeed;
-    let dv = 0;
+    let dv: number;
     if (input.throttle > 0) {
       const fade = v > 0 ? Math.max(0, 1 - v / max) : 1;
       const thrust = Math.min(DRIVE_ACCEL * this.spec.power * fade, traction);

@@ -23,7 +23,7 @@ export const hillGame: GameDefinition = {
     { action: 'left', label: 'BRAKE', side: 'left', slot: 0, wide: true },
     { action: 'right', label: 'GAS', side: 'right', slot: 0, wide: true },
   ],
-  scorePerCoin: 300,
+  scorePerCoin: 500,
   scorePerXp: 60,
   music: { bpm: 120, root: 52, scale: 'dorian', progression: [0, 3, 6, 4], seed: 44, lead: 'triangle' },
   statLabels: {
