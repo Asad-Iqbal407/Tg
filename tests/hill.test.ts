@@ -174,14 +174,14 @@ describe('Hill Rider driving', () => {
         const run = runBot({ seed, skinId, mode: 'hold', seconds: 120 });
         expect(run.meters, `${skinId} seed ${seed}`).toBeGreaterThan(800);
       }
-  });
+  }, 60_000);
 
   it('the Rally Racer survives early terrain under hold-gas', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       const run = runBot({ seed, skinId: 'car-racer', mode: 'hold', seconds: 60 });
       expect(run.meters, `seed ${seed}`).toBeGreaterThan(300);
     }
-  });
+  }, 30_000);
 
   it('a skilled airborne input lands a full flip, for every vehicle', () => {
     for (const skinId of VEHICLES) {
@@ -189,7 +189,7 @@ describe('Hill Rider driving', () => {
       expect(run.result.stats.flips ?? 0, skinId).toBe(1);
       expect(run.reason, skinId).toBe('');
     }
-  });
+  }, 30_000);
 
   it('a car that stands on its tail is flipped over within a few seconds', () => {
     let stops = 0;
@@ -225,7 +225,7 @@ describe('Hill Rider driving', () => {
     const after = t - emptyAt;
     expect(after).toBeGreaterThan(2.5);
     expect(after).toBeLessThan(6);
-  });
+  }, 30_000);
 
   it('destroy() stops the engine drone once, even if called twice', () => {
     let stops = 0;

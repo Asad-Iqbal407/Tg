@@ -98,6 +98,8 @@ function arena(opts: SetupOptions = {}): { game: GameInstance; input: Input; g: 
   if (!boss) throw new Error('boss did not spawn');
   boss.y = boss.targetY;
   boss.t = 3;
+  // One active step settles the bob, so tests place shots where the boss really is.
+  step(r.game, r.input, 1);
   return { ...r, boss };
 }
 
@@ -217,7 +219,16 @@ describe('Galaxy War boss', () => {
 
   it('clears nearby enemy fire and drops a power-up on each rage change', () => {
     const { g, boss } = arena();
-    g.enemyShots.push({ x: boss.x + 10, y: boss.y + 50, vx: 0, vy: 0, r: 6, dmg: 1, alive: true, color: '#fff' });
+    g.enemyShots.push({
+      x: boss.x + 10,
+      y: boss.y + 50,
+      vx: 0,
+      vy: 0,
+      r: 6,
+      dmg: 1,
+      alive: true,
+      color: '#fff',
+    });
     g.enemyShots.push({ x: boss.x, y: boss.y + 600, vx: 0, vy: 0, r: 6, dmg: 1, alive: true, color: '#fff' });
     const drops = g.drops.length;
     g.damage(boss, boss.maxHp * 0.4);
