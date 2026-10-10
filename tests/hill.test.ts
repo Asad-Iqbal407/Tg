@@ -27,7 +27,7 @@ export interface BotOptions {
   height?: number;
   insets?: Insets;
   /** Called once per simulation step, before the step, with the car's state. */
-  trace?: (p: HillProbe, step: number) => void;
+  trace?: (p: HillProbe, step: number, want: { gas: boolean; brake: boolean }) => void;
 }
 
 export interface BotRun {
@@ -95,8 +95,8 @@ export function runBot(opts: BotOptions): BotRun {
   let steps = 0;
   while (steps < maxSteps && !game.isOver()) {
     const p = game.probe();
-    opts.trace?.(p, steps);
     const want = decide(p, mode, flips, st);
+    opts.trace?.(p, steps, want);
     input.setVirtual('right', want.gas, 'bot');
     input.setVirtual('left', want.brake, 'bot');
     game.update(DT);

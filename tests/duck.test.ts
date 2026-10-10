@@ -7,6 +7,7 @@ import {
   AIM,
   DUCK_INFO,
   DUCKS_PER_ROUND,
+  type DuckKind,
   flyTime,
   hitRadius,
   isStepRound,
@@ -26,7 +27,7 @@ const DT = 1 / 60;
 const def = gameById('duck');
 
 interface SimDuck {
-  kind: string;
+  kind: DuckKind;
   x: number;
   y: number;
   vx: number;

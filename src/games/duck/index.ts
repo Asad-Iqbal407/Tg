@@ -6,7 +6,7 @@ export const duckGame: GameDefinition = {
   title: 'Duck Season',
   tagline: 'Three shells. Two ducks. No mercy.',
   description:
-    'A sharpshooting gallery across changing skies. Each round releases ten ducks in pairs — hit enough to advance. Chain hits for combo multipliers, land double kills, shoot supply balloons for slow-mo and scatter shots, and hunt the rare golden duck.',
+    'A sharpshooting gallery across changing skies. Each round releases ten ducks in waves — hit enough to advance. Chain hits for combo multipliers, land double kills, shoot supply balloons for slow-mo and scatter shots, and hunt the rare golden duck.',
   genre: 'Shooting gallery',
   inspiredBy: 'Duck Hunt',
   width: 960,

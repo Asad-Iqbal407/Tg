@@ -13,7 +13,7 @@ it('trace', () => {
     mode: (process.env.MODE ?? 'flip') as 'flip',
     flips: 1,
     seconds: Number(process.env.SECS ?? 60),
-    trace: (p, step) => {
+    trace: (p, step, want) => {
       if (p.airT > 0 && prevAir === 0) {
         startAngle = p.angle;
         airRotMax = 0;
@@ -21,7 +21,7 @@ it('trace', () => {
       }
       if (p.airT > 0) {
         const rot = p.angle - startAngle;
-        out.push(`  t=${p.airT.toFixed(2)} ang=${p.angle.toFixed(2)} rot=${rot.toFixed(2)} w=${p.angularVelocity.toFixed(2)} y=${p.y.toFixed(0)} R=${p.rearDown ? 1 : 0} F=${p.frontDown ? 1 : 0}`);
+        out.push(`  t=${p.airT.toFixed(2)} ang=${p.angle.toFixed(2)} rot=${rot.toFixed(2)} w=${p.angularVelocity.toFixed(2)} y=${p.y.toFixed(0)} gas=${want.gas ? 1 : 0} brk=${want.brake ? 1 : 0} vx=${p.vx.toFixed(0)}`);
       } else if (prevAir > 0) {
         out.push(`  LAND ang=${p.angle.toFixed(2)} slope=${p.groundAngle(p.x).toFixed(2)} stats=${JSON.stringify(r0(p))}`);
       }
