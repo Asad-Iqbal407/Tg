@@ -742,7 +742,7 @@ export class BombSquadGame extends BaseGame {
     for (let i = 0; i < spawns.length; i++) {
       const idx = (this.spawnCursor + i) % spawns.length;
       const s = spawns[idx];
-      if (!s || false) continue;
+      if (!s || manhattan(s.x, s.y, px, py) < MIN_BOT_SPAWN_DIST) continue;
       if (this.spawnBusy(s)) continue;
       this.spawnCursor = idx + 1;
       return s;
