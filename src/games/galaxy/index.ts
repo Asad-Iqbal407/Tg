@@ -6,7 +6,7 @@ export const galaxyGame: GameDefinition = {
   title: 'Galaxy War',
   tagline: 'Hold the line against the armada.',
   description:
-    'A vertical space shooter with auto-fire, five weapon levels, screen-clearing bombs and chain multipliers. Survive formations of scouts, fighters, tanks and kamikazes, then face a Mothership with escalating bullet patterns every fifth wave.',
+    'A vertical space shooter with auto-fire, five weapon levels, screen-clearing bombs and chain multipliers. Surplus power-ups at max weapon grant Overdrive. Survive formations of scouts, fighters, tanks and kamikazes, then face a Mothership with telegraphed bullet patterns every fifth wave.',
   genre: 'Space shooter',
   inspiredBy: 'Galaga / Space Shooter',
   width: 540,

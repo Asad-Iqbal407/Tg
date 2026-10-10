@@ -838,7 +838,13 @@ export class GalaxyGame extends BaseGame {
       // Twin cannons fan
       for (const side of [-1, 1]) {
         for (let k = 0; k < 3 + rage; k++)
-          this.enemyShot(e.x + side * 60 * s, e.y + 44 * s, Math.PI / 2 + side * 0.15 * k, 240, BULLET_YELLOW);
+          this.enemyShot(
+            e.x + side * 60 * s,
+            e.y + 44 * s,
+            Math.PI / 2 + side * 0.15 * k,
+            240,
+            BULLET_YELLOW,
+          );
       }
       e.fireT = 0.45 - rage * 0.06;
     }
@@ -1424,7 +1430,15 @@ export class GalaxyGame extends BaseGame {
     if (this.chain >= 2) this.drawChain(12 + left, 60 + top);
 
     if (this.boss) {
-      progressBar(ctx, 12 + left, 96 + top, W - 24 - left - right, 10, this.boss.hp / this.boss.maxHp, '#ff4dd2');
+      progressBar(
+        ctx,
+        12 + left,
+        96 + top,
+        W - 24 - left - right,
+        10,
+        this.boss.hp / this.boss.maxHp,
+        '#ff4dd2',
+      );
       text(ctx, 'MOTHERSHIP', W / 2, 118 + top, { size: 12, align: 'center', color: '#ffb3ec' });
     }
 
