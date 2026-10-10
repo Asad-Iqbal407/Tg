@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest';
+import type { BoostId, GameResult, Insets } from '../src/games/types';
+import { type HillGame, type HillProbe } from '../src/games/hill/hill';
+import { GAMES } from '../src/games/registry';
+import { SKINS, toSkinData } from '../src/meta/catalog';
+import { createGame } from './helpers';
+
+const DT = 1 / 60;
+const hillDef = GAMES.find((g) => g.id === 'hill')!;
+
+/**
+ * Headless driver. `hold` keeps gas down on the ground and only balances in the air. `skilled`
+ * also lifts off a wheelie. `flip` rotates forward in the air until `flips` full turns are done,
+ * then balances for the landing.
+ */
+export type BotMode = 'hold' | 'skilled' | 'flip';
+
+export interface BotOptions {
+  seed: number;
+  skinId?: string;
+  mode?: BotMode;
+  /** Full turns to attempt per air phase (flip mode). */
+  flips?: number;
+  seconds?: number;
+  boosts?: BoostId[];
+  width?: number;
+  height?: number;
+  insets?: Insets;
+}
+
+export interface BotRun {
+  result: GameResult;
+  meters: number;
+  /** Crash reason, or '' if the run was still going when the time limit hit. */
+  reason: string;
+  seconds: number;
+  game: HillGame;
+}
+
+interface BotState {
+  airRot: number;
+  lastAngle: number;
+}
+
+function wrap(a: number): number {
+  return Math.atan2(Math.sin(a), Math.cos(a));
+}
+
+function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas: boolean; brake: boolean } {
+  if (p.crashed) return { gas: false, brake: false };
+  const airborne = p.airT > 0;
+  if (!airborne) {
+    st.airRot = 0;
+    st.lastAngle = p.angle;
+    // Lift the nose if a wheelie gets going on the skilled line.
+    if (mode !== 'hold' && p.angle < -0.5) return { gas: false, brake: true };
+    return { gas: true, brake: false };
+  }
+  st.airRot += wrap(p.angle - st.lastAngle);
+  st.lastAngle = p.angle;
+  if (mode === 'flip' && Math.abs(st.airRot) < Math.PI * 2 * flips - 0.25) return { gas: false, brake: true };
+  // Level out for the landing: brake tilts nose down, gas tilts nose up.
+  const err = wrap(p.angle - p.groundAngle(p.x));
+  if (err < -0.18) return { gas: false, brake: true };
+  if (err > 0.18) return { gas: true, brake: false };
+  return { gas: false, brake: false };
+}
+
+/** Drive one run with a simple policy and report where it ended. */
+export function runBot(opts: BotOptions): BotRun {
+  const skinId = opts.skinId ?? 'car-jeep';
+  const skin = toSkinData(SKINS.find((s) => s.id === skinId)!);
+  const { game: instance, input } = createGame(hillDef, {
+    seed: opts.seed,
+    skin,
+    boosts: opts.boosts,
+    width: opts.width,
+    height: opts.height,
+    insets: opts.insets,
+  });
+  const game = instance as HillGame;
+  const mode = opts.mode ?? 'hold';
+  const flips = opts.flips ?? 1;
+  const maxSteps = Math.round((opts.seconds ?? 300) * 60);
+  const st: BotState = { airRot: 0, lastAngle: 0 };
+  let steps = 0;
+  while (steps < maxSteps && !game.isOver()) {
+    const p = game.probe();
+    const want = decide(p, mode, flips, st);
+    input.setVirtual('right', want.gas, 'bot');
+    input.setVirtual('left', want.brake, 'bot');
+    game.update(DT);
+    input.postUpdate();
+    steps++;
+    if (p.crashed && game.isOver()) break;
+  }
+  const probe = game.probe();
+  return {
+    result: game.getResult(),
+    meters: probe.meters,
+    reason: probe.crashReason,
+    seconds: steps * DT,
+    game,
+  };
+}
+
+describe('Hill Rider bot', () => {
+  it('runs a headless driver without errors', () => {
+    const run = runBot({ seed: 1, seconds: 5 });
+    expect(run.seconds).toBeGreaterThan(4);
+    expect(run.result.durationSec).toBeGreaterThan(4);
+  });
+});
