@@ -20,6 +20,7 @@ import {
 import { type BoostId, type GameInstance, type Insets, NO_INSETS } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
 import { gameById, mockCtx } from './helpers';
+import { DuckGame as LegacyDuck } from '../src/games/duck/legacy_tmp';
 
 const DT = 1 / 60;
 const def = gameById('duck');
@@ -157,8 +158,8 @@ interface BotOptions {
   reaction: number;
   /** Aim error standard deviation in px. */
   noise: number;
-  /** Click timing jitter (s): the error grows with the duck's speed. */
-  jitter: number;
+  /** Perception lag (s): the bot aims where it saw the duck this long ago, plus linear lead. */
+  lag: number;
 }
 
 interface BotStats {
@@ -171,39 +172,61 @@ interface BotStats {
   coins: number;
 }
 
-/** A scripted player that clicks near a flying duck at a steady cadence (seeded noise). */
-function playBot(seed: number, seconds: number, bot: BotOptions): BotStats {
-  const { g, input } = make({ seed });
+interface BotDuck {
+  x: number;
+  y: number;
+  state: string;
+}
+
+/**
+ * A scripted player: it sees ducks `lag` seconds late, leads them linearly, and clicks at a steady
+ * cadence with Gaussian aim noise (all seeded).
+ */
+function playBot(game: GameInstance, input: Input, seed: number, seconds: number, bot: BotOptions): BotStats {
+  const g = game as unknown as { ducks: BotDuck[]; leaving?: BotDuck[]; phase: string };
   const rng = new Rng(seed * 7 + 1);
   const gauss = () => Math.sqrt(-2 * Math.log(1 - rng.next())) * Math.cos(2 * Math.PI * rng.next());
   const out: BotStats = { frames: 0, flying: 0, onScreen: 0, rounds: 0, over: false, score: 0, coins: 0 };
+  const seen = new Map<BotDuck, { x: number; y: number }[]>();
+  const lagFrames = Math.round(bot.lag * 60);
   let cool = bot.reaction;
-  for (let i = 0; i < seconds * 60 && !g.isOver(); i++) {
+  let target: BotDuck | null = null;
+  for (let i = 0; i < seconds * 60 && !game.isOver(); i++) {
     const flying = g.ducks.filter((d) => d.state === 'fly');
+    for (const d of flying) {
+      let h = seen.get(d);
+      if (!h) seen.set(d, (h = []));
+      h.unshift({ x: d.x, y: d.y });
+      if (h.length > lagFrames + 2) h.pop();
+    }
     if (g.phase === 'wave' && flying.length > 0) {
       cool -= DT;
-      const target = flying[0];
-      if (cool <= 0 && target && target.y < g.grassTop - 30) {
-        const lag = gauss() * bot.jitter;
+      if (!target || target.state !== 'fly') target = flying[0] ?? null;
+      const h = target ? seen.get(target) : undefined;
+      const a = h?.[Math.min(lagFrames, h.length - 1)];
+      const b = h?.[Math.min(lagFrames + 1, h.length - 1)];
+      if (cool <= 0 && a && b && a.y < 370) {
+        const lead = bot.lag;
         tap(
           input,
-          target.x + target.vx * lag + gauss() * bot.noise,
-          target.y + target.vy * lag + gauss() * bot.noise,
+          a.x + (a.x - b.x) * 60 * lead + gauss() * bot.noise,
+          a.y + (a.y - b.y) * 60 * lead + gauss() * bot.noise,
         );
         cool = bot.cadence;
       }
     } else {
       cool = bot.reaction;
+      target = null;
     }
     out.frames++;
     if (flying.length > 0) out.flying++;
-    if (g.ducks.length + g.leaving.length > 0) out.onScreen++;
-    g.update(DT);
+    if (g.ducks.length + (g.leaving?.length ?? 0) > 0) out.onScreen++;
+    game.update(DT);
     input.postUpdate();
   }
-  const r = g.getResult();
+  const r = game.getResult();
   out.rounds = r.stats.rounds ?? 0;
-  out.over = g.isOver();
+  out.over = game.isOver();
   out.score = r.score;
   out.coins = r.coins;
   return out;
@@ -211,23 +234,44 @@ function playBot(seed: number, seconds: number, bot: BotOptions): BotStats {
 
 describe('Duck Season pacing', () => {
   it('explores', () => {
-    for (const bot of [
-      { cadence: 0.45, reaction: 0.45, noise: 10, jitter: 0.04 },
-      { cadence: 0.55, reaction: 0.6, noise: 14, jitter: 0.06 },
-      { cadence: 0.7, reaction: 0.8, noise: 18, jitter: 0.08 },
-    ]) {
+    for (const [name, bot] of [
+      ['expert', { cadence: 0.45, reaction: 0.45, noise: 8, lag: 0.15 }],
+      ['skilled', { cadence: 0.55, reaction: 0.6, noise: 12, lag: 0.2 }],
+      ['casual', { cadence: 0.7, reaction: 0.8, noise: 18, lag: 0.25 }],
+    ] as const) {
+     for (const legacy of [true, false]) {
       let frames = 0;
       let flying = 0;
       let onScreen = 0;
       const rows: string[] = [];
       for (let seed = 1; seed <= 12; seed++) {
-        const s = playBot(seed, 400, bot);
+        let s: BotStats;
+        if (legacy) {
+          const input = new Input();
+          const game = new LegacyDuck({
+            ctx: mockCtx(),
+            width: 960,
+            height: 540,
+            insets: NO_INSETS,
+            input,
+            audio: new RecordingAudio(),
+            rng: new Rng(seed),
+            loadout: { skin: toSkinData(defaultSkin('duck')), boosts: new Set(), powerDuration: 1 },
+            reducedMotion: false,
+            haptic: () => undefined,
+          });
+          s = playBot(game, input, seed, 600, bot);
+        } else {
+          const { g, input } = make({ seed });
+          s = playBot(g, input, seed, 600, bot);
+        }
         frames += s.frames;
         flying += s.flying;
         onScreen += s.onScreen;
         rows.push(`r${s.rounds} ${s.score} c${s.coins} ${(s.frames / 60).toFixed(0)}s`);
       }
-      console.log(JSON.stringify(bot), (flying / frames).toFixed(3), (onScreen / frames).toFixed(3), rows.join(' | '));
+      console.log(name, legacy ? 'OLD' : 'NEW', (flying / frames).toFixed(3), (onScreen / frames).toFixed(3), rows.join(' | '));
+     }
     }
   });
 });

@@ -85,9 +85,13 @@ export const SCATTER_RADIUS = 64;
 /** Positions a duck remembers for lag-compensated hit tests (about 50 ms at 60 Hz). */
 export const HISTORY = 3;
 
-/** Duck speed multiplier: eases in quickly and levels off at 1.8x instead of climbing forever. */
+/**
+ * Duck speed multiplier: eases in over the first dozen rounds (1.27x at round 4, 1.64x at 12),
+ * then keeps creeping up by 2.5% a round so long runs still end, without ever jumping.
+ */
 export function roundSpeed(round: number): number {
-  return 1 + 0.8 * (1 - Math.exp(-Math.max(0, round - 1) / 7));
+  const r = Math.max(1, round);
+  return 1 + 0.8 * (1 - Math.exp(-(r - 1) / 7)) + 0.025 * Math.max(0, r - 12);
 }
 
 /** Ducks to hit (of ten) to clear a round. */
@@ -106,7 +110,7 @@ export function speedScale(round: number): number {
 
 /** Seconds a wave may fly before the ducks escape (triples get a little longer). */
 export function flyTime(round: number, ducks: number): number {
-  return Math.max(4.6, 7.4 - 0.2 * round) + (ducks > 2 ? 1 : 0);
+  return Math.max(4.2, 7.4 - 0.2 * round) + (ducks > 2 ? 1 : 0);
 }
 
 /** Shells per wave: one spare per wave. */
