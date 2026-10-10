@@ -11,6 +11,8 @@ import type { SkinItem } from '../meta/catalog';
 
 /** Seed, simulated seconds and vertical crop focus (0 = top, 1 = bottom) for card art. */
 const PREVIEW: Record<string, { seed: number; seconds: number; focus: number }> = {
+  snake: { seed: 4, seconds: 1.6, focus: 0.5 },
+  bombsquad: { seed: 6, seconds: 1.5, focus: 0.5 },
   runner: { seed: 4, seconds: 2.6, focus: 0.75 },
   platformer: { seed: 9, seconds: 2.6, focus: 0.5 },
   duck: { seed: 3, seconds: 2.4, focus: 0.5 },
@@ -221,6 +223,57 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
         ctx.arc(x, 14, wr * 0.5, 0, TAU);
         ctx.fill();
       }
+      break;
+    }
+    case 'snake': {
+      // A curled serpent with a golden apple and a red apple.
+      const body = p.body ?? '#4ade80';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = body;
+      ctx.lineWidth = 15;
+      ctx.beginPath();
+      ctx.moveTo(-34, 22);
+      ctx.bezierCurveTo(-34, -16, 4, -30, 4, -2);
+      ctx.bezierCurveTo(4, 20, 30, 18, 26, -10);
+      ctx.stroke();
+      ctx.fillStyle = p.head ?? '#bbf7d0';
+      ctx.beginPath();
+      ctx.arc(26, -10, 9, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.food ?? '#ef4444';
+      ctx.beginPath();
+      ctx.arc(-30, -26, 7, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.gold ?? '#fde047';
+      ctx.beginPath();
+      ctx.arc(20, 26, 6, 0, TAU);
+      ctx.fill();
+      break;
+    }
+    case 'bombsquad': {
+      // A round bomb with a lit fuse.
+      ctx.fillStyle = p.bomb ?? '#111827';
+      ctx.beginPath();
+      ctx.arc(0, 6, 26, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = p.fuse ?? '#f97316';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(10, -18);
+      ctx.quadraticCurveTo(20, -36, 34, -30);
+      ctx.stroke();
+      ctx.fillStyle = p.fuse ?? '#f97316';
+      ctx.beginPath();
+      ctx.arc(34, -30, 5, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.suit ?? '#3b82f6';
+      fillRoundRect(ctx, -20, 26, 40, 14, 6, p.suit ?? '#3b82f6');
+      ctx.fillStyle = p.visor ?? '#e0f2fe';
+      ctx.beginPath();
+      ctx.arc(-6, 2, 3, 0, TAU);
+      ctx.arc(8, 2, 3, 0, TAU);
+      ctx.fill();
       break;
     }
     case 'galaxy': {

@@ -126,6 +126,38 @@ export const MISSION_TEMPLATES: readonly MissionTemplate[] = [
     targets: [3, 5, 8],
     label: (n) => `Reach wave ${n} in Galaxy War`,
   },
+  {
+    id: 'snake-food',
+    gameId: 'snake',
+    kind: 'total',
+    stat: 'food',
+    targets: [10, 30, 60],
+    label: (n) => `Eat ${n} apples in Snake Classic`,
+  },
+  {
+    id: 'snake-length',
+    gameId: 'snake',
+    kind: 'best',
+    stat: 'length',
+    targets: [8, 14, 20],
+    label: (n) => `Grow to length ${n} in Snake Classic`,
+  },
+  {
+    id: 'bomb-kills',
+    gameId: 'bombsquad',
+    kind: 'total',
+    stat: 'kills',
+    targets: [5, 15, 30],
+    label: (n) => `Defeat ${n} bots in Bomb Squad`,
+  },
+  {
+    id: 'bomb-wave',
+    gameId: 'bombsquad',
+    kind: 'best',
+    stat: 'wave',
+    targets: [2, 3, 5],
+    label: (n) => `Reach wave ${n} in Bomb Squad`,
+  },
 ];
 
 const TIER_REWARDS = [
