@@ -10,7 +10,7 @@ export const CRATE = 3;
 /** Probability that an ordinary interior cell starts with a crate. */
 const CRATE_CHANCE = 0.62;
 /** Bot spawns are at least this many tiles (Manhattan) from the player. */
-const MIN_BOT_SPAWN_DIST = 6;
+export const MIN_BOT_SPAWN_DIST = 6;
 
 export interface Cell {
   x: number;

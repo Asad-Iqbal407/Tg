@@ -19,6 +19,8 @@ const GOLDEN_BLINK_SEC = 1.5;
 const DEATH_FLASH = '#fb7185';
 /** Colour steps used to fade the snake body toward its tail. */
 const FADE_STEPS = 8;
+/** How much darker the tail is than the body colour, as a blend toward black. */
+const TAIL_DIM = 0.35;
 
 const HEX = /^#?([0-9a-f]{6})$/i;
 
@@ -29,7 +31,10 @@ function channels(hex: string): [number, number, number] | null {
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
 }
 
-/** Linear blend of two hex colours: t = 0 gives `a`, t = 1 gives `b`. Non-hex input is returned as `a`. */
+/**
+ * Linear blend of two colours: t = 0 gives `a`, t = 1 gives `b`. Both must be #rrggbb hex (a `shade()` result
+ * is rgb() and is not parsed); the blend is returned as an rgb() string. Anything else is returned as `a`.
+ */
 export function mixHex(a: string, b: string, t: number): string {
   const ca = channels(a);
   const cb = channels(b);
@@ -37,6 +42,21 @@ export function mixHex(a: string, b: string, t: number): string {
   const k = Math.max(0, Math.min(1, t));
   const mix = (i: 0 | 1 | 2): number => Math.round(ca[i] + (cb[i] - ca[i]) * k);
   return `rgb(${mix(0)},${mix(1)},${mix(2)})`;
+}
+
+const fadeCache = new Map<string, readonly string[]>();
+
+/**
+ * The body colour at each fade step, from the head (index 0) down to the tail (last index), darkening toward
+ * black. Built once per colour, so no colour strings are made while drawing.
+ */
+export function bodyShades(body: string): readonly string[] {
+  const cached = fadeCache.get(body);
+  if (cached) return cached;
+  const shades: string[] = [];
+  for (let k = 0; k < FADE_STEPS; k++) shades.push(mixHex(body, '#000000', (TAIL_DIM * k) / (FADE_STEPS - 1)));
+  fadeCache.set(body, shades);
+  return shades;
 }
 
 /** Width of the stone frame around the playfield. */
@@ -187,11 +207,8 @@ export function drawSnake(
   const { cell } = rect;
   const n = body.length;
   const width = cell * (0.78 + 0.06 * look.thick);
-  const tailColour = shade(pal.body, -0.35);
-  // The body fades toward the tail in a few steps; one stroke colour per step, none per frame.
-  const shades: string[] = [];
-  for (let k = 0; k < FADE_STEPS; k++)
-    shades.push(mixHex(pal.body, tailColour, (0.8 * k) / (FADE_STEPS - 1)));
+  // The body fades toward the tail in a few steps: one stroke colour per step, from the cached shades.
+  const shades = bodyShades(pal.body);
   const cx = (c: Cell): number => rect.x + (c.x + 0.5) * cell;
   const cy = (c: Cell): number => rect.y + (c.y + 0.5) * cell;
   ctx.save();

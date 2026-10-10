@@ -2,7 +2,7 @@ import { lerp, TAU } from '../../core/math';
 import { BaseGame } from '../base';
 import type { GameResult, GameServices } from '../types';
 import { type BotEnv, stepBot } from './bots';
-import { Arena, BORDER, CRATE, DIRECTIONS, PILLAR } from './grid';
+import { type Cell, Arena, BORDER, CRATE, DIRECTIONS, manhattan, MIN_BOT_SPAWN_DIST, PILLAR } from './grid';
 import { drawScene, type Layout, type Palette, type SceneView } from './render';
 import {
   type Bomb,
@@ -418,6 +418,8 @@ export class BombSquadGame extends BaseGame {
       const lay = this.layout();
       const tx = Math.floor((pt.x - lay.ox) / lay.ts);
       const ty = Math.floor((pt.y - lay.oy) / lay.ts);
+      // Only a pointer over the arena itself aims: the HUD strip and the margins fall back to facing.
+      if (!this.arena.inBounds(tx, ty)) return { dx: p.facingX, dy: p.facingY, reach: THROW_RANGE };
       const ddx = tx - ox;
       const ddy = ty - oy;
       if (Math.abs(ddx) >= Math.abs(ddy) && ddx !== 0) {
