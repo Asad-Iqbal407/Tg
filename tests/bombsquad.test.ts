@@ -135,14 +135,16 @@ describe('arena layout', () => {
       // 19 x 11 at design size: pillars at x 2..16 and y 2..8.
       if (seed === 1) expect(pillars).toBe(8 * 4);
 
-      // Nothing solid within Manhattan distance 2 of the player's spawn tile.
+      // No crates within Manhattan distance 2 of the player's spawn, and the two first steps are open.
       const { x: sx, y: sy } = arena.playerSpawn;
       for (let y = sy - 2; y <= sy + 2; y++) {
         for (let x = sx - 2; x <= sx + 2; x++) {
-          if (Math.abs(x - sx) + Math.abs(y - sy) > 2) continue;
-          expect(arena.isSolid(x, y)).toBe(false);
+          if (Math.abs(x - sx) + Math.abs(y - sy) > 2 || !arena.inBounds(x, y)) continue;
+          expect(arena.isCrate(x, y)).toBe(false);
         }
       }
+      expect(arena.isSolid(2, 1)).toBe(false);
+      expect(arena.isSolid(1, 2)).toBe(false);
     }
   });
 
@@ -281,7 +283,7 @@ describe('bombs and blasts', () => {
     run(plain.game, plain.input, 0.1);
     expect(plain.i.lives).toBe(LIVES - 1);
 
-    const shielded = quietGame(8, { boosts: ['shield'] });
+    const shielded = quietGame(8, ['shield']);
     clearInterior(shielded.arena);
     shielded.i.player.invuln = 0;
     expect(shielded.i.player.shielded).toBe(true);

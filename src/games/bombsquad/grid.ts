@@ -214,7 +214,8 @@ export class Arena {
   private carveRoute(from: Cell, to: Cell): void {
     const start = this.index(from.x, from.y);
     const goal = this.index(to.x, to.y);
-    this.dist.fill(Number.MAX_SAFE_INTEGER);
+    // Int32Array storage: use a large int32 sentinel (MAX_SAFE_INTEGER would wrap to -1).
+    this.dist.fill(0x3fffffff);
     this.prev.fill(-1);
     this.done.fill(0);
     this.dist[start] = 0;
