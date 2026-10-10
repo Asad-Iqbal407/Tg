@@ -1,23 +1,63 @@
-import { clamp, TAU } from '../../core/math';
+import { clamp, damp, TAU } from '../../core/math';
 import { BaseGame } from '../base';
-import { banner, fillRoundRect, hash1, hudPill, progressBar, text } from '../draw';
+import { banner, fillRoundRect, hudPill, progressBar, text } from '../draw';
 import type { GameServices } from '../types';
+import {
+  BALLOON_DY,
+  BALLOON_RX,
+  BALLOON_RY,
+  type Cloud,
+  CRATE_HALF,
+  drawCrate,
+  drawDog,
+  drawDuckSprite,
+  Scenery,
+  trackerDuck,
+} from './art';
+import {
+  AIM,
+  DUCK_INFO,
+  DUCKS_PER_ROUND,
+  type DuckKind,
+  type FlightPattern,
+  flyTime,
+  HISTORY,
+  hitRadius,
+  kindWeights,
+  PACE,
+  POWER_INFO,
+  type PowerKind,
+  requiredHits,
+  shellsFor,
+  SLOWMO_SCALE,
+  speedScale,
+  turnAngle,
+  turnInterval,
+  wavePlan,
+  zigzagChance,
+} from './tuning';
 
-type DuckKind = 'green' | 'blue' | 'red' | 'gold';
-type PowerKind = 'slowmo' | 'scatter' | 'ammo';
 type Phase = 'intro' | 'wave' | 'waveEnd' | 'roundEnd' | 'over';
+/** One entry of the round's hit tracker: the kind that was shot, a miss, or still to come. */
+type Slot = 'pending' | 'miss' | DuckKind;
 
 interface Duck {
   kind: DuckKind;
+  pattern: FlightPattern;
   x: number;
   y: number;
   vx: number;
   vy: number;
   speed: number;
   state: 'fly' | 'hit' | 'fall' | 'escape' | 'gone';
+  /** Shot down (as opposed to escaped). */
+  hit: boolean;
   t: number;
   turnT: number;
   flap: number;
+  /** Positions at the end of the previous HISTORY steps, newest first (lag-compensated hits). */
+  hx: number[];
+  hy: number[];
 }
 
 interface Crate {
@@ -32,136 +72,175 @@ interface Hole {
   x: number;
   y: number;
   life: number;
+  hit: boolean;
 }
 
-const DUCK_INFO: Record<
-  DuckKind,
-  { speed: number; points: number; head: string; body: string; wing: string; belly: string }
-> = {
-  green: { speed: 190, points: 500, head: '#1a7f3c', body: '#7a4e2a', wing: '#c8a165', belly: '#e8d5b0' },
-  blue: { speed: 250, points: 1000, head: '#2a6fdb', body: '#3d3d7a', wing: '#8fa9e8', belly: '#d5dcf0' },
-  red: { speed: 310, points: 1500, head: '#c0392b', body: '#5a2d0c', wing: '#e58e6d', belly: '#f2d0b5' },
-  gold: { speed: 340, points: 3000, head: '#ffd23f', body: '#e0a100', wing: '#fff1a8', belly: '#fff6d0' },
-};
+interface BarLayout {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** HUD scale factor. */
+  s: number;
+}
 
-const POWER_INFO: Record<PowerKind, { label: string; color: string; dur: number }> = {
-  slowmo: { label: 'SLOW-MO', color: '#4dd9ff', dur: 6 },
-  scatter: { label: 'SCATTER SHOT', color: '#ffb703', dur: 9 },
-  ammo: { label: '+3 SHELLS', color: '#7CFC00', dur: 0 },
-};
-
-const SKIES = [
-  ['#7ec8ff', '#d6f0ff'],
-  ['#5aa9f0', '#bfe3ff'],
-  ['#ff8e72', '#ffd59e'],
-  ['#1b2a5a', '#4b3f7a'],
-] as const;
-
-const GRASS_TOP = 400;
-const DUCKS_PER_ROUND = 10;
-const DUCKS_PER_WAVE = 2;
-const SHOTS_PER_WAVE = 3;
+const HOLE_LIFE = 0.4;
+/** Zig-zag ducks climb or dive at this angle (radians) from the horizontal. */
+const ZIGZAG_ANGLE = 0.55;
+/** Seconds between ambient quacks while ducks are in the air. */
+const QUACK_EVERY = 2.2;
 
 export class DuckGame extends BaseGame {
   private round = 1;
   private phase: Phase = 'intro';
   private phaseT = 0;
+  private plan: number[] = [];
+  private waveIndex = 0;
+  /** Tracker index of the current wave's first duck. */
+  private waveStart = 0;
   private ducks: Duck[] = [];
   private crates: Crate[] = [];
   private holes: Hole[] = [];
-  private results: ('hit' | 'miss' | 'pending')[] = [];
-  private waveIndex = 0;
-  private shots = SHOTS_PER_WAVE;
+  private readonly results: Slot[] = Array.from({ length: DUCKS_PER_ROUND }, (): Slot => 'pending');
+  private shots = 0;
+  private waveShells = 0;
   private waveT = 0;
+  private waveFly = 0;
+  /** Seconds since the last shell was fired. */
+  private shotT = 0;
+  private hurryWarned = false;
   private combo = 0;
   private flash = 0;
   private escapeFlash = 0;
   private aimX: number;
   private aimY: number;
-  private readonly powers: Record<PowerKind, number> = { slowmo: 0, scatter: 0, ammo: 0 };
+  private aimVX = 0;
+  private aimVY = 0;
+  private aimHold = 0;
+  /** Keyboard / gamepad steers the crosshair (until the pointer moves or presses again). */
+  private aimByKeys = false;
+  /** The pointer driving the crosshair is a finger: larger hit radius. */
+  private touchAim = false;
+  private lastPtrX: number;
+  private lastPtrY: number;
+  private readonly powers: Record<'slowmo' | 'scatter', number> = { slowmo: 0, scatter: 0 };
+  /** Power Start boost: scatter shot for the whole first round, independent of crates. */
+  private headStart: boolean;
   private guardian: boolean;
-  private dogX = 480;
+  /** The current round is a Guardian retry. */
+  private retry = false;
   private dogMode: 'none' | 'happy' | 'laugh' = 'none';
-  private dogCount = 0;
-  private readonly clouds: { x: number; y: number; s: number }[] = [];
-  private headStartRound: boolean;
+  private dogT = 0;
+  private dogX = 0;
+  /** Game over: the dog rises and stays. */
+  private dogStay = false;
+  private readonly dogKinds: DuckKind[] = [];
+  private laughStep = 0;
+  private quackT = 1;
+  private readonly clouds: Cloud[] = [];
+  private readonly grassTop: number;
+  private readonly scenery: Scenery;
+  private readonly bar: BarLayout = { x: 0, y: 0, w: 0, h: 0, s: 1 };
 
   constructor(s: GameServices) {
     super(s);
+    this.grassTop = this.H - 140;
+    this.scenery = new Scenery(this.ctx, this.W, this.H, this.grassTop);
     this.aimX = this.W / 2;
-    this.aimY = this.H / 2.5;
+    this.aimY = this.grassTop * 0.55;
+    this.lastPtrX = this.input.pointer.x;
+    this.lastPtrY = this.input.pointer.y;
     this.guardian = this.hasBoost('shield');
-    this.headStartRound = this.hasBoost('head-start');
-    for (let i = 0; i < 6; i++)
+    this.headStart = this.hasBoost('head-start');
+    const clouds = Math.round(this.W / 160);
+    for (let i = 0; i < clouds; i++)
       this.clouds.push({
         x: this.rng.range(0, this.W),
-        y: this.rng.range(30, 200),
+        y: this.rng.range(30, this.grassTop * 0.5),
         s: this.rng.range(0.6, 1.3),
       });
     this.startRound();
   }
 
-  private get roundSpeed(): number {
-    return 1 + Math.min(1.2, (this.round - 1) * 0.08);
-  }
-
   private get required(): number {
-    return this.round <= 3 ? 6 : this.round <= 6 ? 7 : this.round <= 9 ? 8 : 9;
+    return requiredHits(this.round);
   }
 
-  private get flyTime(): number {
-    return Math.max(4.2, 7 - this.round * 0.25);
+  private get scatterActive(): boolean {
+    return this.headStart || this.powers.scatter > 0;
+  }
+
+  private get multiplier(): number {
+    return Math.min(5, 1 + Math.floor(this.combo / 3));
+  }
+
+  private hitCount(): number {
+    let n = 0;
+    for (const r of this.results) if (r !== 'pending' && r !== 'miss') n++;
+    return n;
   }
 
   private startRound(): void {
     this.phase = 'intro';
     this.phaseT = 0;
     this.waveIndex = 0;
-    this.results = Array.from({ length: DUCKS_PER_ROUND }, () => 'pending' as const);
+    this.waveStart = 0;
+    this.results.fill('pending');
     this.ducks = [];
-    if (this.headStartRound) this.powers.scatter = 999;
+    this.plan = wavePlan(this.round, this.rng);
+    const first = this.plan[0] ?? 2;
+    this.waveShells = this.shots = shellsFor(first);
   }
 
   private startWave(): void {
+    const n = this.plan[this.waveIndex] ?? 2;
     this.phase = 'wave';
     this.phaseT = 0;
     this.waveT = 0;
-    this.shots = SHOTS_PER_WAVE;
+    this.shotT = 0;
+    this.hurryWarned = false;
+    this.waveShells = this.shots = shellsFor(n);
+    this.waveFly = flyTime(this.round, n);
     this.ducks = [];
-    for (let i = 0; i < DUCKS_PER_WAVE; i++) this.ducks.push(this.makeDuck());
+    for (let i = 0; i < n; i++) this.ducks.push(this.makeDuck());
     if (this.rng.chance(0.2)) {
       const kind = this.rng.pick<PowerKind>(['slowmo', 'scatter', 'ammo']);
       this.crates.push({
         kind,
         x: this.rng.range(120, this.W - 120),
-        y: GRASS_TOP + 40,
+        // The box starts just above the grass so it is visible, not only its balloon.
+        y: this.grassTop - 10,
         vy: -this.rng.range(55, 80),
         alive: true,
       });
+      this.audio.play('pop');
     }
+    this.quackT = 0.9;
     this.audio.play('quack');
   }
 
   private makeDuck(): Duck {
-    const r = this.rng.next();
-    const rr = this.round;
-    let kind: DuckKind = 'green';
-    if (r < 0.04 + rr * 0.004) kind = 'gold';
-    else if (r < 0.2 + rr * 0.03) kind = 'red';
-    else if (r < 0.5 + rr * 0.03) kind = 'blue';
-    const speed = DUCK_INFO[kind].speed * this.roundSpeed;
+    const kind = this.rng.weighted(kindWeights(this.round));
+    const pattern: FlightPattern = this.rng.chance(zigzagChance(this.round)) ? 'zigzag' : 'wander';
+    const speed = DUCK_INFO[kind].speed * speedScale(this.round);
     const angle = -Math.PI / 2 + this.rng.range(-0.9, 0.9);
+    const x = this.rng.range(140, this.W - 140);
+    const y = this.grassTop + 30;
     return {
       kind,
-      x: this.rng.range(140, this.W - 140),
-      y: GRASS_TOP + 30,
+      pattern,
+      x,
+      y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       speed,
       state: 'fly',
+      hit: false,
       t: 0,
-      turnT: this.rng.range(0.6, 1.4),
+      turnT: turnInterval(this.round, kind, this.rng),
       flap: this.rng.next() * TAU,
+      hx: new Array<number>(HISTORY).fill(x),
+      hy: new Array<number>(HISTORY).fill(y),
     };
   }
 
@@ -169,63 +248,124 @@ export class DuckGame extends BaseGame {
 
   protected tick(dt: number): void {
     this.phaseT += dt;
+    this.dogT += dt;
+    this.shotT += dt;
     this.flash = Math.max(0, this.flash - dt);
     this.escapeFlash = Math.max(0, this.escapeFlash - dt);
-    for (const k of ['slowmo', 'scatter'] as const) this.powers[k] = Math.max(0, this.powers[k] - dt);
+    this.powers.slowmo = Math.max(0, this.powers.slowmo - dt);
+    this.powers.scatter = Math.max(0, this.powers.scatter - dt);
     for (const c of this.clouds) {
       c.x += 8 * c.s * dt;
       if (c.x > this.W + 120) c.x = -160;
     }
     for (const h of this.holes) h.life -= dt;
-    this.holes = this.holes.filter((h) => h.life > 0);
-    this.updateAim(dt);
+    if (this.holes.some((h) => h.life <= 0)) this.holes = this.holes.filter((h) => h.life > 0);
+    this.updateDogVoice();
 
-    const slow = this.powers.slowmo > 0 ? 0.45 : 1;
+    const ptr = this.input.pointer;
+    // Presses off the canvas (letterbox bars) never fire.
+    const ptrPress = ptr.pressed && ptr.inside;
+    const fire = ptrPress || this.input.wasPressed('primary');
+    this.updateAim(dt, ptrPress);
+    const slow = this.powers.slowmo > 0 ? SLOWMO_SCALE : 1;
+    // Shots are tested before the ducks move: against what the last rendered frame showed.
+    if (this.phase === 'wave' && fire) this.shoot();
     this.updateDucks(dt * slow);
     this.updateCrates(dt);
 
     switch (this.phase) {
       case 'intro':
-        if (this.phaseT > 1.8) this.startWave();
+        if (this.phaseT >= PACE.intro) this.startWave();
         break;
       case 'wave':
         this.waveT += dt * slow;
-        if (this.input.pointer.pressed || this.input.wasPressed('primary')) this.shoot();
+        this.updateQuacks(dt);
         this.checkWaveEnd();
         break;
       case 'waveEnd':
-        if (this.phaseT > 1.5) {
-          this.dogMode = 'none';
-          if ((this.waveIndex + 1) * DUCKS_PER_WAVE >= DUCKS_PER_ROUND) this.endRound();
-          else {
+        // The next ducks take off while the dog is still sinking back into the grass.
+        if (this.phaseT >= PACE.nextWave) {
+          if (this.waveIndex + 1 < this.plan.length) {
+            this.waveStart += this.plan[this.waveIndex] ?? 2;
             this.waveIndex++;
             this.startWave();
+          } else {
+            this.endRound();
           }
         }
         break;
       case 'roundEnd':
-        if (this.phaseT > 2.8) this.afterRound();
+        if (this.phaseT >= PACE.roundEnd || (fire && this.phaseT >= PACE.roundSkip)) this.afterRound();
         break;
       case 'over':
         break;
     }
   }
 
-  private updateAim(dt: number): void {
+  private updateAim(dt: number, ptrPress: boolean): void {
     const ptr = this.input.pointer;
-    if (ptr.active) {
+    // The pointer steers whenever it moves or presses; keys take over until it does again.
+    if (ptr.active && (ptrPress || ptr.x !== this.lastPtrX || ptr.y !== this.lastPtrY)) {
+      this.aimByKeys = false;
+      this.touchAim = ptr.touch;
       this.aimX = ptr.x;
       this.aimY = ptr.y;
+      this.aimVX = this.aimVY = 0;
     }
-    const ax = this.input.axisX();
-    const ay = this.input.axisY();
+    this.lastPtrX = ptr.x;
+    this.lastPtrY = ptr.y;
+    let ax = this.input.axisX();
+    let ay = this.input.axisY();
     if (ax !== 0 || ay !== 0) {
-      ptr.active = false;
-      this.aimX += ax * 620 * dt;
-      this.aimY += ay * 620 * dt;
+      if (ax !== 0 && ay !== 0) {
+        ax *= Math.SQRT1_2;
+        ay *= Math.SQRT1_2;
+      }
+      this.aimByKeys = true;
+      this.touchAim = false;
+      this.aimHold += dt;
+    } else {
+      this.aimHold = 0;
+    }
+    if (this.aimByKeys) {
+      // Accelerate while held (precise taps, fast sweeps) and ease velocity changes so digital
+      // keys and d-pads feel analog.
+      const k = clamp(this.aimHold / AIM.ramp, 0, 1);
+      const speed = AIM.minSpeed + (AIM.maxSpeed - AIM.minSpeed) * k * k * (3 - 2 * k);
+      const resp = damp(AIM.response, dt);
+      this.aimVX += (ax * speed - this.aimVX) * resp;
+      this.aimVY += (ay * speed - this.aimVY) * resp;
+      this.aimX += this.aimVX * dt;
+      this.aimY += this.aimVY * dt;
+      if (Math.hypot(this.aimVX, this.aimVY) < AIM.assistMaxSpeed) this.assistAim(dt);
     }
     this.aimX = clamp(this.aimX, 0, this.W);
     this.aimY = clamp(this.aimY, 0, this.H);
+  }
+
+  /** Light magnetism for keys and pads: drift with a nearby duck and ease onto it. */
+  private assistAim(dt: number): void {
+    let best: Duck | null = null;
+    let bestD: number = AIM.assistRadius;
+    for (const d of this.ducks) {
+      if (d.state !== 'fly') continue;
+      const dd = Math.hypot(d.x - this.aimX, d.y - this.aimY);
+      if (dd < bestD) {
+        bestD = dd;
+        best = d;
+      }
+    }
+    if (!best) return;
+    this.aimX += (best.x - (best.hx[0] ?? best.x)) * AIM.assistFollow;
+    this.aimY += (best.y - (best.hy[0] ?? best.y)) * AIM.assistFollow;
+    const k = damp(AIM.assistPull, dt);
+    this.aimX += (best.x - this.aimX) * k;
+    this.aimY += (best.y - this.aimY) * k;
+  }
+
+  /** Current hit radius: the reticle ring is drawn at exactly this size. */
+  private get shotRadius(): number {
+    return hitRadius(this.round, this.touchAim, this.scatterActive);
   }
 
   private shoot(): void {
@@ -234,52 +374,71 @@ export class DuckGame extends BaseGame {
       return;
     }
     this.shots--;
+    this.shotT = 0;
     this.addStat('shots');
     this.audio.play('gun');
     this.flash = 0.06;
     this.shake.add(0.18);
     this.services.haptic(25);
-    this.holes.push({ x: this.aimX, y: this.aimY, life: 0.4 });
-    const radius = this.powers.scatter > 0 ? 62 : 36;
-    let hits = 0;
-    for (const crate of this.crates) {
-      if (crate.alive && Math.hypot(crate.x - this.aimX, crate.y - this.aimY) < radius + 18) {
-        crate.alive = false;
-        this.activatePower(crate.kind);
-        this.particles.emit({
-          x: crate.x,
-          y: crate.y,
-          count: 18,
-          speed: 220,
-          life: 0.6,
-          size: 4,
-          colors: ['#c58b4a', '#fff', POWER_INFO[crate.kind].color],
-          shape: 'square',
-          gravity: 400,
-        });
-      }
+    const x = this.aimX;
+    const y = this.aimY;
+    const r = this.shotRadius;
+    let crateHit = false;
+    for (const c of this.crates) {
+      if (!c.alive || !crateInReach(c, x, y, r)) continue;
+      c.alive = false;
+      crateHit = true;
+      this.activatePower(c.kind);
+      this.particles.emit({
+        x: c.x,
+        y: c.y - BALLOON_DY / 2,
+        count: 18,
+        speed: 220,
+        life: 0.6,
+        size: 4,
+        colors: ['#c58b4a', '#fff', POWER_INFO[c.kind].color],
+        shape: 'square',
+        gravity: 400,
+      });
     }
+    let hits = 0;
     for (const d of this.ducks) {
-      if (d.state !== 'fly') continue;
-      if (Math.hypot(d.x - this.aimX, d.y - this.aimY) < radius) {
+      if (d.state === 'fly' && duckInReach(d, x, y, r)) {
         hits++;
         this.hitDuck(d);
       }
     }
-    if (hits === 0) {
+    this.holes.push({ x, y, life: HOLE_LIFE, hit: hits > 0 || crateHit });
+    if (hits === 0 && !crateHit) {
+      // A miss breaks the combo; supply crates never do.
       this.combo = 0;
+      this.texts.add(x, y - 34, 'MISS', '#e6e9f5', 16, 0.5);
+      this.particles.emit({
+        x,
+        y,
+        count: 7,
+        speed: 110,
+        life: 0.45,
+        size: 3,
+        colors: ['#ffffff', '#ded6c2', '#b9b2a0'],
+        gravity: 260,
+        drag: 3,
+      });
     } else if (hits > 1) {
       this.addStat('doubleKills');
-      this.score += 2000;
-      this.texts.add(this.aimX, this.aimY - 50, 'DOUBLE! +2000', '#ffd23f', 26);
+      const bonus = hits > 2 ? 5000 : 2000;
+      this.score += bonus;
+      this.texts.add(x, y - 54, `${hits > 2 ? 'TRIPLE' : 'DOUBLE'}! +${bonus}`, '#ffd23f', 26);
     }
   }
 
   private hitDuck(d: Duck): void {
     d.state = 'hit';
+    d.hit = true;
     d.t = 0;
+    const before = this.multiplier;
     this.combo++;
-    const mult = Math.min(5, 1 + Math.floor(this.combo / 3));
+    const mult = this.multiplier;
     const pts = Math.round(DUCK_INFO[d.kind].points * (1 + (this.round - 1) * 0.1)) * mult;
     this.score += pts;
     this.addStat('ducks');
@@ -293,7 +452,7 @@ export class DuckGame extends BaseGame {
     }
     this.audio.play('quack', { pitch: 1.4 });
     const idx = this.results.indexOf('pending');
-    if (idx >= 0) this.results[idx] = 'hit';
+    if (idx >= 0) this.results[idx] = d.kind;
     this.texts.add(
       d.x,
       d.y - 30,
@@ -301,6 +460,10 @@ export class DuckGame extends BaseGame {
       d.kind === 'gold' ? '#ffd23f' : '#fff',
       22,
     );
+    if (mult > before) {
+      this.audio.play('coin', { pitch: 1 + 0.12 * mult });
+      this.texts.add(d.x, d.y - 56, `COMBO x${mult}`, '#ffb703', 20);
+    }
     this.particles.emit({
       x: d.x,
       y: d.y,
@@ -313,58 +476,81 @@ export class DuckGame extends BaseGame {
       drag: 2.5,
       shape: 'square',
     });
-    this.dogX = d.x;
   }
 
   private activatePower(kind: PowerKind): void {
     this.audio.play('powerup');
     this.addStat('powerups');
-    this.texts.add(this.W / 2, 200, POWER_INFO[kind].label, POWER_INFO[kind].color, 30);
+    this.texts.add(this.W / 2, this.grassTop * 0.45, POWER_INFO[kind].label, POWER_INFO[kind].color, 30);
     if (kind === 'ammo') this.shots += 3;
-    else this.powers[kind] = POWER_INFO[kind].dur;
+    // Never shortens a running power; the Overclock upgrade stretches every pickup.
+    else this.powers[kind] = Math.max(this.powers[kind], this.powerTime(POWER_INFO[kind].dur));
   }
 
   private updateDucks(dt: number): void {
     for (const d of this.ducks) {
       d.t += dt;
       d.flap += dt * (d.state === 'fly' ? 14 : 22);
-      if (d.state === 'fly') {
-        d.turnT -= dt;
-        const emerging = d.y > GRASS_TOP - 40 && d.t < 1.2;
-        if (d.turnT <= 0 && !emerging) {
-          d.turnT = this.rng.range(0.5, 1.4) / (d.kind === 'gold' ? 1.8 : 1);
-          const a = Math.atan2(d.vy, d.vx) + this.rng.range(-1.4, 1.4);
-          d.vx = Math.cos(a) * d.speed;
-          d.vy = Math.sin(a) * d.speed;
-        }
-        d.x += d.vx * dt;
-        d.y += d.vy * dt;
-        if (d.x < 30 && d.vx < 0) d.vx = -d.vx;
-        if (d.x > this.W - 30 && d.vx > 0) d.vx = -d.vx;
-        if (d.y < 40 && d.vy < 0) d.vy = -d.vy;
-        if (!emerging && d.y > GRASS_TOP - 50 && d.vy > 0) d.vy = -Math.abs(d.vy);
-        if (d.t > 0.8 && d.t % 1.5 < dt) this.audio.play('quack', { volume: 0.4 });
-      } else if (d.state === 'hit') {
-        if (d.t > 0.4) {
-          d.state = 'fall';
-          d.vy = 0;
-          d.t = 0;
-        }
-      } else if (d.state === 'fall') {
-        d.vy = Math.min(700, d.vy + 1400 * dt);
-        d.y += d.vy * dt;
-        if (d.y > GRASS_TOP + 40) {
-          d.state = 'gone';
-          this.audio.play('land');
-        }
-      } else if (d.state === 'escape') {
-        d.vy = -420;
-        d.vx *= 0.98;
-        d.x += d.vx * dt;
-        d.y += d.vy * dt;
-        if (d.y < -80) d.state = 'gone';
+      switch (d.state) {
+        case 'fly':
+          this.flyDuck(d, dt);
+          break;
+        case 'hit':
+          if (d.t >= PACE.hitFreeze) {
+            d.state = 'fall';
+            d.vy = 0;
+            d.t = 0;
+          }
+          break;
+        case 'fall':
+          d.vy = Math.min(PACE.fallMaxSpeed, d.vy + PACE.fallGravity * dt);
+          d.y += d.vy * dt;
+          if (d.y > this.grassTop + 40) {
+            d.state = 'gone';
+            this.audio.play('land');
+          }
+          break;
+        case 'escape':
+          d.vy = -PACE.escapeSpeed;
+          d.vx *= Math.exp(-1.2 * dt);
+          d.x += d.vx * dt;
+          d.y += d.vy * dt;
+          if (d.y < -80) d.state = 'gone';
+          break;
+        case 'gone':
+          break;
       }
     }
+  }
+
+  private flyDuck(d: Duck, dt: number): void {
+    for (let i = HISTORY - 1; i > 0; i--) {
+      d.hx[i] = d.hx[i - 1] ?? d.x;
+      d.hy[i] = d.hy[i - 1] ?? d.y;
+    }
+    d.hx[0] = d.x;
+    d.hy[0] = d.y;
+    d.turnT -= dt;
+    const emerging = d.t < PACE.emerge && d.y > this.grassTop - 40;
+    if (d.turnT <= 0 && !emerging) {
+      if (d.pattern === 'zigzag') {
+        d.turnT = this.rng.range(0.42, 0.58);
+        const dir = d.vx >= 0 ? 1 : -1;
+        d.vx = dir * Math.cos(ZIGZAG_ANGLE) * d.speed;
+        d.vy = (d.vy > 0 ? -1 : 1) * Math.sin(ZIGZAG_ANGLE) * d.speed;
+      } else {
+        d.turnT = turnInterval(this.round, d.kind, this.rng);
+        const a = Math.atan2(d.vy, d.vx) + this.rng.range(-1, 1) * turnAngle(d.kind);
+        d.vx = Math.cos(a) * d.speed;
+        d.vy = Math.sin(a) * d.speed;
+      }
+    }
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+    if (d.x < 34 && d.vx < 0) d.vx = -d.vx;
+    if (d.x > this.W - 34 && d.vx > 0) d.vx = -d.vx;
+    if (d.y < 44 && d.vy < 0) d.vy = -d.vy;
+    if (!emerging && d.y > this.grassTop - 50 && d.vy > 0) d.vy = -Math.abs(d.vy);
   }
 
   private updateCrates(dt: number): void {
@@ -372,68 +558,133 @@ export class DuckGame extends BaseGame {
       c.y += c.vy * dt;
       if (c.y < -60) c.alive = false;
     }
-    this.crates = this.crates.filter((c) => c.alive);
+    if (this.crates.some((c) => !c.alive)) this.crates = this.crates.filter((c) => c.alive);
+  }
+
+  /** Occasional quack from the duck nearest the crosshair (not a constant chorus). */
+  private updateQuacks(dt: number): void {
+    this.quackT -= dt;
+    if (this.quackT > 0) return;
+    this.quackT = QUACK_EVERY;
+    let best: Duck | null = null;
+    let bestD = Infinity;
+    for (const d of this.ducks) {
+      if (d.state !== 'fly') continue;
+      const dd = Math.hypot(d.x - this.aimX, d.y - this.aimY);
+      if (dd < bestD) {
+        bestD = dd;
+        best = d;
+      }
+    }
+    if (best) this.audio.play('quack', { volume: 0.3, pitch: best.kind === 'gold' ? 1.25 : 1 });
+  }
+
+  private updateDogVoice(): void {
+    // A short descending chuckle when the dog laughs.
+    if (this.dogMode !== 'laugh' || this.laughStep >= 3 || this.dogT < this.laughStep * 0.14) return;
+    this.audio.play('stomp', { pitch: 1.6 - 0.18 * this.laughStep, volume: 0.6 });
+    this.laughStep++;
   }
 
   private checkWaveEnd(): void {
-    const flying = this.ducks.filter((d) => d.state === 'fly');
-    const busy = this.ducks.some((d) => d.state === 'hit' || d.state === 'fall' || d.state === 'escape');
-    if (flying.length > 0 && (this.waveT > this.flyTime || (this.shots <= 0 && !busy && this.waveT > 0.3))) {
-      for (const d of flying) {
-        d.state = 'escape';
-        const idx = this.results.indexOf('pending');
-        if (idx >= 0) this.results[idx] = 'miss';
+    let flying = 0;
+    let gone = 0;
+    for (const d of this.ducks) {
+      if (d.state === 'fly') flying++;
+      else if (d.state === 'gone') gone++;
+    }
+    if (flying > 0) {
+      if (!this.hurryWarned && this.waveT > this.waveFly - PACE.hurry) {
+        this.hurryWarned = true;
+        this.audio.play('warning', { volume: 0.5 });
       }
-      this.combo = 0;
-      this.escapeFlash = 1.2;
-      this.audio.play('whoosh');
+      // Out of shells: the rest fly off right away instead of idling until the clock runs out.
+      const dry = this.shots <= 0 && this.shotT >= PACE.outOfShells;
+      if (this.waveT > this.waveFly || dry) this.escapeAll();
       return;
     }
-    if (this.ducks.every((d) => d.state === 'gone')) {
-      const hitCount = this.ducks.filter((d) => d.y > GRASS_TOP).length;
-      this.dogCount = hitCount;
-      this.dogMode = hitCount > 0 ? 'happy' : 'laugh';
-      this.phase = 'waveEnd';
-      this.phaseT = 0;
-      if (hitCount === 0) this.audio.play('error');
-      else this.audio.play('select');
+    if (gone === this.ducks.length) this.showDog();
+  }
+
+  private escapeAll(): void {
+    for (const d of this.ducks) {
+      if (d.state !== 'fly') continue;
+      d.state = 'escape';
+      d.t = 0;
+      const idx = this.results.indexOf('pending');
+      if (idx >= 0) this.results[idx] = 'miss';
+      this.texts.add(
+        clamp(d.x, 80, this.W - 80),
+        clamp(d.y, 60, this.grassTop) - 30,
+        'FLEW AWAY',
+        '#ffd0e0',
+        18,
+      );
     }
+    this.combo = 0;
+    this.escapeFlash = 1.2;
+    this.audio.play('whoosh');
+  }
+
+  private showDog(): void {
+    this.dogKinds.length = 0;
+    let sumX = 0;
+    for (const d of this.ducks) {
+      if (!d.hit) continue;
+      this.dogKinds.push(d.kind);
+      sumX += d.x;
+    }
+    const n = this.dogKinds.length;
+    this.dogX = n > 0 ? sumX / n : this.W / 2;
+    this.dogMode = n > 0 ? 'happy' : 'laugh';
+    this.dogT = 0;
+    this.dogStay = false;
+    this.laughStep = 0;
+    this.phase = 'waveEnd';
+    this.phaseT = 0;
+    if (n > 0) this.audio.play(n > 1 ? 'coin' : 'select');
   }
 
   private endRound(): void {
     this.phase = 'roundEnd';
     this.phaseT = 0;
-    const hits = this.results.filter((r) => r === 'hit').length;
+    const hits = this.hitCount();
     if (hits >= this.required) {
       this.audio.play('win');
       if (hits === DUCKS_PER_ROUND) {
         this.score += 10000;
         this.coins += 10;
         this.addStat('perfectRounds');
-        this.texts.add(this.W / 2, 300, 'PERFECT! +10000', '#ffd23f', 34);
+        this.texts.add(this.W / 2, this.grassTop * 0.75, 'PERFECT! +10000', '#ffd23f', 34, 1.6);
       }
     } else {
-      this.audio.play('gameover');
+      // The Guardian will retry the round: not a game-over sting.
+      this.audio.play(this.guardian ? 'warning' : 'gameover');
     }
   }
 
   private afterRound(): void {
-    const hits = this.results.filter((r) => r === 'hit').length;
-    this.headStartRound = false;
-    if (this.powers.scatter > 100) this.powers.scatter = 0;
-    if (hits >= this.required) {
+    const pass = this.hitCount() >= this.required;
+    this.headStart = false;
+    this.retry = false;
+    if (pass) {
       this.addStat('rounds');
       this.maxStat('bestRound', this.round);
       this.round++;
       this.startRound();
     } else if (this.guardian) {
       this.guardian = false;
-      this.texts.add(this.W / 2, 240, 'GUARDIAN: ROUND RETRY', '#7cf', 30);
+      this.retry = true;
       this.audio.play('powerup');
       this.startRound();
     } else {
       this.phase = 'over';
+      this.phaseT = 0;
       this.dogMode = 'laugh';
+      this.dogX = this.W / 2;
+      this.dogT = 0;
+      this.dogStay = true;
+      this.laughStep = 0;
       this.endGame(2.2, false);
     }
   }
@@ -442,281 +693,98 @@ export class DuckGame extends BaseGame {
 
   render(): void {
     const ctx = this.ctx;
+    const calm = this.services.reducedMotion;
     ctx.save();
     ctx.translate(this.shake.x, this.shake.y);
-    this.drawSky();
-    for (const c of this.crates) this.drawCrate(c);
-    for (const d of this.ducks) if (d.state !== 'gone') this.drawDuck(d);
-    this.drawDog();
-    this.drawForeground();
-    this.particles.render(ctx);
-    for (const h of this.holes) {
-      ctx.globalAlpha = h.life / 0.4;
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(h.x, h.y, (1 - h.life / 0.4) * 40 + 6, 0, TAU);
-      ctx.stroke();
+    this.scenery.drawBack(this.round, this.time, this.clouds);
+    if (this.escapeFlash > 0 && !calm) {
+      ctx.fillStyle = `rgba(255,140,180,${Math.min(0.4, this.escapeFlash * 0.45)})`;
+      ctx.fillRect(-20, -20, this.W + 40, this.grassTop + 20);
     }
-    ctx.globalAlpha = 1;
+    const rise = this.dogRise();
+    if (rise > 0 && this.dogMode !== 'none') {
+      drawDog(
+        ctx,
+        clamp(this.dogX, 120, this.W - 120),
+        this.grassTop + 62,
+        rise,
+        this.dogMode,
+        this.dogKinds,
+        this.time,
+      );
+    }
+    for (const c of this.crates) drawCrate(ctx, c);
+    for (const d of this.ducks) if (d.state !== 'gone') this.drawDuck(d);
+    this.scenery.drawFront(this.round, this.time);
+    this.particles.render(ctx);
+    this.drawHoles();
     this.texts.render(ctx);
     ctx.restore();
-    if (this.flash > 0 && !this.services.reducedMotion) {
-      ctx.fillStyle = `rgba(255,255,255,${this.flash * 4})`;
+    if (this.flash > 0 && !calm) {
+      ctx.fillStyle = `rgba(255,255,255,${this.flash * 3})`;
       ctx.fillRect(0, 0, this.W, this.H);
     }
-    this.drawHud();
+    if (!this.services.preview) this.drawHud();
     this.drawCrosshair();
   }
 
-  private drawSky(): void {
-    const ctx = this.ctx;
-    const sky = SKIES[(this.round - 1) % SKIES.length] ?? SKIES[0];
-    const g = ctx.createLinearGradient(0, 0, 0, GRASS_TOP);
-    g.addColorStop(0, sky[0]);
-    g.addColorStop(1, sky[1]);
-    ctx.fillStyle = g;
-    ctx.fillRect(-20, -20, this.W + 40, this.H + 40);
-    if (this.escapeFlash > 0) {
-      ctx.fillStyle = `rgba(255,140,180,${Math.min(0.45, this.escapeFlash * 0.5)})`;
-      ctx.fillRect(-20, -20, this.W + 40, this.H + 40);
+  /** How far the dog has risen out of the grass, 0..1. */
+  private dogRise(): number {
+    const t = this.dogT;
+    if (this.dogStay) return Math.min(1, t / 0.3);
+    if (this.dogMode === 'none' || t >= PACE.dog) return 0;
+    if (t < PACE.dogRise) {
+      const k = 1 - t / PACE.dogRise;
+      return 1 - k * k;
     }
-    const night = (this.round - 1) % SKIES.length === 3;
-    if (night) {
-      ctx.fillStyle = '#f5f3ce';
-      ctx.beginPath();
-      ctx.arc(800, 90, 34, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < 50; i++) ctx.fillRect(hash1(i) * this.W, hash1(i + 7) * 300, 2, 2);
-    } else {
-      const sg = ctx.createRadialGradient(820, 90, 10, 820, 90, 90);
-      sg.addColorStop(0, 'rgba(255,250,210,0.95)');
-      sg.addColorStop(1, 'rgba(255,250,210,0)');
-      ctx.fillStyle = sg;
-      ctx.fillRect(700, 0, 260, 200);
-    }
-    for (const c of this.clouds) {
-      ctx.fillStyle = night ? 'rgba(180,180,220,0.18)' : 'rgba(255,255,255,0.85)';
-      ctx.beginPath();
-      ctx.ellipse(c.x, c.y, 60 * c.s, 20 * c.s, 0, 0, TAU);
-      ctx.ellipse(c.x + 40 * c.s, c.y - 12 * c.s, 40 * c.s, 22 * c.s, 0, 0, TAU);
-      ctx.fill();
-    }
-    // Distant tree line
-    ctx.fillStyle = night ? '#1d2b3a' : '#4f8f5a';
-    ctx.beginPath();
-    ctx.moveTo(0, GRASS_TOP);
-    for (let x = 0; x <= this.W; x += 24) ctx.lineTo(x, GRASS_TOP - 40 - hash1(x * 0.37) * 40);
-    ctx.lineTo(this.W, GRASS_TOP);
-    ctx.fill();
-  }
-
-  private drawForeground(): void {
-    const ctx = this.ctx;
-    const night = (this.round - 1) % SKIES.length === 3;
-    // Big tree on the left
-    ctx.fillStyle = night ? '#2b1d14' : '#5b3a1e';
-    ctx.fillRect(60, 170, 34, GRASS_TOP - 160);
-    ctx.fillStyle = night ? '#173826' : '#2f7d3a';
-    for (const [x, y, r] of [
-      [77, 150, 70],
-      [30, 200, 50],
-      [130, 195, 55],
-      [80, 230, 55],
-    ] as const) {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, TAU);
-      ctx.fill();
-    }
-    // Ground and tall grass
-    ctx.fillStyle = night ? '#3a2a1e' : '#8a5a2b';
-    ctx.fillRect(-20, GRASS_TOP + 70, this.W + 40, this.H);
-    const blades = night ? ['#1f5a2c', '#2a6b36'] : ['#4caf50', '#3d8f40'];
-    for (let layer = 0; layer < 2; layer++) {
-      ctx.fillStyle = blades[layer] as string;
-      ctx.beginPath();
-      ctx.moveTo(-10, GRASS_TOP + 90);
-      for (let x = -10; x <= this.W + 10; x += 14) {
-        const sway = Math.sin(this.time * 1.5 + x * 0.05 + layer) * 4;
-        ctx.lineTo(x + 7 + sway, GRASS_TOP - 10 + layer * 20 + hash1(x + layer * 13) * 20);
-        ctx.lineTo(x + 14, GRASS_TOP + 40 + layer * 10);
-      }
-      ctx.lineTo(this.W + 10, GRASS_TOP + 90);
-      ctx.fill();
-    }
+    const sink = PACE.dog - PACE.dogSink;
+    return t > sink ? 1 - (t - sink) / PACE.dogSink : 1;
   }
 
   private drawDuck(d: Duck): void {
-    const ctx = this.ctx;
-    const info = DUCK_INFO[d.kind];
     const facing = d.vx >= 0 ? 1 : -1;
-    ctx.save();
-    ctx.translate(d.x, d.y);
-    if (d.state === 'fall') ctx.rotate(d.t * 14);
+    let rot = 0;
+    if (d.state === 'fall') rot = d.t * 14;
     else if (d.state === 'fly' || d.state === 'escape')
-      ctx.rotate(clamp(Math.atan2(d.vy, Math.abs(d.vx)) * 0.4, -0.5, 0.5) * facing);
-    ctx.scale(facing * 1.1, 1.1);
-    if (d.kind === 'gold') {
-      ctx.shadowColor = '#ffd23f';
-      ctx.shadowBlur = 18;
-    }
-    // Tail
-    ctx.fillStyle = info.body;
-    ctx.beginPath();
-    ctx.moveTo(-26, -2);
-    ctx.lineTo(-38, -8);
-    ctx.lineTo(-36, 6);
-    ctx.fill();
-    // Body
-    ctx.beginPath();
-    ctx.ellipse(-4, 2, 26, 15, 0, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = info.belly;
-    ctx.beginPath();
-    ctx.ellipse(-2, 9, 20, 7, 0, 0, TAU);
-    ctx.fill();
-    // Head
-    ctx.fillStyle = info.head;
-    ctx.beginPath();
-    ctx.arc(22, -10, 11, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(14, -2, 14, 3);
-    // Beak
-    ctx.fillStyle = '#f4a020';
-    ctx.beginPath();
-    ctx.moveTo(31, -12);
-    ctx.lineTo(44, -8);
-    ctx.lineTo(31, -5);
-    ctx.fill();
-    // Eye
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(25, -13, 3.5, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#111';
-    if (d.state === 'hit' || d.state === 'fall') {
-      ctx.strokeStyle = '#111';
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(23, -15);
-      ctx.lineTo(27, -11);
-      ctx.moveTo(27, -15);
-      ctx.lineTo(23, -11);
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
-      ctx.arc(26, -13, 1.8, 0, TAU);
-      ctx.fill();
-    }
-    // Wing
-    const flapA = d.state === 'hit' ? -1.2 : Math.sin(d.flap) * 1.0;
-    ctx.save();
-    ctx.translate(-6, -4);
-    ctx.rotate(-flapA * 0.9);
-    ctx.fillStyle = info.wing;
-    ctx.beginPath();
-    ctx.ellipse(-4, -12, 9, 20, -0.4, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-    ctx.restore();
-    ctx.shadowBlur = 0;
-  }
-
-  private drawCrate(c: Crate): void {
-    const ctx = this.ctx;
-    const info = POWER_INFO[c.kind];
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(c.x, c.y - 18);
-    ctx.lineTo(c.x, c.y - 50);
-    ctx.stroke();
-    ctx.fillStyle = info.color;
-    ctx.beginPath();
-    ctx.ellipse(c.x, c.y - 66, 20, 24, 0, 0, TAU);
-    ctx.fill();
-    fillRoundRect(ctx, c.x - 18, c.y - 18, 36, 36, 6, '#c58b4a');
-    ctx.strokeStyle = '#7a5226';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(c.x - 15, c.y - 15, 30, 30);
-    text(ctx, c.kind === 'slowmo' ? 'S' : c.kind === 'scatter' ? 'W' : '+3', c.x, c.y + 1, {
-      size: 16,
-      align: 'center',
-      color: info.color,
+      rot = clamp(Math.atan2(d.vy, Math.abs(d.vx)) * 0.4, -0.5, 0.5) * facing;
+    drawDuckSprite(this.ctx, d.kind, d.x, d.y, {
+      facing,
+      rot,
+      wing: d.state === 'hit' ? -1.2 : Math.sin(d.flap),
+      dead: d.state === 'hit' || d.state === 'fall',
+      scale: 1.1,
     });
+    if (d.state === 'hit' && d.t < 0.12) {
+      const ctx = this.ctx;
+      ctx.globalAlpha = 1 - d.t / 0.12;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 30 + d.t * 200, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
 
-  private drawDog(): void {
-    if (this.dogMode === 'none') return;
+  private drawHoles(): void {
     const ctx = this.ctx;
-    const t = this.phase === 'over' ? Math.min(1, this.phaseT * 2) : this.phaseT;
-    const rise =
-      this.phase === 'over' ? t : t < 0.3 ? t / 0.3 : t > 1.2 ? Math.max(0, 1 - (t - 1.2) / 0.3) : 1;
-    const x = clamp(this.dogX, 120, this.W - 120);
-    const y = GRASS_TOP + 60 - rise * 110;
-    ctx.save();
-    ctx.translate(x, y + (this.dogMode === 'laugh' ? Math.abs(Math.sin(this.time * 14)) * -6 : 0));
-    // Head
-    ctx.fillStyle = '#b5733c';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 34, 30, 0, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#6b3d1c';
-    ctx.beginPath();
-    ctx.ellipse(-32, -2, 12, 26, 0.3, 0, TAU);
-    ctx.ellipse(32, -2, 12, 26, -0.3, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#f3dcc0';
-    ctx.beginPath();
-    ctx.ellipse(0, 14, 20, 15, 0, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#1b1b1b';
-    ctx.beginPath();
-    ctx.ellipse(0, 6, 8, 6, 0, 0, TAU);
-    ctx.fill();
-    if (this.dogMode === 'laugh') {
-      ctx.strokeStyle = '#1b1b1b';
+    for (const h of this.holes) {
+      const k = h.life / HOLE_LIFE;
+      ctx.globalAlpha = k;
+      ctx.strokeStyle = h.hit ? '#ffd23f' : '#fff';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(-12, -10, 6, Math.PI, 0);
-      ctx.moveTo(18, -10);
-      ctx.arc(12, -10, 6, Math.PI, 0);
+      ctx.arc(h.x, h.y, (1 - k) * 40 + 6, 0, TAU);
       ctx.stroke();
-      ctx.fillStyle = '#7a1f1f';
-      ctx.beginPath();
-      ctx.ellipse(0, 22, 10, 7, 0, 0, Math.PI);
-      ctx.fill();
-    } else {
-      ctx.fillStyle = '#1b1b1b';
-      ctx.beginPath();
-      ctx.arc(-12, -10, 4, 0, TAU);
-      ctx.arc(12, -10, 4, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = '#1b1b1b';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 16, 8, 0.2, Math.PI - 0.2);
-      ctx.stroke();
-      // Ducks held up
-      for (let i = 0; i < this.dogCount; i++) {
-        ctx.save();
-        ctx.translate((i - (this.dogCount - 1) / 2) * 60, -48);
-        ctx.rotate(Math.PI / 2);
-        ctx.scale(0.6, 0.6);
-        ctx.fillStyle = DUCK_INFO.green.body;
+      // Muzzle spark for the first few frames.
+      if (k > 0.8) {
+        ctx.fillStyle = '#fffbe0';
         ctx.beginPath();
-        ctx.ellipse(0, 0, 26, 14, 0, 0, TAU);
+        ctx.arc(h.x, h.y, 9 * (k - 0.8) * 5, 0, TAU);
         ctx.fill();
-        ctx.fillStyle = DUCK_INFO.green.head;
-        ctx.beginPath();
-        ctx.arc(26, 0, 11, 0, TAU);
-        ctx.fill();
-        ctx.restore();
       }
     }
-    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   private drawCrosshair(): void {
@@ -724,10 +792,18 @@ export class DuckGame extends BaseGame {
     const main = this.skinColor('main', '#ff3b3b');
     const accent = this.skinColor('accent', '#ffffff');
     const style = this.skinParam('style', 0);
-    const r = this.powers.scatter > 0 ? 62 : 30;
+    const r = this.shotRadius;
     const x = this.aimX;
     const y = this.aimY;
     ctx.save();
+    if (this.phase === 'wave' && this.shots <= 0) ctx.globalAlpha = 0.45;
+    // A soft fill tells you a duck is inside the ring right now.
+    if (this.phase === 'wave' && this.onTarget(r)) {
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.fill();
+    }
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(0,0,0,0.5)';
     ctx.beginPath();
@@ -752,15 +828,14 @@ export class DuckGame extends BaseGame {
       const gap = style === 2 ? 10 : 6;
       const len = style === 2 ? r + 12 : r + 6;
       ctx.beginPath();
-      for (const [dx, dy] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ] as const) {
-        ctx.moveTo(x + dx * gap, y + dy * gap);
-        ctx.lineTo(x + dx * len, y + dy * len);
-      }
+      ctx.moveTo(x + gap, y);
+      ctx.lineTo(x + len, y);
+      ctx.moveTo(x - gap, y);
+      ctx.lineTo(x - len, y);
+      ctx.moveTo(x, y + gap);
+      ctx.lineTo(x, y + len);
+      ctx.moveTo(x, y - gap);
+      ctx.lineTo(x, y - len);
       ctx.stroke();
       if (style === 2) {
         ctx.strokeStyle = main;
@@ -772,91 +847,203 @@ export class DuckGame extends BaseGame {
     ctx.restore();
   }
 
+  private onTarget(r: number): boolean {
+    for (const d of this.ducks)
+      if (d.state === 'fly' && Math.hypot(d.x - this.aimX, d.y - this.aimY) < r) return true;
+    return false;
+  }
+
+  /** Bottom HUD bar: anchored to the canvas edges and lifted above the bottom inset. */
+  private layoutBar(): BarLayout {
+    const b = this.bar;
+    const ins = this.insets;
+    b.s = clamp(this.H / 540, 1, 1.5);
+    b.h = 58 * b.s;
+    b.x = 10 + ins.left;
+    b.w = Math.max(0, this.W - ins.left - ins.right - 20);
+    b.y = Math.max(4, this.H - ins.bottom - b.h - 10);
+    return b;
+  }
+
   private drawHud(): void {
     const ctx = this.ctx;
-    const y = this.H - 58;
-    fillRoundRect(ctx, 12, y, this.W - 24, 48, 14, 'rgba(10,12,30,0.72)');
-    // Round
-    text(ctx, `R${this.round}`, 40, y + 24, { size: 22, align: 'center', color: '#7CFC00' });
-    // Shells
-    for (let i = 0; i < Math.max(SHOTS_PER_WAVE, this.shots); i++) {
+    const b = this.layoutBar();
+    const s = b.s;
+    const cy = b.y + b.h / 2;
+    const right = b.x + b.w;
+    fillRoundRect(ctx, b.x, b.y, b.w, b.h, 16 * s, 'rgba(10,12,30,0.74)');
+    // Round number and shells on the left.
+    let x = b.x + 16 * s;
+    const roundLabel = `R${this.round}`;
+    text(ctx, roundLabel, x, cy, { size: 28 * s, color: '#7CFC00' });
+    x += ctx.measureText(roundLabel).width + 14 * s;
+    const shells = Math.max(this.waveShells, this.shots);
+    const sw = 12 * s;
+    const step = (shells > 4 ? 17 : 20) * s;
+    for (let i = 0; i < shells; i++) {
       const filled = i < this.shots;
-      fillRoundRect(ctx, 76 + i * 18, y + 12, 12, 24, 4, filled ? '#e63946' : 'rgba(255,255,255,0.15)');
-      if (filled) fillRoundRect(ctx, 76 + i * 18, y + 30, 12, 6, 2, '#ffd23f');
+      const sx = x + i * step;
+      fillRoundRect(ctx, sx, cy - 14 * s, sw, 28 * s, 4 * s, filled ? '#e63946' : 'rgba(255,255,255,0.15)');
+      if (filled) fillRoundRect(ctx, sx, cy + 7 * s, sw, 7 * s, 2 * s, '#ffd23f');
     }
-    // Hit tracker
-    const tx = 200;
-    text(ctx, 'HIT', tx, y + 24, { size: 16, color: '#ccd' });
-    for (let i = 0; i < DUCKS_PER_ROUND; i++) {
-      const r = this.results[i];
-      const cx = tx + 50 + i * 30;
-      ctx.fillStyle = r === 'hit' ? '#ff4d6d' : r === 'miss' ? 'rgba(255,255,255,0.2)' : '#fff';
-      if (
-        this.phase === 'wave' &&
-        r === 'pending' &&
-        i < (this.waveIndex + 1) * DUCKS_PER_WAVE &&
-        i >= this.waveIndex * DUCKS_PER_WAVE
-      ) {
-        ctx.fillStyle = Math.floor(this.time * 4) % 2 === 0 ? '#fff' : '#aaa';
-      }
-      ctx.beginPath();
-      ctx.ellipse(cx, y + 24, 9, 7, 0, 0, TAU);
-      ctx.arc(cx + 8, y + 18, 5, 0, TAU);
-      ctx.fill();
-    }
-    const reqX = tx + 50 + (this.required - 0.5) * 30;
-    ctx.fillStyle = '#4dd9ff';
-    ctx.fillRect(reqX, y + 6, 2, 36);
-    // Score
-    text(ctx, Math.floor(this.score).toLocaleString('en-US'), this.W - 30, y + 24, {
-      size: 24,
-      align: 'right',
-    });
-    // Power timers
-    let px = 14;
-    for (const k of ['slowmo', 'scatter'] as const) {
-      const v = this.powers[k];
-      if (v <= 0) continue;
-      hudPill(ctx, px, 14, 190, 34);
-      text(ctx, POWER_INFO[k].label, px + 14, 31, { size: 13, color: POWER_INFO[k].color });
-      if (v < 100) progressBar(ctx, px + 112, 26, 66, 10, v / POWER_INFO[k].dur, POWER_INFO[k].color);
-      px += 200;
-    }
-    if (this.guardian) {
-      hudPill(ctx, this.W - 140, 14, 126, 34);
-      text(ctx, 'GUARDIAN', this.W - 77, 31, { size: 14, align: 'center', color: '#7cf' });
-    }
+    const leftEnd = x + shells * step + 8 * s;
+    // Score on the right.
+    const scoreLabel = Math.floor(this.score).toLocaleString('en-US');
+    text(ctx, scoreLabel, right - 16 * s, cy, { size: 30 * s, align: 'right' });
+    const rightStart = right - 16 * s - Math.max(ctx.measureText(scoreLabel).width, 90 * s) - 16 * s;
+    this.drawTracker(leftEnd, rightStart, cy, s);
+    this.drawStatusRow(b);
     if (
       this.phase === 'wave' &&
-      this.waveT > this.flyTime - 1.5 &&
+      this.waveT > this.waveFly - PACE.hurry &&
       this.ducks.some((d) => d.state === 'fly')
     ) {
-      text(ctx, 'HURRY!', this.W / 2, 70, { size: 28, align: 'center', color: '#ff6b6b' });
+      const pulse = 1 + 0.08 * Math.sin(this.time * 14);
+      text(ctx, 'HURRY!', this.W / 2, b.y - 66 * s, {
+        size: 30 * s * pulse,
+        align: 'center',
+        color: '#ff6b6b',
+      });
     }
+    this.drawBanners();
+  }
+
+  /** The ten-duck tracker with the required-hits marker, centred in the space left over. */
+  private drawTracker(left: number, right: number, cy: number, s: number): void {
+    const ctx = this.ctx;
+    const labelW = 44 * s;
+    const sp = clamp((right - left - labelW) / DUCKS_PER_ROUND, 22 * s, 34 * s);
+    const icon = Math.min(1, sp / (32 * s)) * s;
+    const x0 = (left + right) / 2 - (labelW + sp * DUCKS_PER_ROUND) / 2;
+    text(ctx, 'HIT', x0, cy, { size: 19 * s, color: '#ccd' });
+    const first = this.waveStart;
+    const last = first + (this.plan[this.waveIndex] ?? 2);
+    const blink = 0.5 + 0.5 * Math.sin(this.time * 10);
+    for (let i = 0; i < DUCKS_PER_ROUND; i++) {
+      const r = this.results[i] ?? 'pending';
+      const cx = x0 + labelW + (i + 0.4) * sp;
+      const iy = cy + 3 * s;
+      ctx.fillStyle =
+        r === 'pending'
+          ? '#fff'
+          : r === 'miss'
+            ? 'rgba(255,255,255,0.18)'
+            : r === 'gold'
+              ? '#ffd23f'
+              : '#ff4d6d';
+      trackerDuck(ctx, cx, iy, icon);
+      // The ducks in the air right now get a pulsing yellow ring.
+      if (this.phase === 'wave' && r === 'pending' && i >= first && i < last) {
+        ctx.strokeStyle = `rgba(255,210,63,${0.45 + 0.55 * blink})`;
+        ctx.lineWidth = 2.5 * s;
+        ctx.beginPath();
+        ctx.ellipse(cx + 3 * icon, iy - 2 * icon, 18 * icon, 14 * icon, 0, 0, TAU);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = '#4dd9ff';
+    ctx.fillRect(x0 + labelW + this.required * sp - 0.18 * sp - 1.5 * s, cy - 22 * s, 3 * s, 44 * s);
+  }
+
+  /** Power timers (left), combo and Guardian (right): just above the bar, below the flight band. */
+  private drawStatusRow(b: BarLayout): void {
+    const ctx = this.ctx;
+    const s = b.s;
+    const h = 40 * s;
+    const y = b.y - h - 8 * s;
+    let x = b.x;
+    for (const k of ['slowmo', 'scatter'] as const) {
+      const v = this.powers[k];
+      const boost = k === 'scatter' && this.headStart;
+      if (v <= 0 && !boost) continue;
+      const info = POWER_INFO[k];
+      const w = 190 * s;
+      hudPill(ctx, x, y, w, h);
+      text(ctx, boost && v <= 0 ? `${info.label} · ROUND` : info.label, x + 18 * s, y + 14 * s, {
+        size: 15 * s,
+        color: info.color,
+      });
+      const frac = v > 0 ? v / this.powerTime(info.dur) : 1;
+      progressBar(ctx, x + 18 * s, y + 25 * s, w - 36 * s, 7 * s, frac, info.color);
+      x += w + 8 * s;
+    }
+    let rx = b.x + b.w;
+    if (this.guardian) {
+      const w = 140 * s;
+      rx -= w;
+      hudPill(ctx, rx, y, w, h);
+      text(ctx, 'GUARDIAN', rx + w / 2, y + h / 2, { size: 16 * s, align: 'center', color: '#7cf' });
+      rx -= 8 * s;
+    }
+    const mult = this.multiplier;
+    if (mult > 1) {
+      const w = 118 * s;
+      rx -= w;
+      hudPill(ctx, rx, y, w, h);
+      text(ctx, `COMBO x${mult}`, rx + w / 2, y + h / 2, { size: 16 * s, align: 'center', color: '#ffb703' });
+    }
+  }
+
+  private drawBanners(): void {
+    const ctx = this.ctx;
     if (this.phase === 'intro') {
+      const goal = `Hit ${this.required} of ${DUCKS_PER_ROUND} ducks`;
       banner(
         ctx,
         this.W,
         this.H,
         `ROUND ${this.round}`,
-        `Hit ${this.required} of ${DUCKS_PER_ROUND} ducks`,
-        this.phaseT / 1.8,
-        '#7CFC00',
+        this.retry ? `Guardian retry · ${goal}` : goal,
+        this.phaseT / PACE.intro,
+        this.retry ? '#77ccff' : '#7CFC00',
       );
     } else if (this.phase === 'roundEnd') {
-      const hits = this.results.filter((r) => r === 'hit').length;
+      const hits = this.hitCount();
       const pass = hits >= this.required;
+      const sub = `${hits} / ${DUCKS_PER_ROUND} ducks${!pass && this.guardian ? ' · Guardian retry' : ''}`;
+      const t = this.phaseT / PACE.roundEnd;
       banner(
         ctx,
         this.W,
         this.H,
         pass ? 'ROUND CLEAR!' : 'ROUND FAILED',
-        `${hits} / ${DUCKS_PER_ROUND} ducks`,
-        this.phaseT / 2.8,
+        sub,
+        t,
         pass ? '#ffd23f' : '#ff6b6b',
       );
+      if (this.phaseT >= PACE.roundSkip && t < 0.8) {
+        text(ctx, 'Click or shoot to continue', this.W / 2, this.H * 0.38 + 92, {
+          size: 17,
+          align: 'center',
+          weight: 700,
+          color: 'rgba(255,255,255,0.85)',
+        });
+      }
     } else if (this.phase === 'over') {
-      banner(ctx, this.W, this.H, 'GAME OVER', '', 0.5, '#ff6b6b');
+      banner(ctx, this.W, this.H, 'GAME OVER', '', Math.min(0.5, this.phaseT / 1.5), '#ff6b6b');
     }
   }
+}
+
+/** Shot circle (x, y, r) against the crate box or its balloon. */
+function crateInReach(c: Crate, x: number, y: number, r: number): boolean {
+  if (Math.hypot(c.x - x, c.y - y) < r + CRATE_HALF) return true;
+  return Math.hypot(c.x - x, c.y - BALLOON_DY - y) < r + (BALLOON_RX + BALLOON_RY) / 2;
+}
+
+/**
+ * Shot circle against the duck where it was shown in the last rendered frame or the few frames
+ * before it (about 50 ms of input latency), so fast ducks can't slip out from under the reticle.
+ */
+function duckInReach(d: Duck, x: number, y: number, r: number): boolean {
+  const r2 = r * r;
+  let dx = d.x - x;
+  let dy = d.y - y;
+  if (dx * dx + dy * dy <= r2) return true;
+  for (let i = 0; i < HISTORY; i++) {
+    dx = (d.hx[i] ?? d.x) - x;
+    dy = (d.hy[i] ?? d.y) - y;
+    if (dx * dx + dy * dy <= r2) return true;
+  }
+  return false;
 }

@@ -11,11 +11,13 @@ export const duckGame: GameDefinition = {
   inspiredBy: 'Duck Hunt',
   width: 960,
   height: 540,
+  // Wider screens show more sky; the flight band, scenery and HUD all follow the width.
+  viewport: { minWidth: 800, maxWidth: 1280 },
   accent: '#7CFC00',
   gradient: ['#4caf50', '#1b5e20'],
   controls: [
     ['Mouse / tap', 'Aim and shoot'],
-    ['Arrow keys / WASD', 'Move crosshair'],
+    ['Arrow keys / WASD / stick', 'Move crosshair (hold to speed up; it drifts with nearby ducks)'],
     ['Space / Enter', 'Shoot'],
   ],
   touchHint: 'Tap anywhere to shoot at that spot.',
@@ -34,7 +36,7 @@ export const duckGame: GameDefinition = {
   },
   boostEffects: {
     shield: 'Retry one failed round.',
-    'head-start': 'Scatter shot for the whole first round.',
+    'head-start': 'Scatter shot for the whole first round (crates never cut it short).',
   },
   create: (s) => new DuckGame(s),
 };
