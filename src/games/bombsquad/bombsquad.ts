@@ -621,7 +621,7 @@ export class BombSquadGame extends BaseGame {
     this.score += 10;
     const s = this.screenOf(x + 0.5, y + 0.5);
     this.particles.emit({ x: s.x, y: s.y, count: 12, speed: 150, life: 0.6, size: 4, colors: WOOD_COLORS, shape: 'square' });
-    if (this.fxRng.chance(0) || !this.rng.chance(DROP_CHANCE)) return;
+    if (!this.rng.chance(DROP_CHANCE)) return;
     this.items.push({ kind: this.rng.weighted(ITEM_DROPS), x, y });
   }
 
