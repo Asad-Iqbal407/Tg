@@ -414,7 +414,8 @@ export function drawBarrier(v: View, ob: Obstacle, rel: number, alpha: number): 
   if (rel < NEAR + 0.3) return;
   const cx = laneX(ob.lane);
   const low = ob.kind === 'low';
-  ctx.globalAlpha = alpha;
+  // Fade out once passed, so a barrier doesn't loom over the bottom of the screen.
+  ctx.globalAlpha = rel < 0 ? alpha * Math.max(0, 1 + rel / 2.5) : alpha;
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath();
   cam.flat(ctx, cx - 1.15, cx + 1.15, 0.02, rel - 0.25, rel + 0.7);

@@ -6,16 +6,18 @@ export const platformerGame: GameDefinition = {
   title: 'Pixel Quest',
   tagline: 'Stomp, bump and run to the flag.',
   description:
-    'A side-scrolling platformer with procedurally assembled worlds. Bump blocks for coins and power-ups, stomp Grumbles, kick Shellbacks, throw fireballs and reach the flagpole before time runs out.',
+    'A side-scrolling platformer with procedurally assembled worlds. Bump blocks for coins and power-ups, stomp Grumbles, kick Shellbacks, throw fireballs and reach the flagpole before time runs out. Every world gets faster, busier and shorter on time.',
   genre: 'Platformer',
   inspiredBy: 'Super Mario Bros.',
   width: 960,
   height: 540,
+  // Wider screens see further ahead; the course is always 15 rows tall.
+  viewport: { minWidth: 800, maxWidth: 1280 },
   accent: '#ffd23f',
   gradient: ['#5c94fc', '#e63946'],
   controls: [
     ['← / → or A / D', 'Move'],
-    ['Space / ↑ / W', 'Jump (hold for higher)'],
+    ['Space / ↑ / W', 'Jump (hold for higher, tap to hop)'],
     ['Shift / X', 'Run · throw fireball when powered'],
   ],
   touchHint: 'Use the on-screen pad to move, A to jump and B to run / throw fire.',

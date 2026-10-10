@@ -3,26 +3,37 @@ import { BaseGame } from '../base';
 import { banner, drawCoin, fillRoundRect, hash1, hudPill, shade, text } from '../draw';
 import { drawSprite, type SpritePalette } from '../sprite';
 import type { GameServices } from '../types';
-import { buildLevel, ROWS, T, Tile, type EnemyKind, type LevelData, type TileId } from './level';
+import {
+  buildLevel,
+  CHUNK_TOP_ROW,
+  GROUND_ROW,
+  ROWS,
+  T,
+  Tile,
+  type EnemyKind,
+  type LevelData,
+  type Spawn,
+  type TileId,
+} from './level';
 import { FIREBALL, FLOWER, HERO, MUSHROOM, SHELL, SHELLBACK, SPIKY, WALKER, type HeroPose } from './sprites';
+import { themeFor, type Theme } from './themes';
+import { ENEMY_SPEED, enemySpeedScale, HURRY_TIME, levelTimeLimit, PHYS, worldLabel } from './tuning';
 
-const PHYS = {
-  accel: 1500,
-  airAccel: 1050,
-  friction: 1900,
-  walkMax: 215,
-  runMax: 335,
-  jumpV: 800,
-  gHold: 1750,
-  gRelease: 3400,
-  gFall: 2600,
-  maxFall: 950,
-  coyote: 0.09,
-  buffer: 0.12,
-};
 const PX = 2.25;
-const LEVEL_TIME = 150;
 const STOMP_POINTS = [100, 200, 400, 500, 800, 1000, 2000, 4000, 5000, 8000];
+/** The hero lands on an enemy when its feet were at most this far below the enemy's top last step. */
+const STOMP_TOLERANCE = 10;
+/** Score per second left on the clock at the end of a course. */
+const TIME_BONUS = 100;
+const SHELL_KICK_POINTS = 400;
+/** After a fresh course or a respawn, enemies wait this long (or until the hero moves). */
+const ENEMY_HOLD = 1.5;
+const RESPAWN_INVULN = 1.2;
+const BANNER_TIME = 2;
+const HUD_PAD = 12;
+const HUD_H = 40;
+/** Strip of floor (px) kept visible above touch controls covering the bottom of the canvas. */
+const FLOOR_STRIP = 24;
 
 interface Box {
   x: number;
@@ -45,6 +56,8 @@ interface Player extends Box {
   dead: boolean;
   combo: number;
   fireCooldown: number;
+  /** Just bounced off an enemy: overlaps from above keep counting as stomps for a moment. */
+  stompGrace: number;
 }
 
 interface Enemy extends Box {
@@ -54,7 +67,12 @@ interface Enemy extends Box {
   active: boolean;
   dir: number;
   chain: number;
+  /** Harmless (and can't be re-kicked) while > 0: right after a stomp or a kick. */
   kickGrace: number;
+  /** Turns around at ledges. */
+  patrol: boolean;
+  /** Walking speed for this course. */
+  speed: number;
 }
 
 interface Item extends Box {
@@ -88,49 +106,31 @@ interface Debris {
 
 type Phase = 'play' | 'dying' | 'flag' | 'walkoff' | 'tally';
 
-const THEMES = [
-  {
-    name: 'Grassland',
-    sky: ['#5c94fc', '#a8d0ff'],
-    hill: '#47b04f',
-    hillFar: '#8fd18f',
-    ground: '#c8743c',
-    grass: '#62d162',
-    stars: false,
-  },
-  {
-    name: 'Sunset Ridge',
-    sky: ['#6a3d9a', '#ff9a62'],
-    hill: '#8c3f6e',
-    hillFar: '#c06b8a',
-    ground: '#a8603a',
-    grass: '#f2b34c',
-    stars: false,
-  },
-  {
-    name: 'Starlight Hills',
-    sky: ['#081430', '#253a6e'],
-    hill: '#1f4d5c',
-    hillFar: '#2c3e70',
-    ground: '#5c4f86',
-    grass: '#46d9c4',
-    stars: true,
-  },
-] as const;
-
 export class PlatformerGame extends BaseGame {
   private readonly seed: number;
+  private readonly preview: boolean;
   private levelNum = 1;
   private level!: LevelData;
+  private theme!: Theme;
   private phase: Phase = 'play';
   private phaseT = 0;
   private lives: number;
-  private timeLeft = LEVEL_TIME;
+  private timeLeft = 0;
+  private hurried = false;
+  private hurryT = 99;
+  /** Camera: world x/y of the top-left of the view. camY is presentation only. */
   private camX = 0;
+  private camY = 0;
   private checkpointReached = false;
   private coinCounter = 0;
   private flagY = 0;
+  private castleFlag = 0;
+  private fireworks = 0;
+  private fireworkAt = 0;
   private bannerT = 0;
+  private showBanner = true;
+  private enemyHold = 0;
+  private pitDeath = false;
   private readonly bumps = new Map<number, number>();
   private player!: Player;
   private enemies: Enemy[] = [];
@@ -139,9 +139,16 @@ export class PlatformerGame extends BaseGame {
   private popCoins: PopCoin[] = [];
   private debris: Debris[] = [];
   private readonly heroPal: Record<'normal' | 'fire', SpritePalette>;
+  // Render-only state: device pixels per logical px, and fills cached per theme.
+  private rsX = 1;
+  private rsY = 1;
+  private sky: { theme: Theme; fill: CanvasGradient } | null = null;
+  private pipeFill: CanvasGradient | null = null;
+  private tones = { groundDark: '', grassDark: '' };
 
   constructor(s: GameServices) {
     super(s);
+    this.preview = s.preview === true;
     this.seed = this.rng.int(1, 1_000_000);
     this.lives = 3 + (this.hasBoost('shield') ? 1 : 0);
     const base = {
@@ -167,27 +174,34 @@ export class PlatformerGame extends BaseGame {
 
   // ------------------------------------------------------------------ level lifecycle
 
+  /** Build the current course. `fresh` starts it from the beginning; otherwise this is a respawn. */
   private loadLevel(fresh: boolean): void {
     this.level = buildLevel(this.levelNum, this.seed);
+    this.theme = themeFor(this.levelNum);
+    this.tones = { groundDark: shade(this.theme.ground, -0.18), grassDark: shade(this.theme.grass, -0.25) };
     this.bumps.clear();
     this.items = [];
     this.fireballs = [];
     this.popCoins = [];
     this.debris = [];
-    this.enemies = this.level.spawns.map((sp) => this.makeEnemy(sp.kind, sp.x, sp.y));
-    const spawn = this.checkpointReached && !fresh ? this.level.checkpoint : this.level.start;
+    const speed = enemySpeedScale(this.levelNum);
+    this.enemies = this.level.spawns.map((sp) => this.makeEnemy(sp, speed));
+    const atCheckpoint = !fresh && this.checkpointReached;
+    const cp = this.level.checkpoint;
     const prevPower = this.player?.power ?? 0;
+    const w = 22;
+    const h = 32;
     this.player = {
-      x: spawn.x,
-      y: spawn.y - 32,
-      w: 22,
-      h: 32,
+      x: atCheckpoint ? cp.x - w / 2 : this.level.start.x,
+      y: (atCheckpoint ? cp.y : this.level.start.y) - h,
+      w,
+      h,
       vx: 0,
       vy: 0,
       onGround: false,
       power: fresh ? prevPower : 0,
       facing: 1,
-      invuln: 0,
+      invuln: fresh ? 0 : RESPAWN_INVULN,
       coyote: 0,
       jumpBuf: 0,
       jumping: false,
@@ -195,22 +209,32 @@ export class PlatformerGame extends BaseGame {
       dead: false,
       combo: 0,
       fireCooldown: 0,
+      stompGrace: 0,
     };
     this.syncPlayerSize();
-    this.timeLeft = LEVEL_TIME;
+    this.timeLeft = levelTimeLimit(this.level.cols * T, this.levelNum);
+    this.hurried = false;
+    this.hurryT = 99;
     this.phase = 'play';
     this.phaseT = 0;
     this.flagY = 0;
+    this.castleFlag = 0;
+    this.fireworks = 0;
+    this.fireworkAt = 0;
     this.bannerT = 0;
-    this.camX = clamp(this.player.x - this.W * 0.4, 0, this.level.cols * T - this.W);
+    this.showBanner = fresh;
+    this.enemyHold = ENEMY_HOLD;
+    this.pitDeath = false;
+    this.camX = this.cameraTargetX();
+    this.camY = this.cameraTargetY();
   }
 
-  private makeEnemy(kind: EnemyKind, x: number, feetY: number): Enemy {
-    const h = kind === 'walker' ? 26 : kind === 'shellback' ? 28 : 24;
+  private makeEnemy(sp: Spawn, speedScale: number): Enemy {
+    const h = sp.kind === 'walker' ? 26 : sp.kind === 'shellback' ? 28 : 24;
     return {
-      kind,
-      x: x - 13,
-      y: feetY - h,
+      kind: sp.kind,
+      x: sp.x - 13,
+      y: sp.y - h,
       w: 26,
       h,
       vx: 0,
@@ -222,6 +246,8 @@ export class PlatformerGame extends BaseGame {
       dir: -1,
       chain: 0,
       kickGrace: 0,
+      patrol: sp.patrol,
+      speed: ENEMY_SPEED[sp.kind] * speedScale,
     };
   }
 
@@ -232,6 +258,36 @@ export class PlatformerGame extends BaseGame {
       p.y += p.h - h;
       p.h = h;
     }
+  }
+
+  /** Centre x of the castle door the hero walks into. */
+  private get doorX(): number {
+    return this.level.castleX + 1.5 * T;
+  }
+
+  // ------------------------------------------------------------------ camera
+
+  private cameraTargetX(): number {
+    // Narrow views keep the hero a little further left, so ~1.5 s of run-speed lookahead stays visible.
+    const anchor = clamp(0.4 - (1000 - this.W) * 0.0003, 0.33, 0.4);
+    const maxX = Math.max(0, this.level.cols * T - this.W);
+    return clamp(this.player.x + this.player.w / 2 - this.W * anchor, 0, maxX);
+  }
+
+  /**
+   * Vertical framing (presentation only). The level is exactly as tall as the default view; when touch
+   * controls cover the bottom of the canvas, the view shifts down into the unused sky rows so the
+   * hero's row and a strip of floor stay above them. It also follows the hero above the HUD.
+   */
+  private cameraTargetY(): number {
+    const worldTop = ROWS * T - this.H;
+    const hudBottom = this.insets.top + HUD_PAD + HUD_H;
+    const need = GROUND_ROW * T + FLOOR_STRIP - (this.H - this.insets.bottom);
+    const maxShift = Math.max(worldTop, (CHUNK_TOP_ROW + 1) * T - hudBottom - 8);
+    let y = clamp(need, worldTop, maxShift);
+    const p = this.player;
+    if ((this.phase === 'play' || this.phase === 'flag') && !p.dead) y = Math.min(y, p.y - hudBottom - 4);
+    return y;
   }
 
   // ------------------------------------------------------------------ tile helpers
@@ -278,8 +334,12 @@ export class PlatformerGame extends BaseGame {
     return false;
   }
 
-  /** Move along y; returns the column of a ceiling hit (for block bumps), -1 for floor, null otherwise. */
-  private moveY(b: Box, dy: number): number | null {
+  /**
+   * Move along y; returns the column of a ceiling hit (for block bumps), -1 for floor, null otherwise.
+   * With `nudge` > 0, a rising box that only clips a ceiling corner by that many px or less slides
+   * past it instead of bonking (corner correction, used for the hero).
+   */
+  private moveY(b: Box, dy: number, nudge = 0): number | null {
     b.onGround = false;
     if (dy === 0) dy = 0.001;
     const oldT = b.y;
@@ -302,6 +362,7 @@ export class PlatformerGame extends BaseGame {
     } else {
       const row = Math.floor(b.y / T);
       if ((row + 1) * T <= oldT + 0.5) {
+        if (nudge > 0 && this.slipCorner(b, row, c0, c1, nudge)) return null;
         let best: number | null = null;
         let bestDist = Infinity;
         const center = b.x + b.w / 2;
@@ -324,11 +385,28 @@ export class PlatformerGame extends BaseGame {
     return null;
   }
 
+  /** Corner correction: shift `b` sideways off a ceiling tile it overlaps by at most `max` px. */
+  private slipCorner(b: Box, row: number, c0: number, c1: number, max: number): boolean {
+    if (c0 === c1) return false;
+    const leftHit = this.solid(c0, row);
+    const rightHit = this.solid(c1, row);
+    if (leftHit === rightHit) return false;
+    const x = leftHit ? (c0 + 1) * T : c1 * T - b.w;
+    if (Math.abs(x - b.x) > max) return false;
+    // The spot it slides into must be free for the hero's full height.
+    const col = leftHit ? c1 : c0;
+    const r1 = Math.floor((b.y + b.h - 0.01) / T);
+    for (let r = row; r <= r1; r++) if (this.solid(col, r)) return false;
+    b.x = x;
+    return true;
+  }
+
   // ------------------------------------------------------------------ update
 
   protected tick(dt: number): void {
     this.phaseT += dt;
     this.bannerT += dt;
+    this.hurryT += dt;
     this.updateBlocks(dt);
     this.updatePopCoins(dt);
     switch (this.phase) {
@@ -348,13 +426,18 @@ export class PlatformerGame extends BaseGame {
         this.updateTally(dt);
         break;
     }
-    const target = clamp(this.player.x - this.W * 0.4, 0, this.level.cols * T - this.W);
-    this.camX += (target - this.camX) * damp(10, dt);
+    this.camX += (this.cameraTargetX() - this.camX) * damp(10, dt);
+    this.camY += (this.cameraTargetY() - this.camY) * damp(6, dt);
   }
 
   private updatePlay(dt: number): void {
     const p = this.player;
     this.timeLeft -= dt;
+    if (!this.hurried && this.timeLeft <= HURRY_TIME) {
+      this.hurried = true;
+      this.hurryT = 0;
+      this.audio.play('warning');
+    }
     if (this.timeLeft <= 0) {
       this.timeLeft = 0;
       this.die();
@@ -362,6 +445,7 @@ export class PlatformerGame extends BaseGame {
     }
     p.invuln = Math.max(0, p.invuln - dt);
     p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+    p.stompGrace = Math.max(0, p.stompGrace - dt);
 
     // Horizontal control
     const ax = this.input.axisX();
@@ -380,9 +464,10 @@ export class PlatformerGame extends BaseGame {
     if (Math.abs(p.vx) > max && p.onGround) p.vx -= Math.sign(p.vx) * PHYS.friction * dt;
 
     // Jump with coyote time and input buffering
+    const jumpPressed = this.input.wasPressed('primary') || this.input.wasPressed('up');
     p.coyote = p.onGround ? PHYS.coyote : Math.max(0, p.coyote - dt);
-    if (this.input.wasPressed('primary') || this.input.wasPressed('up')) p.jumpBuf = PHYS.buffer;
-    else p.jumpBuf = Math.max(0, p.jumpBuf - dt);
+    p.jumpBuf = jumpPressed ? PHYS.buffer : Math.max(0, p.jumpBuf - dt);
+    if (this.enemyHold > 0) this.enemyHold = ax !== 0 || jumpPressed ? 0 : this.enemyHold - dt;
     const holding = this.input.isDown('primary') || this.input.isDown('up');
     if (p.jumpBuf > 0 && p.coyote > 0) {
       p.vy = -(PHYS.jumpV + Math.abs(p.vx) * 0.18);
@@ -393,6 +478,8 @@ export class PlatformerGame extends BaseGame {
       this.addStat('jumps');
       this.audio.play('jump', { pitch: p.power > 0 ? 0.9 : 1.1 });
     }
+    // Variable height: letting go caps the rise, so a tap is a short hop.
+    if (p.jumping && !holding && p.vy < -PHYS.jumpCutV) p.vy = -PHYS.jumpCutV;
     const g = p.vy < 0 ? (holding && p.jumping ? PHYS.gHold : PHYS.gRelease) : PHYS.gFall;
     p.vy = Math.min(PHYS.maxFall, p.vy + g * dt);
 
@@ -415,13 +502,14 @@ export class PlatformerGame extends BaseGame {
     }
 
     const prevBottom = p.y + p.h;
+    const descending = p.vy > 0;
     this.moveX(p, p.vx * dt);
     if (p.x < 0) {
       p.x = 0;
       p.vx = 0;
     }
     const wasAir = !p.onGround;
-    const hit = this.moveY(p, p.vy * dt);
+    const hit = this.moveY(p, p.vy * dt, PHYS.cornerNudge);
     if (hit !== null && hit >= 0) {
       const row = Math.floor(p.y / T) - 1;
       this.bumpBlock(hit, row);
@@ -439,21 +527,16 @@ export class PlatformerGame extends BaseGame {
       return;
     }
 
-    if (!this.checkpointReached && p.x > this.level.checkpoint.x) {
+    const cp = this.level.checkpoint;
+    if (!this.checkpointReached && p.x + p.w / 2 >= cp.x) {
       this.checkpointReached = true;
       this.audio.play('select');
-      this.texts.add(
-        this.level.checkpoint.x - this.camX,
-        this.level.checkpoint.y - 90,
-        'CHECKPOINT',
-        '#7cf',
-        22,
-      );
+      this.texts.add(cp.x, cp.y - 3 * T, 'CHECKPOINT', '#7cf', 22);
     }
 
     this.collectCoins();
     this.updateItems(dt);
-    this.updateEnemies(dt, prevBottom);
+    this.updateEnemies(dt, prevBottom, descending);
     this.updateFireballs(dt);
     this.updateDebris(dt);
 
@@ -476,15 +559,7 @@ export class PlatformerGame extends BaseGame {
     this.coinCounter++;
     this.score += 200;
     this.audio.play('coin', { volume: 0.7 });
-    this.particles.emit({
-      x: x - this.camX,
-      y,
-      count: 6,
-      speed: 120,
-      life: 0.35,
-      size: 3,
-      colors: ['#ffe066', '#fff'],
-    });
+    this.particles.emit({ x, y, count: 6, speed: 120, life: 0.35, size: 3, colors: ['#ffe066', '#fff'] });
     if (this.coinCounter >= 100) {
       this.coinCounter -= 100;
       this.gainLife(x, y);
@@ -494,7 +569,7 @@ export class PlatformerGame extends BaseGame {
   private gainLife(x: number, y: number): void {
     this.lives++;
     this.audio.play('levelup');
-    this.texts.add(x - this.camX, y - 20, '1UP', '#5f5', 26);
+    this.texts.add(x, y - 20, '1UP', '#5f5', 26);
   }
 
   private bumpBlock(col: number, row: number): void {
@@ -531,12 +606,13 @@ export class PlatformerGame extends BaseGame {
         this.score += 50;
         this.addStat('bricks');
         this.audio.play('explode', { volume: 0.4, pitch: 2 });
+        // Debris is cosmetic: it draws from the effects RNG, never the gameplay one.
         for (let i = 0; i < 4; i++) {
           this.debris.push({
             x: col * T + (i % 2) * 18 + 9,
             y: row * T + Math.floor(i / 2) * 18 + 9,
-            vx: (i % 2 === 0 ? -1 : 1) * this.rng.range(80, 160),
-            vy: -this.rng.range(380, 560) + Math.floor(i / 2) * 120,
+            vx: (i % 2 === 0 ? -1 : 1) * this.fxRng.range(80, 160),
+            vy: -this.fxRng.range(380, 560) + Math.floor(i / 2) * 120,
             rot: 0,
           });
         }
@@ -600,12 +676,12 @@ export class PlatformerGame extends BaseGame {
       if (rectsOverlap(p, it) && it.emerge < 0.3) {
         it.y = 99999;
         if (it.kind === 'oneup') {
-          this.gainLife(it.x, p.y);
+          this.gainLife(p.x + p.w / 2, p.y);
         } else {
           this.score += 1000;
           this.addStat('powerups');
           this.audio.play('powerup');
-          this.texts.add(p.x - this.camX + p.w / 2, p.y - 10, '1000', '#fff', 20);
+          this.texts.add(p.x + p.w / 2, p.y - 10, '1000', '#fff', 20);
           if (it.kind === 'mushroom') p.power = Math.max(p.power, 1) as 1 | 2;
           else p.power = 2;
           this.syncPlayerSize();
@@ -615,16 +691,27 @@ export class PlatformerGame extends BaseGame {
     this.items = this.items.filter((it) => it.y < ROWS * T + 100);
   }
 
-  private updateEnemies(dt: number, prevBottom: number): void {
+  /** True when a walking enemy's next step would take it off a ledge. */
+  private ledgeAhead(e: Enemy): boolean {
+    if (e.vx === 0) return false;
+    const footX = e.vx > 0 ? e.x + e.w + 1 : e.x - 1;
+    return !this.solid(Math.floor(footX / T), Math.floor((e.y + e.h + 1) / T));
+  }
+
+  /**
+   * `prevBottom` is the hero's feet before this step's move and `descending` whether that move was
+   * downward; both are captured before any stomp bounces the hero, so landing on two enemies at
+   * once squashes both.
+   */
+  private updateEnemies(dt: number, prevBottom: number, descending: boolean): void {
     const p = this.player;
     const viewL = this.camX - 3 * T;
     const viewR = this.camX + this.W + 3 * T;
     for (const e of this.enemies) {
       if (!e.active) {
-        if (e.x < viewR && e.x + e.w > viewL) {
-          e.active = true;
-          e.vx = e.dir * (e.kind === 'spiky' ? 50 : 60);
-        } else continue;
+        if (this.enemyHold > 0 || e.x >= viewR || e.x + e.w <= viewL) continue;
+        e.active = true;
+        e.vx = e.dir * e.speed;
       }
       if (e.state === 'dead') {
         e.vy += PHYS.gFall * dt;
@@ -638,6 +725,7 @@ export class PlatformerGame extends BaseGame {
       }
       e.kickGrace = Math.max(0, e.kickGrace - dt);
       e.vy = Math.min(PHYS.maxFall, e.vy + PHYS.gFall * dt);
+      if (e.state === 'walk' && e.patrol && e.onGround && this.ledgeAhead(e)) e.vx = -e.vx;
       if (this.moveX(e, e.vx * dt)) {
         e.vx = -e.vx;
         if (e.state === 'shellMove') this.audio.play('bump', { volume: 0.5 });
@@ -664,19 +752,15 @@ export class PlatformerGame extends BaseGame {
         }
       }
 
-      if (p.dead || this.phase !== 'play') continue;
-      if (!rectsOverlap(p, e)) continue;
-      const stomping = p.vy > 0 && prevBottom <= e.y + 10;
-      if (stomping && e.kind !== 'spiky') {
+      if (p.dead || this.phase !== 'play' || !rectsOverlap(p, e)) continue;
+      const fromAbove = prevBottom <= e.y + STOMP_TOLERANCE;
+      if ((descending || p.stompGrace > 0) && fromAbove && e.kind !== 'spiky') {
         this.stomp(e);
+      } else if (e.kickGrace > 0) {
+        // Just stomped or kicked: harmless, and not kicked again by the same contact.
       } else if (e.state === 'shell') {
-        e.state = 'shellMove';
-        e.vx = (p.x + p.w / 2 < e.x + e.w / 2 ? 1 : -1) * 430;
-        e.kickGrace = 0.25;
-        e.chain = 0;
-        this.score += 400;
-        this.audio.play('stomp');
-      } else if (e.kickGrace <= 0) {
+        this.kickShell(e, p.x + p.w / 2 < e.x + e.w / 2 ? 1 : -1);
+      } else {
         this.hurt();
       }
     }
@@ -687,18 +771,27 @@ export class PlatformerGame extends BaseGame {
 
   private stomp(e: Enemy): void {
     const p = this.player;
-    const pts = STOMP_POINTS[Math.min(p.combo, STOMP_POINTS.length - 1)] ?? 100;
-    p.combo++;
-    if (p.combo > STOMP_POINTS.length) this.gainLife(e.x, e.y);
-    else {
-      this.score += pts;
-      this.texts.add(e.x - this.camX + e.w / 2, e.y - 6, `${pts}`, '#fff', 18);
-    }
+    // Sit the hero on top so the bounce starts clear of the enemy.
+    p.y = Math.min(p.y, e.y - p.h);
     p.vy = this.input.isDown('primary') || this.input.isDown('up') ? -720 : -460;
     p.jumping = true;
+    p.stompGrace = PHYS.stompGrace;
     this.addStat('stomps');
-    this.audio.play('stomp');
     this.services.haptic(20);
+    if (e.kind === 'shellback' && e.state === 'shell') {
+      // Landing on a resting shell kicks it away from the side the hero came down on.
+      const side = p.x + p.w / 2 - (e.x + e.w / 2);
+      this.kickShell(e, side === 0 ? p.facing : side < 0 ? 1 : -1);
+      return;
+    }
+    const pts = STOMP_POINTS[Math.min(p.combo, STOMP_POINTS.length - 1)] ?? 100;
+    p.combo++;
+    if (p.combo > STOMP_POINTS.length) this.gainLife(e.x + e.w / 2, e.y);
+    else {
+      this.score += pts;
+      this.texts.add(e.x + e.w / 2, e.y - 6, `${pts}`, '#fff', 18);
+    }
+    this.audio.play('stomp', { pitch: 1 + Math.min(p.combo, 6) * 0.06 });
     if (e.kind === 'walker') {
       e.state = 'squished';
       e.timer = 0.45;
@@ -709,9 +802,21 @@ export class PlatformerGame extends BaseGame {
         e.h = 18;
         e.y += 10;
       }
+      // A walking shellback retreats into its shell; a sliding shell stops.
       e.state = 'shell';
       e.vx = 0;
+      e.kickGrace = 0.2;
     }
+  }
+
+  private kickShell(e: Enemy, dir: number): void {
+    e.state = 'shellMove';
+    e.vx = dir * ENEMY_SPEED.shell * enemySpeedScale(this.levelNum, true);
+    e.kickGrace = 0.25;
+    e.chain = 0;
+    this.score += SHELL_KICK_POINTS;
+    this.texts.add(e.x + e.w / 2, e.y - 6, `${SHELL_KICK_POINTS}`, '#fff', 18);
+    this.audio.play('stomp', { pitch: 0.8 });
   }
 
   private killEnemy(e: Enemy, points: number, dir: number): void {
@@ -722,7 +827,7 @@ export class PlatformerGame extends BaseGame {
     this.score += points;
     this.addStat('enemies');
     this.audio.play('stomp', { pitch: 1.3 });
-    this.texts.add(e.x - this.camX + e.w / 2, e.y - 6, `${points}`, '#fff', 18);
+    this.texts.add(e.x + e.w / 2, e.y - 6, `${points}`, '#fff', 18);
   }
 
   private hurt(): void {
@@ -743,27 +848,30 @@ export class PlatformerGame extends BaseGame {
   private die(): void {
     const p = this.player;
     if (p.dead) return;
+    // Falling out of the level is its own death: no hop back up over the pit.
+    this.pitDeath = p.y + p.h > ROWS * T;
     p.dead = true;
-    p.vy = -720;
+    p.vy = this.pitDeath ? 0 : -720;
     p.vx = 0;
     p.power = 0;
+    this.syncPlayerSize();
     this.phase = 'dying';
     this.phaseT = 0;
     this.lives--;
     this.addStat('deaths');
     this.audio.play('hit');
-    this.shake.add(0.5);
+    this.shake.add(this.pitDeath ? 0.2 : 0.5);
     this.services.haptic(150);
   }
 
   private updateDying(dt: number): void {
     const p = this.player;
-    if (this.phaseT > 0.4) {
+    if (!this.pitDeath && this.phaseT > 0.4) {
       p.vy += PHYS.gFall * 0.6 * dt;
       p.y += p.vy * dt;
     }
     this.updateDebris(dt);
-    if (this.phaseT > 2.4) {
+    if (this.phaseT > (this.pitDeath ? 1.6 : 2.4)) {
       if (this.lives <= 0) {
         this.endGame(0.2);
         this.phaseT = -99;
@@ -780,18 +888,20 @@ export class PlatformerGame extends BaseGame {
     p.vx = 0;
     p.vy = 0;
     p.x = this.level.flagX - p.w - 2;
-    const groundY = 13 * T;
-    const poleTop = 4 * T;
+    const groundY = GROUND_ROW * T;
+    const poleTop = CHUNK_TOP_ROW * T;
     const t = clamp((groundY - (p.y + p.h)) / (groundY - poleTop), 0, 1);
     const pts = t > 0.85 ? 5000 : t > 0.6 ? 2000 : t > 0.35 ? 800 : t > 0.15 ? 400 : 100;
     this.score += pts;
-    this.texts.add(this.level.flagX - this.camX + 30, p.y, `${pts}`, '#ffd23f', 24);
+    this.fireworks = pts >= 5000 ? 3 : pts >= 2000 ? 2 : 1;
+    this.fireworkAt = 0.25;
+    this.texts.add(this.level.flagX + 30, p.y, `${pts}`, '#ffd23f', 24);
     this.audio.play('win');
   }
 
   private updateFlag(dt: number): void {
     const p = this.player;
-    const groundY = 13 * T;
+    const groundY = GROUND_ROW * T;
     p.y = Math.min(groundY - p.h, p.y + 300 * dt);
     this.flagY = Math.min(groundY - 4 * T - 56, this.flagY + 300 * dt);
     if (this.phaseT > 1.3) {
@@ -808,19 +918,26 @@ export class PlatformerGame extends BaseGame {
     this.moveX(p, p.vx * dt);
     this.moveY(p, p.vy * dt);
     p.anim += p.vx * dt * 0.05;
-    if (p.x > this.level.castleX + T) {
+    if (p.x + p.w / 2 >= this.doorX) {
       this.phase = 'tally';
       this.phaseT = 0;
     }
   }
 
   private updateTally(dt: number): void {
+    this.castleFlag = Math.min(1, this.castleFlag + dt * 1.5);
     if (this.timeLeft > 0) {
       const step = Math.min(this.timeLeft, 90 * dt);
       this.timeLeft -= step;
-      this.score += step * 50;
+      this.score += step * TIME_BONUS;
       if (Math.floor(this.phaseT * 20) % 2 === 0) this.audio.play('click', { volume: 0.3 });
+      // Restart the phase clock once counted down: the clear banner and fireworks follow.
+      if (this.timeLeft <= 0) this.phaseT = 0;
       return;
+    }
+    if (this.fireworks > 0 && this.phaseT >= this.fireworkAt) {
+      this.launchFirework(this.fireworks--);
+      this.fireworkAt += 0.45;
     }
     if (this.phaseT > 2.6) {
       this.addStat('levels');
@@ -829,6 +946,19 @@ export class PlatformerGame extends BaseGame {
       this.checkpointReached = false;
       this.loadLevel(true);
     }
+  }
+
+  /** A cosmetic burst over the castle; `i` (3, 2, 1) spreads them out. */
+  private launchFirework(i: number): void {
+    const x = this.doorX + (i - 2) * 2.2 * T;
+    const y = (2 + (i % 2)) * T + 10;
+    const colors = [
+      ['#ffd23f', '#fff'],
+      ['#ff6b6b', '#ffd6e0'],
+      ['#7cf', '#fff'],
+    ][i % 3] as string[];
+    this.particles.emit({ x, y, count: 28, speed: 260, life: 0.9, size: 3, colors, gravity: 220, drag: 1.2 });
+    this.audio.play('pop', { pitch: 0.6 + i * 0.15, volume: 0.8 });
   }
 
   private updateFireballs(dt: number): void {
@@ -852,7 +982,7 @@ export class PlatformerGame extends BaseGame {
       if (f.x < this.camX - 40 || f.x > this.camX + this.W + 40) f.life = 0;
       if (f.life <= 0)
         this.particles.emit({
-          x: f.x - this.camX,
+          x: f.x,
           y: f.y,
           count: 8,
           speed: 140,
@@ -876,17 +1006,17 @@ export class PlatformerGame extends BaseGame {
 
   // ------------------------------------------------------------------ render
 
-  private get theme() {
-    return THEMES[(this.levelNum - 1) % THEMES.length] ?? THEMES[0];
-  }
-
   render(): void {
     const ctx = this.ctx;
+    const m = typeof ctx.getTransform === 'function' ? ctx.getTransform() : undefined;
+    this.rsX = m && m.a > 0 ? m.a : 1;
+    this.rsY = m && m.d > 0 ? m.d : 1;
     ctx.save();
-    ctx.translate(Math.round(this.shake.x), Math.round(this.shake.y));
+    ctx.translate(this.snapX(this.shake.x), this.snapY(this.shake.y));
     this.drawBackground();
     ctx.save();
-    ctx.translate(-Math.round(this.camX), 0);
+    // Whole device pixels, so tile edges land on pixel boundaries at any scale.
+    ctx.translate(-this.snapX(this.camX), -this.snapY(this.camY));
     this.drawFlagAndCastle();
     this.drawItems();
     this.drawTiles();
@@ -895,66 +1025,110 @@ export class PlatformerGame extends BaseGame {
     this.drawFireballs();
     this.drawDebris();
     this.drawPlayer();
-    ctx.restore();
     this.particles.render(ctx);
     this.texts.render(ctx);
     ctx.restore();
-    this.drawHud();
+    ctx.restore();
+    if (!this.preview) this.drawHud();
+  }
+
+  private snapX(v: number): number {
+    return Math.round(v * this.rsX) / this.rsX;
+  }
+
+  private snapY(v: number): number {
+    return Math.round(v * this.rsY) / this.rsY;
+  }
+
+  /** fillRect with every edge on a device pixel, so neighbouring tiles share edges exactly (no seams). */
+  private rect(x: number, y: number, w: number, h: number): void {
+    const x0 = this.snapX(x);
+    const y0 = this.snapY(y);
+    this.ctx.fillRect(x0, y0, this.snapX(x + w) - x0, this.snapY(y + h) - y0);
+  }
+
+  private skyFill(): CanvasGradient {
+    const th = this.theme;
+    if (this.sky?.theme !== th) {
+      const g = this.ctx.createLinearGradient(0, 0, 0, this.H);
+      g.addColorStop(0, th.sky[0]);
+      g.addColorStop(1, th.sky[1]);
+      this.sky = { theme: th, fill: g };
+    }
+    return this.sky.fill;
   }
 
   private drawBackground(): void {
     const ctx = this.ctx;
     const th = this.theme;
-    const g = ctx.createLinearGradient(0, 0, 0, this.H);
-    g.addColorStop(0, th.sky[0]);
-    g.addColorStop(1, th.sky[1]);
-    ctx.fillStyle = g;
-    ctx.fillRect(-10, -10, this.W + 20, this.H + 20);
-    if (th.stars) {
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < 70; i++) {
-        const x = ((((hash1(i) * 1200 - this.camX * 0.05) % 1200) + 1200) % 1200) - 120;
-        const y = hash1(i + 99) * 300;
-        ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 2 + i));
-        ctx.fillRect(x, y, 2, 2);
-      }
-      ctx.globalAlpha = 1;
+    ctx.fillStyle = this.skyFill();
+    ctx.fillRect(-20, -20, this.W + 40, this.H + 40);
+    // Hills stand on the horizon, so they move vertically with the world.
+    const horizon = GROUND_ROW * T - this.camY;
+    if (th.stars) this.drawStars();
+    this.drawHills(th.hillFar, 420, 0.2, horizon, 120, 80, 0.6, 0.5, 0);
+    if (th.cave) this.drawStalactites();
+    else this.drawClouds();
+    this.drawHills(th.hill, 360, 0.5, horizon, 60, 70, 0.35, 0.4, 50);
+  }
+
+  private drawStars(): void {
+    const ctx = this.ctx;
+    const period = this.W + 240;
+    const count = Math.round(period / 17);
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < count; i++) {
+      const x = ((((hash1(i) * period - this.camX * 0.05) % period) + period) % period) - 120;
+      const y = hash1(i + 99) * 300 - this.camY * 0.3;
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 2 + i));
+      ctx.fillRect(x, y, 2, 2);
     }
-    // Far hills
-    ctx.fillStyle = th.hillFar;
-    for (let i = -1; i < 6; i++) {
-      const span = 420;
-      const off = -((this.camX * 0.2) % span);
-      const x = off + i * span;
-      const hgt = 120 + hash1(i + Math.floor((this.camX * 0.2) / span)) * 80;
-      ctx.beginPath();
-      ctx.ellipse(x + span / 2, 13 * T, span * 0.6, hgt, 0, Math.PI, 0);
-      ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  /** A parallax row of half-ellipse hills covering the whole view width. */
+  private drawHills(
+    color: string,
+    span: number,
+    parallax: number,
+    baseline: number,
+    minH: number,
+    varH: number,
+    rx: number,
+    cx: number,
+    salt: number,
+  ): void {
+    const ctx = this.ctx;
+    const scroll = this.camX * parallax;
+    const base = Math.floor(scroll / span);
+    const off = base * span - scroll;
+    const n = Math.ceil(this.W / span) + 2;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = -1; i < n; i++) {
+      const x = off + i * span + span * cx;
+      ctx.moveTo(x - span * rx, baseline);
+      ctx.ellipse(x, baseline, span * rx, minH + hash1(base + i + salt) * varH, 0, Math.PI, 0);
     }
-    // Clouds
-    for (let i = -1; i < 5; i++) {
-      const span = 320;
-      const base = Math.floor((this.camX * 0.35) / span);
-      const x = -((this.camX * 0.35) % span) + i * span + hash1(base + i) * 120;
-      const y = 50 + hash1(base + i + 7) * 120;
+    ctx.fill();
+  }
+
+  private drawClouds(): void {
+    const span = 320;
+    const scroll = this.camX * 0.35;
+    const base = Math.floor(scroll / span);
+    const off = base * span - scroll;
+    const n = Math.ceil(this.W / span) + 2;
+    this.ctx.fillStyle = this.theme.stars ? 'rgba(200,210,255,0.25)' : 'rgba(255,255,255,0.92)';
+    for (let i = -1; i < n; i++) {
+      const x = off + i * span + hash1(base + i) * 120;
+      const y = 50 + hash1(base + i + 7) * 120 - this.camY * 0.3;
       this.cloud(x, y, 0.8 + hash1(base + i + 3) * 0.5);
-    }
-    // Near hills
-    ctx.fillStyle = th.hill;
-    for (let i = -1; i < 5; i++) {
-      const span = 360;
-      const base = Math.floor((this.camX * 0.5) / span);
-      const x = -((this.camX * 0.5) % span) + i * span;
-      const hgt = 60 + hash1(base + i + 50) * 70;
-      ctx.beginPath();
-      ctx.ellipse(x + span * 0.4, 13 * T, span * 0.35, hgt, 0, Math.PI, 0);
-      ctx.fill();
     }
   }
 
   private cloud(x: number, y: number, s: number): void {
     const ctx = this.ctx;
-    ctx.fillStyle = this.theme.stars ? 'rgba(200,210,255,0.25)' : 'rgba(255,255,255,0.92)';
     ctx.beginPath();
     ctx.arc(x, y, 22 * s, 0, TAU);
     ctx.moveTo(x + 26 * s + 28 * s, y - 12 * s);
@@ -965,12 +1139,48 @@ export class PlatformerGame extends BaseGame {
     ctx.fill('nonzero');
   }
 
+  /** Underground: a rocky ceiling with stalactites and glinting crystals, in place of clouds. */
+  private drawStalactites(): void {
+    const ctx = this.ctx;
+    const span = 150;
+    const scroll = this.camX * 0.35;
+    const base = Math.floor(scroll / span);
+    const off = base * span - scroll;
+    const n = Math.ceil(this.W / span) + 2;
+    const top = 14 - this.camY * 0.3;
+    ctx.fillStyle = this.theme.hillFar;
+    ctx.fillRect(-20, -20, this.W + 40, top + 20);
+    ctx.beginPath();
+    for (let i = -1; i < n; i++) {
+      const x = off + i * span + hash1(base + i + 11) * 60;
+      const half = 14 + hash1(base + i + 13) * 16;
+      const len = 30 + hash1(base + i + 17) * 110;
+      ctx.moveTo(x - half, top - 1);
+      ctx.lineTo(x + half, top - 1);
+      ctx.lineTo(x + half * 0.2, top + len);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.fillStyle = this.theme.grass;
+    for (let i = -1; i < n; i++) {
+      const x = off + i * span + hash1(base + i + 11) * 60;
+      const len = 30 + hash1(base + i + 17) * 110;
+      ctx.globalAlpha = 0.35 + 0.5 * Math.abs(Math.sin(this.time * 1.7 + i * 1.3));
+      ctx.fillRect(x - 1, top + len - 14, 3, 5);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   private drawTiles(): void {
     const ctx = this.ctx;
     const c0 = Math.max(0, Math.floor(this.camX / T) - 1);
     const c1 = Math.min(this.level.cols - 1, Math.ceil((this.camX + this.W) / T) + 1);
+    const r0 = clamp(Math.floor(this.camY / T) - 1, 0, ROWS - 1);
+    const r1 = clamp(Math.ceil((this.camY + this.H) / T), 0, ROWS - 1);
+    // When the view reaches below the level (touch framing), the bottom ground row extends down.
+    const floorEnd = Math.max(ROWS * T, this.camY + this.H + 20);
     const th = this.theme;
-    for (let row = 0; row < ROWS; row++) {
+    for (let row = r0; row <= r1; row++) {
       for (let col = c0; col <= c1; col++) {
         const tile = this.tileAt(col, row);
         if (tile === Tile.Empty) continue;
@@ -981,8 +1191,8 @@ export class PlatformerGame extends BaseGame {
         switch (tile) {
           case Tile.Ground: {
             ctx.fillStyle = th.ground;
-            ctx.fillRect(x, y, T, T);
-            ctx.fillStyle = shade(th.ground, -0.18);
+            this.rect(x, y, T, (row === ROWS - 1 ? floorEnd : y + T) - y);
+            ctx.fillStyle = this.tones.groundDark;
             for (let i = 0; i < 3; i++) {
               const hx = hash1(idx * 3 + i);
               const hy = hash1(idx * 5 + i);
@@ -990,9 +1200,9 @@ export class PlatformerGame extends BaseGame {
             }
             if (this.tileAt(col, row - 1) === Tile.Empty) {
               ctx.fillStyle = th.grass;
-              ctx.fillRect(x, y, T, 9);
-              ctx.fillStyle = shade(th.grass, -0.25);
-              ctx.fillRect(x, y + 9, T, 3);
+              this.rect(x, y, T, 9);
+              ctx.fillStyle = this.tones.grassDark;
+              this.rect(x, y + 9, T, 3);
               ctx.fillStyle = th.grass;
               for (let i = 0; i < 4; i++) ctx.fillRect(x + i * 9 + 2, y + 9, 5, 4);
             }
@@ -1000,15 +1210,15 @@ export class PlatformerGame extends BaseGame {
           }
           case Tile.Brick:
             ctx.fillStyle = '#b5532a';
-            ctx.fillRect(x, y, T, T);
+            this.rect(x, y, T, T);
             ctx.fillStyle = '#6e2c12';
-            ctx.fillRect(x, y, T, 2);
-            ctx.fillRect(x, y + T / 2 - 1, T, 2);
-            ctx.fillRect(x + T / 2 - 1, y, 2, T / 2);
-            ctx.fillRect(x + T / 4 - 1, y + T / 2, 2, T / 2);
-            ctx.fillRect(x + (3 * T) / 4 - 1, y + T / 2, 2, T / 2);
+            this.rect(x, y, T, 2);
+            this.rect(x, y + T / 2 - 1, T, 2);
+            this.rect(x + T / 2 - 1, y, 2, T / 2);
+            this.rect(x + T / 4 - 1, y + T / 2, 2, T / 2);
+            this.rect(x + (3 * T) / 4 - 1, y + T / 2, 2, T / 2);
             ctx.fillStyle = 'rgba(255,255,255,0.15)';
-            ctx.fillRect(x, y + 2, T, 2);
+            this.rect(x, y + 2, T, 2);
             break;
           case Tile.Question: {
             const shimmer = 0.15 * Math.sin(this.time * 5);
@@ -1016,14 +1226,7 @@ export class PlatformerGame extends BaseGame {
             ctx.strokeStyle = '#8a4a00';
             ctx.lineWidth = 2;
             ctx.strokeRect(x + 2, y + 2, T - 4, T - 4);
-            ctx.fillStyle = '#8a4a00';
-            for (const [dx, dy] of [
-              [5, 5],
-              [T - 8, 5],
-              [5, T - 8],
-              [T - 8, T - 8],
-            ] as const)
-              ctx.fillRect(x + dx, y + dy, 3, 3);
+            this.rivets(x, y, '#8a4a00');
             text(ctx, '?', x + T / 2 + 1, y + T / 2 + 2, {
               size: 24,
               align: 'center',
@@ -1035,50 +1238,68 @@ export class PlatformerGame extends BaseGame {
           }
           case Tile.Used:
             fillRoundRect(ctx, x + 1, y + 1, T - 2, T - 2, 4, '#8a5a3c');
-            ctx.fillStyle = '#5a3420';
-            for (const [dx, dy] of [
-              [5, 5],
-              [T - 8, 5],
-              [5, T - 8],
-              [T - 8, T - 8],
-            ] as const)
-              ctx.fillRect(x + dx, y + dy, 3, 3);
+            this.rivets(x, y, '#5a3420');
             break;
           case Tile.Hard:
             ctx.fillStyle = '#9a8f86';
-            ctx.fillRect(x, y, T, T);
+            this.rect(x, y, T, T);
             ctx.fillStyle = '#c8bfb6';
-            ctx.fillRect(x, y, T, 4);
-            ctx.fillRect(x, y, 4, T);
+            this.rect(x, y, T, 4);
+            this.rect(x, y, 4, T);
             ctx.fillStyle = '#5e554e';
-            ctx.fillRect(x, y + T - 4, T, 4);
-            ctx.fillRect(x + T - 4, y, 4, T);
+            this.rect(x, y + T - 4, T, 4);
+            this.rect(x + T - 4, y, 4, T);
             break;
           case Tile.PipeTL:
           case Tile.PipeTR:
           case Tile.PipeL:
-          case Tile.PipeR: {
-            const left = tile === Tile.PipeTL || tile === Tile.PipeL;
-            const top = tile === Tile.PipeTL || tile === Tile.PipeTR;
-            const lip = top ? 4 : 0;
-            const px0 = left ? x + 3 - lip : x;
-            const pw = left ? T - 3 + lip : T - 3 + lip;
-            const grad = ctx.createLinearGradient(left ? x : x - T, 0, left ? x + 2 * T : x + T, 0);
-            grad.addColorStop(0, '#2f8f3a');
-            grad.addColorStop(0.3, '#7ee08a');
-            grad.addColorStop(0.55, '#3cb043');
-            grad.addColorStop(1, '#1d6b27');
-            ctx.fillStyle = grad;
-            ctx.fillRect(px0, y, pw, top ? T - 2 : T);
-            ctx.fillStyle = '#145020';
-            if (top) ctx.fillRect(px0, y + T - 4, pw, 2);
-            if (left) ctx.fillRect(px0, y, 2, T);
-            else ctx.fillRect(px0 + pw - 2, y, 2, T);
+          case Tile.PipeR:
+            this.drawPipeTile(tile, x, y);
             break;
-          }
         }
       }
     }
+  }
+
+  private rivets(x: number, y: number, color: string): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = color;
+    ctx.fillRect(x + 5, y + 5, 3, 3);
+    ctx.fillRect(x + T - 8, y + 5, 3, 3);
+    ctx.fillRect(x + 5, y + T - 8, 3, 3);
+    ctx.fillRect(x + T - 8, y + T - 8, 3, 3);
+  }
+
+  private drawPipeTile(tile: TileId, x: number, y: number): void {
+    const ctx = this.ctx;
+    const left = tile === Tile.PipeTL || tile === Tile.PipeL;
+    const top = tile === Tile.PipeTL || tile === Tile.PipeTR;
+    const lip = top ? 4 : 0;
+    const px0 = left ? x + 3 - lip : x;
+    const pw = T - 3 + lip;
+    const h = top ? T - 2 : T;
+    // One gradient spans the whole pipe (two tiles); it is built once in pipe-local coordinates.
+    const pipeX = left ? x : x - T;
+    if (!this.pipeFill) {
+      const g = ctx.createLinearGradient(0, 0, 2 * T, 0);
+      g.addColorStop(0, '#2f8f3a');
+      g.addColorStop(0.3, '#7ee08a');
+      g.addColorStop(0.55, '#3cb043');
+      g.addColorStop(1, '#1d6b27');
+      this.pipeFill = g;
+    }
+    const xa = this.snapX(px0);
+    const xb = this.snapX(px0 + pw);
+    const ya = this.snapY(y);
+    ctx.save();
+    ctx.translate(pipeX, 0);
+    ctx.fillStyle = this.pipeFill;
+    ctx.fillRect(xa - pipeX, ya, xb - xa, this.snapY(y + h) - ya);
+    ctx.restore();
+    ctx.fillStyle = '#145020';
+    if (top) this.rect(px0, y + T - 4, pw, 2);
+    if (left) this.rect(px0, y, 2, T);
+    else this.rect(px0 + pw - 2, y, 2, T);
   }
 
   private drawCoins(): void {
@@ -1092,21 +1313,24 @@ export class PlatformerGame extends BaseGame {
   private drawFlagAndCastle(): void {
     const ctx = this.ctx;
     const fx = this.level.flagX;
-    const groundY = 13 * T;
-    const topY = 4 * T;
-    // Checkpoint marker
+    const groundY = GROUND_ROW * T;
+    const topY = CHUNK_TOP_ROW * T;
+    // Checkpoint marker, standing on the ground.
     const cp = this.level.checkpoint;
+    const poleH = 2 * T + 10;
+    ctx.fillStyle = '#7d7d8a';
+    this.rect(cp.x - 7, cp.y - 6, 14, 6);
     ctx.fillStyle = '#ddd';
-    ctx.fillRect(cp.x, cp.y - 70, 4, 70);
+    this.rect(cp.x - 2, cp.y - poleH, 4, poleH - 6);
     ctx.fillStyle = this.checkpointReached ? '#4dd9ff' : '#888';
     ctx.beginPath();
-    ctx.moveTo(cp.x + 4, cp.y - 70);
-    ctx.lineTo(cp.x + 30, cp.y - 60);
-    ctx.lineTo(cp.x + 4, cp.y - 50);
+    ctx.moveTo(cp.x + 2, cp.y - poleH);
+    ctx.lineTo(cp.x + 30, cp.y - poleH + 10);
+    ctx.lineTo(cp.x + 2, cp.y - poleH + 20);
     ctx.fill();
-    // Pole
+    // Goal pole
     ctx.fillStyle = '#d8f3dc';
-    ctx.fillRect(fx - 3, topY, 6, groundY - topY);
+    this.rect(fx - 3, topY, 6, groundY - topY);
     ctx.fillStyle = '#2d6a4f';
     ctx.beginPath();
     ctx.arc(fx, topY - 6, 9, 0, TAU);
@@ -1128,12 +1352,25 @@ export class PlatformerGame extends BaseGame {
     const cw = 5 * T;
     const ch = 4 * T;
     const cy = groundY - ch;
+    // Its flag rises out of the tower once the hero is inside.
+    if (this.castleFlag > 0) {
+      const poleX = cx + cw / 2;
+      const rise = 46 * this.castleFlag;
+      ctx.fillStyle = '#d8f3dc';
+      this.rect(poleX - 2, cy - T - 12 - rise, 4, rise);
+      ctx.fillStyle = '#ffd23f';
+      ctx.beginPath();
+      ctx.moveTo(poleX + 2, cy - T - 12 - rise);
+      ctx.lineTo(poleX + 26, cy - T - 4 - rise);
+      ctx.lineTo(poleX + 2, cy - T + 4 - rise);
+      ctx.fill();
+    }
     ctx.fillStyle = '#9c4f2f';
-    ctx.fillRect(cx, cy + T, cw, ch - T);
-    ctx.fillRect(cx + T, cy - T, cw - 2 * T, 2 * T);
+    this.rect(cx, cy + T, cw, ch - T);
+    this.rect(cx + T, cy - T, cw - 2 * T, 2 * T);
     ctx.fillStyle = '#7a3a20';
-    for (let i = 0; i < 5; i++) ctx.fillRect(cx + i * T + 4, cy + T - 12, T - 10, 12);
-    for (let i = 0; i < 3; i++) ctx.fillRect(cx + T + i * T + 4, cy - T - 12, T - 10, 12);
+    for (let i = 0; i < 5; i++) this.rect(cx + i * T + 4, cy + T - 12, T - 10, 12);
+    for (let i = 0; i < 3; i++) this.rect(cx + T + i * T + 4, cy - T - 12, T - 10, 12);
     ctx.fillStyle = '#1b1b2f';
     ctx.beginPath();
     ctx.moveTo(cx + cw / 2 - 20, groundY);
@@ -1141,41 +1378,53 @@ export class PlatformerGame extends BaseGame {
     ctx.arc(cx + cw / 2, groundY - 44, 20, Math.PI, 0);
     ctx.lineTo(cx + cw / 2 + 20, groundY);
     ctx.fill();
-    ctx.fillRect(cx + T + 14, cy - 4, 10, 18);
-    ctx.fillRect(cx + 3 * T - 6, cy - 4, 10, 18);
+    this.rect(cx + T + 14, cy - 4, 10, 18);
+    this.rect(cx + 3 * T - 6, cy - 4, 10, 18);
   }
 
   private drawPlayer(): void {
     const p = this.player;
-    if (this.phase === 'tally' || (this.phase === 'walkoff' && p.x > this.level.castleX + 4)) return;
-    if (p.invuln > 0 && Math.floor(this.time * 16) % 2 === 0) return;
-    const big = p.power > 0 ? 'big' : 'small';
+    if (this.phase === 'tally' || this.pitDeath) return;
+    const ctx = this.ctx;
+    // Walking into the castle: fade out over the last steps before the door.
+    let alpha = this.phase === 'walkoff' ? clamp((this.doorX - (p.x + p.w / 2)) / 24, 0, 1) : 1;
+    if (p.invuln > 0 && !p.dead) {
+      if (this.services.reducedMotion) alpha *= 0.55;
+      else if (Math.floor(this.time * 16) % 2 === 0) return;
+    }
+    if (alpha <= 0) return;
+    const size = p.power > 0 ? 'big' : 'small';
     let pose: HeroPose = 'stand';
-    if (p.dead || !p.onGround) pose = 'jump';
+    if (p.dead) pose = 'dead';
+    else if (!p.onGround) pose = 'jump';
     else if (Math.abs(p.vx) > 10)
       pose = Math.floor(p.anim) % 3 === 0 ? 'walkA' : Math.floor(p.anim) % 3 === 1 ? 'walkB' : 'stand';
-    const def = HERO[big][pose];
-    const sw = 12 * PX;
+    const def = HERO[size][pose];
+    const sw = (def[0]?.length ?? 12) * PX;
     const sh = def.length * PX;
     const pal = p.power === 2 ? this.heroPal.fire : this.heroPal.normal;
+    ctx.globalAlpha = alpha;
     drawSprite(
-      this.ctx,
+      ctx,
       def,
       pal,
       Math.round(p.x + p.w / 2 - sw / 2),
       Math.round(p.y + p.h - sh),
       PX,
-      p.facing < 0,
+      pose !== 'dead' && p.facing < 0,
     );
+    ctx.globalAlpha = 1;
   }
 
   private drawEnemies(): void {
     const ctx = this.ctx;
+    const px = 2.4;
+    const step = Math.floor(this.time * 6) % 2;
     for (const e of this.enemies) {
       if (e.x + e.w < this.camX - T || e.x > this.camX + this.W + T) continue;
-      const frame = Math.floor(this.time * 6) % 2;
-      const px = 2.4;
-      const flip = e.vx > 0;
+      // Waiting enemies stand still; every sprite faces right and is mirrored when heading left.
+      const frame = e.active ? step : 0;
+      const flip = e.vx < 0 || (e.vx === 0 && e.dir < 0);
       ctx.save();
       if (e.state === 'dead') {
         ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
@@ -1192,10 +1441,11 @@ export class PlatformerGame extends BaseGame {
         drawSprite(ctx, def, WALKER_PAL, e.x + e.w / 2 - 6 * px, e.y + e.h - 12 * px, px, flip);
       } else if (e.kind === 'shellback') {
         if (e.state === 'shell' || e.state === 'shellMove') {
-          drawSprite(ctx, SHELL, SHELL_PAL, e.x + e.w / 2 - 6 * px, e.y + e.h - SHELL.length * px, px);
+          const spin = e.state === 'shellMove' && Math.floor(this.time * 14) % 2 === 1;
+          drawSprite(ctx, SHELL, SHELL_PAL, e.x + e.w / 2 - 6 * px, e.y + e.h - SHELL.length * px, px, spin);
         } else {
           const def = SHELLBACK[frame] ?? SHELLBACK[0]!;
-          drawSprite(ctx, def, SHELL_PAL, e.x + e.w / 2 - 6 * px, e.y + e.h - 12 * px, px, !flip);
+          drawSprite(ctx, def, SHELL_PAL, e.x + e.w / 2 - 6 * px, e.y + e.h - 12 * px, px, flip);
         }
       } else {
         const def = SPIKY[frame] ?? SPIKY[0]!;
@@ -1237,42 +1487,70 @@ export class PlatformerGame extends BaseGame {
     }
   }
 
+  /** HUD anchored to the canvas edges inside the insets: score, coins, world on the left; clock, lives on the right. */
   private drawHud(): void {
     const ctx = this.ctx;
-    hudPill(ctx, 12, 12, 210, 40);
-    text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, 30, 33, { size: 22 });
-    hudPill(ctx, 232, 12, 110, 40);
-    drawCoin(ctx, 254, 32, 11);
-    text(ctx, `× ${this.coins}`, 272, 33, { size: 20 });
-    hudPill(ctx, 352, 12, 170, 40);
-    text(ctx, `WORLD 1-${this.levelNum}`, 437, 33, { size: 18, align: 'center' });
-    hudPill(ctx, this.W - 262, 12, 130, 40);
-    const low = this.timeLeft < 30 && this.phase === 'play';
-    text(ctx, `⏱ ${Math.ceil(this.timeLeft)}`, this.W - 197, 33, {
+    const ins = this.insets;
+    const top = ins.top + HUD_PAD;
+    const left = ins.left + HUD_PAD;
+    const right = this.W - ins.right - HUD_PAD;
+    const cy = top + HUD_H / 2 + 1;
+    hudPill(ctx, left, top, 196, HUD_H);
+    text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, left + 18, cy, { size: 22 });
+    hudPill(ctx, left + 206, top, 104, HUD_H);
+    drawCoin(ctx, left + 228, cy - 1, 11);
+    text(ctx, `× ${this.coins}`, left + 246, cy, { size: 20 });
+    const livesX = right - 104;
+    const clockX = livesX - 10 - 120;
+    hudPill(ctx, clockX, top, 120, HUD_H);
+    const low = this.timeLeft < HURRY_TIME && this.phase === 'play';
+    text(ctx, `⏱ ${Math.ceil(this.timeLeft)}`, clockX + 60, cy, {
       size: 20,
       align: 'center',
       color: low ? '#ff6b6b' : '#fff',
     });
-    hudPill(ctx, this.W - 122, 12, 110, 40);
-    this.heart(this.W - 98, 32, 10);
-    text(ctx, `× ${Math.max(0, this.lives)}`, this.W - 80, 33, { size: 20 });
-    if (this.bannerT < 2.4 && this.phase === 'play') {
-      banner(ctx, this.W, this.H, `WORLD 1-${this.levelNum}`, this.theme.name, this.bannerT / 2.4, '#ffd23f');
+    hudPill(ctx, livesX, top, 104, HUD_H);
+    this.heart(livesX + 24, cy - 1, 10);
+    text(ctx, `× ${Math.max(0, this.lives)}`, livesX + 42, cy, { size: 20 });
+    // The world pill follows the coins when there is room, else it drops below the score.
+    const worldW = 150;
+    let wx = left + 320;
+    let wy = top;
+    if (wx + worldW > clockX - 10) {
+      wx = left;
+      wy = top + HUD_H + 8;
     }
+    hudPill(ctx, wx, wy, worldW, HUD_H);
+    text(ctx, `WORLD ${worldLabel(this.levelNum)}`, wx + worldW / 2, wy + HUD_H / 2 + 1, {
+      size: 18,
+      align: 'center',
+    });
+
+    // Banners sit in the open sky under the HUD, clear of the rows the hero plays in.
+    const sky = top + HUD_H;
+    const mid = ins.top + (this.H - ins.top - ins.bottom) * 0.38;
+    if (this.phase === 'play' && this.showBanner && this.bannerT < BANNER_TIME) {
+      const t = this.bannerT / BANNER_TIME;
+      this.drawBanner(`WORLD ${worldLabel(this.levelNum)}`, this.theme.name, t, '#ffd23f', sky + 72);
+    }
+    if (this.phase === 'play' && this.hurryT < 2) this.drawBanner('HURRY UP!', '', this.hurryT / 2, '#ff6b6b', sky + 56);
     if (this.phase === 'tally' && this.timeLeft <= 0) {
-      banner(
-        ctx,
-        this.W,
-        this.H,
-        'COURSE CLEAR!',
-        `Next: World 1-${this.levelNum + 1}`,
-        clamp(this.phaseT / 2.6, 0, 1),
-        '#7CFC00',
-      );
+      const next = `Next: World ${worldLabel(this.levelNum + 1)}`;
+      this.drawBanner('COURSE CLEAR!', next, clamp(this.phaseT / 2.6, 0, 1), '#7CFC00', mid);
     }
     if (this.phase === 'dying' && this.lives <= 0 && this.phaseT > 1) {
-      banner(ctx, this.W, this.H, 'GAME OVER', '', 0.5, '#ff6b6b');
+      this.drawBanner('GAME OVER', '', 0.5, '#ff6b6b', mid);
     }
+  }
+
+  /** The shared banner, centred at height `y` across the area between the side insets. */
+  private drawBanner(title: string, subtitle: string, t: number, color: string, y: number): void {
+    const ctx = this.ctx;
+    const w = this.W - this.insets.left - this.insets.right;
+    ctx.save();
+    ctx.translate(this.insets.left, y - this.H * 0.38);
+    banner(ctx, w, this.H, title, subtitle, t, color);
+    ctx.restore();
   }
 
   private heart(x: number, y: number, r: number): void {

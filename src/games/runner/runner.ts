@@ -858,8 +858,8 @@ export class RunnerGame extends BaseGame {
 
   private drawCoin(c: Coin, rel: number, coinFar: number): void {
     const cam = this.cam.project(c.x, c.y, rel);
-    // Fade in over the last 20 m of coin visibility instead of popping in.
-    this.ctx.globalAlpha = clamp((coinFar - rel) / 20, 0, 1);
+    // Fade in over the last 20 m of coin visibility instead of popping in, and out once passed.
+    this.ctx.globalAlpha = clamp(Math.min((coinFar - rel) / 20, 1 + rel / 2), 0, 1);
     this.coinSprites.draw(
       this.ctx,
       cam.px,

@@ -32,8 +32,9 @@ const CANOPY_X = 4.8;
 const CANOPY_Y = 6.2;
 const WATER_Y = -28;
 export const GANTRY_EVERY = 40;
-const GANTRY_Y = 7.8;
-const WIRE_Y = 7.2;
+/** Overhead structures sit above the highest camera (8.4 m + roof lift) so they never cross the track ahead. */
+const GANTRY_Y = 11;
+const WIRE_Y = 10.4;
 const SKY_MARGIN = 24;
 const SKY_BELOW = 70;
 
