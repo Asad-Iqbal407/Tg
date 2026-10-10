@@ -1,17 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import type { BoostId, GameResult, Insets } from '../src/games/types';
-import { type HillGame, type HillProbe } from '../src/games/hill/hill';
+import type { AudioLike } from '../src/core/audio';
+import { Input } from '../src/core/input';
+import { Rng } from '../src/core/rng';
+import { HillGame, type HillProbe } from '../src/games/hill/hill';
+import { BIOME_M, BIOMES, biomeIndexAt, lapAt, physicsAt } from '../src/games/hill/biomes';
+import { PX_PER_M, Terrain } from '../src/games/hill/terrain';
+import { Vehicle, type VehicleSpec } from '../src/games/hill/vehicle';
 import { GAMES } from '../src/games/registry';
-import { SKINS, toSkinData } from '../src/meta/catalog';
-import { createGame } from './helpers';
+import { type BoostId, type GameResult, type GameServices, type Insets, NO_INSETS } from '../src/games/types';
+import { defaultSkin, SKINS, toSkinData } from '../src/meta/catalog';
+import { createGame, mockCtx } from './helpers';
 
 const DT = 1 / 60;
+const DEG = Math.PI / 180;
 const hillDef = GAMES.find((g) => g.id === 'hill')!;
+const VEHICLES = ['car-jeep', 'car-monster', 'car-racer', 'car-rover'];
+
+/** Catalog values for each vehicle (src/meta/catalog.ts), for tests that drive a Vehicle directly. */
+const SPECS: Record<string, VehicleSpec> = {
+  'car-jeep': { power: 1, maxSpeed: 540, grip: 0.32, wheelR: 20, suspension: 0.35, airControl: 1 },
+  'car-monster': { power: 1.15, maxSpeed: 500, grip: 0.4, wheelR: 27, suspension: 0.25, airControl: 0.85 },
+  'car-racer': { power: 1.35, maxSpeed: 700, grip: 0.27, wheelR: 17, suspension: 0.45, airControl: 1.1 },
+  'car-rover': { power: 1.05, maxSpeed: 560, grip: 0.34, wheelR: 22, suspension: 0.3, airControl: 1.7 },
+};
 
 /**
- * Headless driver. `hold` keeps gas down on the ground and only balances in the air. `skilled`
- * also lifts off a wheelie. `flip` rotates forward in the air until `flips` full turns are done,
- * then balances for the landing.
+ * Headless driver. `hold` keeps gas down on the ground and balances the chassis in the air. `skilled`
+ * also lifts off a wheelie. `flip` spins forward over a jump that gives about a second of air, and
+ * `spin` spins over any air. Both spin modes finish the turn with the same balance controller.
  */
 export type BotMode = 'hold' | 'skilled' | 'flip' | 'spin';
 
@@ -19,7 +35,7 @@ export interface BotOptions {
   seed: number;
   skinId?: string;
   mode?: BotMode;
-  /** Full turns to attempt per air phase (flip mode). */
+  /** Full turns to attempt per air phase (flip and spin modes). */
   flips?: number;
   seconds?: number;
   boosts?: BoostId[];
@@ -52,8 +68,7 @@ function wrap(a: number): number {
 
 function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas: boolean; brake: boolean } {
   if (p.crashed) return { gas: false, brake: false };
-  const airborne = p.airT > 0;
-  if (!airborne) {
+  if (p.airT === 0) {
     st.airRot = 0;
     st.lastAngle = p.angle;
     // Lift the nose if a wheelie gets going on the skilled line.
@@ -64,9 +79,7 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   st.airRot += delta;
   const w = delta / DT;
   st.lastAngle = p.angle;
-  // Only spin on a jump, once clearly airborne (not on a micro-hop). Stop short of the turn and
-  // let the controller finish it, so the car lands level with the slope instead of on its head.
-  // A jump that gives about a second of air (predicted from its angles and the speed).
+  // A jump that gives about a second of air, predicted from its angles and the speed.
   const roomy = p.kickers.some((k) => {
     if (p.x < k.start || p.x > k.end) return false;
     const air = (2 * p.speed * (Math.sin(k.lipAngle) + Math.cos(k.lipAngle) * Math.tan(k.landAngle))) / 980;
@@ -86,10 +99,14 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   return { gas: false, brake: false };
 }
 
+/** Test-only access to the car's private simulation state. */
+function carOf(game: HillGame): Vehicle {
+  return (game as unknown as { car: Vehicle }).car;
+}
+
 /** Drive one run with a simple policy and report where it ended. */
 export function runBot(opts: BotOptions): BotRun {
-  const skinId = opts.skinId ?? 'car-jeep';
-  const skin = toSkinData(SKINS.find((s) => s.id === skinId)!);
+  const skin = toSkinData(SKINS.find((s) => s.id === (opts.skinId ?? 'car-jeep'))!);
   const { game: instance, input } = createGame(hillDef, {
     seed: opts.seed,
     skin,
@@ -100,11 +117,12 @@ export function runBot(opts: BotOptions): BotRun {
   });
   const game = instance as HillGame;
   if (opts.drop) {
-    const car = (game as unknown as { car: { reset(x: number, a: number): void } }).car;
+    const car = carOf(game);
     car.reset(200, 0);
-    const cars = (game as unknown as { car: { pts: { y: number }[]; reset(x: number, a: number): void } }).car;
-    for (const p of cars.pts) p.y -= opts.drop;
-    for (const p of cars.pts) (p as unknown as { py: number }).py = p.y;
+    for (const p of car.pts) {
+      p.y -= opts.drop;
+      p.py -= opts.drop;
+    }
   }
   const mode = opts.mode ?? 'hold';
   const flips = opts.flips ?? 1;
@@ -132,10 +150,207 @@ export function runBot(opts: BotOptions): BotRun {
   };
 }
 
-describe('Hill Rider bot', () => {
-  it('runs a headless driver without errors', () => {
-    const run = runBot({ seed: 1, seconds: 5 });
-    expect(run.seconds).toBeGreaterThan(4);
-    expect(run.result.durationSec).toBeGreaterThan(4);
+/** A hill game whose audio is a stub, so the tests can see the engine handle. */
+function gameWithAudio(audio: AudioLike): HillGame {
+  const services: GameServices = {
+    ctx: mockCtx(),
+    width: hillDef.width,
+    height: hillDef.height,
+    input: new Input(),
+    audio,
+    rng: new Rng(3),
+    loadout: { skin: toSkinData(defaultSkin('hill')), boosts: new Set(), powerDuration: 1 },
+    insets: NO_INSETS,
+    reducedMotion: false,
+    haptic: () => undefined,
+  };
+  return new HillGame(services);
+}
+
+describe('Hill Rider driving', () => {
+  it('every vehicle drives past 800 m on seeds 1-3 with a simple hold-gas policy', () => {
+    for (const skinId of VEHICLES)
+      for (const seed of [1, 2, 3]) {
+        const run = runBot({ seed, skinId, mode: 'hold', seconds: 120 });
+        expect(run.meters, `${skinId} seed ${seed}`).toBeGreaterThan(800);
+      }
+  });
+
+  it('the Rally Racer survives early terrain under hold-gas', () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const run = runBot({ seed, skinId: 'car-racer', mode: 'hold', seconds: 60 });
+      expect(run.meters, `seed ${seed}`).toBeGreaterThan(300);
+    }
+  });
+
+  it('a skilled airborne input lands a full flip, for every vehicle', () => {
+    for (const skinId of VEHICLES) {
+      const run = runBot({ seed: 1, skinId, mode: 'spin', flips: 1, seconds: 4, drop: 500 });
+      expect(run.result.stats.flips ?? 0, skinId).toBe(1);
+      expect(run.reason, skinId).toBe('');
+    }
+  });
+
+  it('a car that stands on its tail is flipped over within a few seconds', () => {
+    let stops = 0;
+    const game = gameWithAudio({
+      play() {},
+      engine: () => ({
+        set() {},
+        stop: () => {
+          stops++;
+        },
+      }),
+    });
+    carOf(game).reset(200, -1.7);
+    for (let t = 0; t < 4 && !game.probe().crashed; t += DT) game.update(DT);
+    expect(game.probe().crashed).toBe(true);
+    expect(game.probe().crashReason).toBe('Flipped over!');
+    expect(stops).toBeGreaterThan(0);
+  });
+
+  it('runs out of fuel a few seconds after the tank empties, once the car has stopped', () => {
+    const { game, input } = createGame(hillDef, { seed: 3 });
+    let emptyAt = -1;
+    let t = 0;
+    while (!game.isOver() && t < 150) {
+      if (emptyAt < 0 && game.probe().fuel <= 0) emptyAt = t;
+      game.update(DT);
+      input.postUpdate();
+      t += DT;
+    }
+    expect(emptyAt).toBeGreaterThan(60);
+    expect(game.isOver()).toBe(true);
+    expect(game.probe().crashReason).toBe('Out of fuel!');
+    const after = t - emptyAt;
+    expect(after).toBeGreaterThan(2.5);
+    expect(after).toBeLessThan(6);
+  });
+
+  it('destroy() stops the engine drone once, even if called twice', () => {
+    let stops = 0;
+    const game = gameWithAudio({
+      play() {},
+      engine: () => ({
+        set() {},
+        stop: () => {
+          stops++;
+        },
+      }),
+    });
+    for (let i = 0; i < 30; i++) game.update(DT);
+    game.destroy();
+    game.destroy();
+    expect(stops).toBe(1);
+  });
+});
+
+describe('Hill Rider air control and torque', () => {
+  /** A vehicle lifted `lift` px above flat ground at x = 200, at rest. */
+  function lifted(skinId: string, lift: number): Vehicle {
+    const car = new Vehicle(new Terrain(1), SPECS[skinId]!);
+    car.reset(200, 0);
+    for (const p of car.pts) {
+      p.y -= lift;
+      p.py -= lift;
+    }
+    return car;
+  }
+
+  it('ignores micro-hops: no air torque until the car has been airborne for 0.12 s', () => {
+    const coast = lifted('car-jeep', 400);
+    const brake = lifted('car-jeep', 400);
+    let early = 0;
+    let late = 0;
+    for (let i = 0; i < 90; i++) {
+      coast.step(DT, { throttle: 0, brake: 0, canReverse: true }, { gravity: 1, grip: 1 });
+      brake.step(DT, { throttle: 0, brake: 1, canReverse: true }, { gravity: 1, grip: 1 });
+      if (brake.airT < 0.1) early = Math.abs(brake.angle() - coast.angle());
+      if (brake.airT > 0.4) late = Math.abs(brake.angle() - coast.angle());
+    }
+    expect(early).toBeLessThan(0.01);
+    expect(late).toBeGreaterThan(0.05);
+  });
+
+  it('the Rally Racer does not rear up when it holds gas on flat ground at lunar gravity', () => {
+    const car = new Vehicle(new Terrain(1), SPECS['car-racer']!);
+    car.reset(60, 0);
+    let minAngle = 0;
+    for (let i = 0; i < 90; i++) {
+      car.step(DT, { throttle: 1, brake: 0, canReverse: true }, { gravity: 0.45, grip: 0.95 });
+      minAngle = Math.min(minAngle, car.angle());
+    }
+    expect(minAngle).toBeGreaterThan(-20 * DEG);
+  });
+});
+
+describe('Hill Rider terrain and biomes', () => {
+  it('caps slopes outside jumps so every hill is within reach of the weakest vehicle', () => {
+    for (const seed of [1, 2, 3]) {
+      const t = new Terrain(seed);
+      t.ensureTo(3000 * PX_PER_M);
+      let maxUp = 0;
+      let maxDown = 0;
+      for (let x = 200; x < 3000 * PX_PER_M; x += 2) {
+        if (t.kickerAt(x)) continue;
+        const s = Math.atan(t.slopeAt(x));
+        if (s > 0) maxDown = Math.max(maxDown, s);
+        else maxUp = Math.max(maxUp, -s);
+      }
+      expect(maxUp, `seed ${seed} uphill`).toBeLessThan(33.5 * DEG);
+      expect(maxDown, `seed ${seed} downhill`).toBeLessThan(37.5 * DEG);
+    }
+  });
+
+  it('places jumps in every stretch, with lips that get steeper with distance', () => {
+    const t = new Terrain(5);
+    t.ensureTo(4000 * PX_PER_M);
+    const early = t.kickers.filter((k) => k.start < 800 * PX_PER_M);
+    const late = t.kickers.filter((k) => k.start > 2400 * PX_PER_M);
+    expect(early.length).toBeGreaterThan(0);
+    expect(late.length).toBeGreaterThan(0);
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(mean(late.map((k) => k.lipAngle))).toBeGreaterThan(mean(early.map((k) => k.lipAngle)));
+    for (const k of t.kickers) {
+      expect(k.lipAngle).toBeGreaterThan(20 * DEG);
+      expect(k.lipAngle).toBeLessThan(40 * DEG);
+    }
+  });
+
+  it('blends gravity and grip across biome borders instead of jumping', () => {
+    const out = { gravity: 1, grip: 1 };
+    let prev: { gravity: number; grip: number } | null = null;
+    let worst = 0;
+    for (let m = 0; m < 4000; m += 0.5) {
+      physicsAt(m, out);
+      if (prev) worst = Math.max(worst, Math.abs(out.gravity - prev.gravity), Math.abs(out.grip - prev.grip));
+      prev = { ...out };
+    }
+    expect(worst).toBeLessThan(0.05);
+  });
+
+  it('cycles the biomes after the lunar base and gets tougher on each lap', () => {
+    const lap = BIOMES.length * BIOME_M;
+    expect(biomeIndexAt(2400)).toBe(3);
+    expect(biomeIndexAt(lap)).toBe(0);
+    expect(lapAt(lap - 1)).toBe(1);
+    expect(lapAt(lap)).toBe(2);
+  });
+});
+
+describe('Hill Rider rendering', () => {
+  it('renders at the corners of the viewport range, with touch insets', () => {
+    const corners = [
+      { width: 880, height: 540 },
+      { width: 1280, height: 540 },
+      { width: 880, height: 760 },
+      { width: 1280, height: 760 },
+    ];
+    const insets: Insets = { top: 0, right: 0, bottom: 120, left: 0 };
+    for (const size of corners) {
+      const { game } = createGame(hillDef, { seed: 4, ...size, insets });
+      for (let i = 0; i < 120; i++) game.update(DT);
+      expect(() => game.render()).not.toThrow();
+    }
   });
 });
