@@ -39,7 +39,7 @@ export const bombsquadGame: GameDefinition = {
   },
   boostEffects: {
     shield: 'Start with a shield that absorbs one hit.',
-    'head-start': 'Start with an extra bomb and a bigger blast.',
+    'head-start': 'Start with an extra bomb to throw.',
   },
   create: (s) => new BombSquadGame(s),
 };

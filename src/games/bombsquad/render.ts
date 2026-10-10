@@ -169,7 +169,7 @@ function drawExplosionsOnFloor(ctx: CanvasRenderingContext2D, v: SceneView): voi
   // Scorch marks under the flames, so a blast still reads after its flames fade.
   const { ts, ox, oy } = v.layout;
   const cols = v.arena.cols;
-  ctx.fillStyle = 'rgba(30,10,0,0.35)';
+  ctx.fillStyle = 'rgba(30,10,0,0.22)';
   for (const e of v.explosions) {
     for (const t of e.tiles) {
       const tx = t % cols;
@@ -191,15 +191,15 @@ function drawExplosionFlames(ctx: CanvasRenderingContext2D, v: SceneView): void 
       const ty = (t - tx) / cols;
       const x = ox + tx * ts;
       const y = oy + ty * ts;
-      const pad = ts * (0.1 + 0.1 * (1 - f));
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(x + pad * 0.5, y + pad * 0.5, ts - pad, ts - pad);
-      const inner = ts * (0.2 + 0.1 * (1 - f)) * flicker;
-      ctx.fillStyle = f > 0.5 ? '#fb923c' : '#fbbf24';
-      ctx.fillRect(x + inner, y + inner, ts - inner * 2, ts - inner * 2);
+      // Flames fill their whole tile: red edge, orange body, yellow heart, white core while fresh.
+      ctx.fillStyle = f > 0.5 ? '#f97316' : '#dc2626';
+      ctx.fillRect(x, y, ts + 0.5, ts + 0.5);
+      const inset = ts * (0.16 + 0.12 * (1 - f)) * flicker;
+      ctx.fillStyle = f > 0.45 ? '#fde047' : '#fb923c';
+      ctx.fillRect(x + inset, y + inset, ts - inset * 2, ts - inset * 2);
       if (f > 0.55) {
         ctx.fillStyle = '#fff7ed';
-        const core = ts * 0.22;
+        const core = ts * 0.24;
         ctx.fillRect(x + (ts - core) / 2, y + (ts - core) / 2, core, core);
       }
     }
