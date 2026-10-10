@@ -27,41 +27,121 @@ const LEGS = {
   jump: ['..OO...OO...', '.OO.....OO..', '.FF......FF.', 'FF.......FF.'],
 } satisfies Record<string, SpriteDef>;
 
-export type HeroPose = keyof typeof LEGS;
+export type HeroPose = keyof typeof LEGS | 'dead';
+
+// Front-facing "oops" pose, arms up, used for the death hop.
+const SMALL_DEAD: SpriteDef = [
+  '....HHHH....',
+  '..HHHHHHHH..',
+  '.HHHHHHHHHH.',
+  'S.hSSSSSSh.S',
+  'S.SEESSEES.S',
+  'SSSSSSSSSSSS',
+  '.S.SmmmmS.S.',
+  '...CCCCCC...',
+  '..CCOOOOCC..',
+  '..COOBBOOC..',
+  '...OOOOOO...',
+  '...OOOOOO...',
+  '...OO..OO...',
+  '...OO..OO...',
+  '..FFF..FFF..',
+  '..FFF..FFF..',
+];
+
+// The powered-up hero is its own 14x22 design (broader head and shoulders), not a stretched
+// small sprite. Head 9 rows, torso 7, legs 6.
+const BIG_HEAD: SpriteDef = [
+  '.....HHHH.....',
+  '...HHHHHHHH...',
+  '..HHHHHHHHHHVV',
+  '..hhSSSSSShh..',
+  '..hSSESSESSh..',
+  '..SSSESSESSS..',
+  '..SSSSSSSSSS..',
+  '...SSSmmSSS...',
+  '....SSSSSS....',
+];
+const BIG_TORSO: SpriteDef = [
+  '....CCCCCC....',
+  '..CCCOCCOCCC..',
+  '.CCCCOCCOCCCC.',
+  'CCCCCOOOOCCCCC',
+  'SSCCOBOOBOCCSS',
+  'SS.OOOOOOOO.SS',
+  '...OOOOOOOO...',
+];
+const BIG_TORSO_JUMP: SpriteDef = [
+  '.SS.CCCCCC....',
+  '.SSCCOCCOCCC..',
+  '..CCCOCCOCCCC.',
+  '..CCCOOOOCCCCS',
+  '..CCOBOOBOCCSS',
+  '...OOOOOOOO...',
+  '...OOOOOOOO...',
+];
+const BIG_LEGS = {
+  stand: [
+    '...OOO..OOO...',
+    '...OOO..OOO...',
+    '...OOO..OOO...',
+    '...OOO..OOO...',
+    '..FFFF..FFFF..',
+    '.FFFFF..FFFFF.',
+  ],
+  walkA: [
+    '...OOOOOOOO...',
+    '..OOOO..OOOO..',
+    '.OOOO....OOOO.',
+    '.OOO......OOO.',
+    'FFFF......FFFF',
+    'FFF........FFF',
+  ],
+  walkB: [
+    '...OOOOOOOO...',
+    '....OOOOOO....',
+    '....OOOOOO....',
+    '.....OOOO.....',
+    '....FFFFFF....',
+    '...FFFFFFFF...',
+  ],
+  jump: [
+    '..OOOO..OOOO..',
+    '.OOOO....OOO..',
+    '.OOO.....OOO..',
+    'FFF......OOO..',
+    'FF......FFFF..',
+    '........FFFFF.',
+  ],
+} satisfies Record<keyof typeof LEGS, SpriteDef>;
 
 function build(big: boolean, pose: HeroPose): SpriteDef {
-  const torso = pose === 'jump' ? TORSO_JUMP : TORSO;
-  const legs = LEGS[pose];
-  if (!big) return [...HEAD, ...torso, ...legs];
-  const t2: string[] = [];
-  for (const r of torso) t2.push(r, r);
-  const l2 = [legs[0], legs[0], legs[1], legs[1], legs[2], legs[3]] as string[];
-  return [...HEAD, ...t2, ...l2];
+  if (pose === 'dead') return SMALL_DEAD;
+  if (big) return [...BIG_HEAD, ...(pose === 'jump' ? BIG_TORSO_JUMP : BIG_TORSO), ...BIG_LEGS[pose]];
+  return [...HEAD, ...(pose === 'jump' ? TORSO_JUMP : TORSO), ...LEGS[pose]];
 }
 
+const POSES: readonly HeroPose[] = ['stand', 'walkA', 'walkB', 'jump', 'dead'];
+
+function buildSet(big: boolean): Record<HeroPose, SpriteDef> {
+  return Object.fromEntries(POSES.map((p) => [p, build(big, p)])) as Record<HeroPose, SpriteDef>;
+}
+
+/** Hero sprites, facing right. Small is 12x16, big is 14x22. */
 export const HERO: Record<'small' | 'big', Record<HeroPose, SpriteDef>> = {
-  small: {
-    stand: build(false, 'stand'),
-    walkA: build(false, 'walkA'),
-    walkB: build(false, 'walkB'),
-    jump: build(false, 'jump'),
-  },
-  big: {
-    stand: build(true, 'stand'),
-    walkA: build(true, 'walkA'),
-    walkB: build(true, 'walkB'),
-    jump: build(true, 'jump'),
-  },
+  small: buildSet(false),
+  big: buildSet(true),
 };
 
 // Grumble: a grumpy walking mushroom. A cap, W eye white, K pupil/mouth, T stem, D feet.
+// All enemy sprites face right; drawEnemies mirrors them when they walk left.
 export const WALKER: readonly SpriteDef[] = [
   [
     '....AAAA....',
     '..AAAAAAAA..',
     '.AAAAAAAAAA.',
     '.AWWAAAAWWA.',
-    'AAWKAAAAKWAA',
+    'AAWKAAAAWKAA',
     'AAAAAAAAAAAA',
     'AAAKKKKKKAAA',
     '.AAAAAAAAAA.',
@@ -75,7 +155,7 @@ export const WALKER: readonly SpriteDef[] = [
     '..AAAAAAAA..',
     '.AAAAAAAAAA.',
     '.AWWAAAAWWA.',
-    'AAKWAAAAWKAA',
+    'AAWKAAAAWKAA',
     'AAAAAAAAAAAA',
     'AAAKKKKKKAAA',
     '.AAAAAAAAAA.',

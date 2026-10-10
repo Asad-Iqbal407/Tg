@@ -1,7 +1,8 @@
 /**
  * Hand-authored level chunks stitched together procedurally. Each chunk lists rows 4–12 of the
  * 15-row level (row 12 is the row the hero stands in) plus a ground mask for rows 13–14, where
- * '.' is a pit. Every chunk starts and ends on solid ground so any ordering is traversable.
+ * '.' is a pit. Every chunk starts and ends on solid ground so any ordering is traversable, and
+ * every question block can be bumped from a surface below it (checked by validateChunk).
  *
  * Legend: # ground  B brick  ? coin block  M power-up block  1 extra-life block  X hard block
  *         [ ] pipe top  { } pipe body  o coin  g walker  k shellback  s spiky  S start  F flag
@@ -21,8 +22,7 @@ export const START_CHUNK: Chunk = {
     '................',
     '................',
     '................',
-    '................',
-    '................',
+    '.........?......',
     '................',
     '................',
     '..S.............',
@@ -133,7 +133,7 @@ export const CHUNKS: readonly Chunk[] = [
     difficulty: 1,
     rows: [
       '................',
-      '............1...',
+      '...........1....',
       '................',
       '................',
       '................',
@@ -246,7 +246,7 @@ export const CHUNKS: readonly Chunk[] = [
     rows: [
       '..................',
       '..................',
-      '..................',
+      '.............M....',
       '..........o.......',
       '.....XX...XX......',
       '....XXX...XXX.....',
@@ -261,8 +261,8 @@ export const CHUNKS: readonly Chunk[] = [
     difficulty: 3,
     rows: [
       '....................',
-      '........oooo........',
-      '........BBMB........',
+      '........oooo...?M?..',
+      '........BBBB........',
       '....................',
       '....................',
       '...XXX........XXX...',
@@ -281,7 +281,7 @@ export const CHUNKS: readonly Chunk[] = [
       '....................',
       '....................',
       '....................',
-      '....B?B?B...B?B.....',
+      '....B?BMB...B?B.....',
       '....................',
       '....................',
       '...g..g...s...k..g..',
@@ -303,5 +303,69 @@ export const CHUNKS: readonly Chunk[] = [
       '....................',
     ],
     ground: '###..##...##...#####',
+  },
+  {
+    name: 'brick-tunnel',
+    difficulty: 2,
+    rows: [
+      '....................',
+      '....................',
+      '....................',
+      '....oooooooooo......',
+      '....BBB?BBMBBB......',
+      '....................',
+      '....................',
+      '....................',
+      '.......g....g..s....',
+    ],
+    ground: '####################',
+  },
+  {
+    name: 'shell-box',
+    difficulty: 3,
+    rows: [
+      '................',
+      '................',
+      '................',
+      '................',
+      '.......ooo......',
+      '................',
+      '..[]........[]..',
+      '..{}........{}..',
+      '..{}....k...{}..',
+    ],
+    ground: '################',
+  },
+  {
+    name: 'pit-run',
+    difficulty: 3,
+    rows: [
+      '......................',
+      '......................',
+      '......................',
+      '......................',
+      '.............ooo......',
+      '......................',
+      '......................',
+      '......................',
+      '.........g.......g....',
+    ],
+    ground: '####...######...######',
+  },
+  {
+    name: 'spiky-steps',
+    difficulty: 3,
+    rows: [
+      '....................',
+      '....................',
+      '....................',
+      '..........ooo.......',
+      '.....?..............',
+      '....................',
+      '.........XXXXX......',
+      '....................',
+      '....s...........s...',
+    ],
+    ground: '####################',
   },
 ];
