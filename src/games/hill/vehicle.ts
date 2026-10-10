@@ -93,6 +93,8 @@ export class Vehicle {
   /** Unit ground tangent under the grounded wheels (last known). */
   readonly tangent = { x: 1, y: 0 };
   private sticks: Stick[] = [];
+  /** Drive actually delivered last substep, as a fraction of full engine thrust (0..power). */
+  private driveLoad = 0;
   private readonly hit: Hit = { px: 0, py: 0, d: 0, nx: 0, ny: -1 };
   private readonly contactN = [
     { x: 0, y: -1 },
@@ -436,9 +438,9 @@ export class Vehicle {
       if (torque * omega > 0 && Math.abs(omega) >= this.spinCap) torque = 0;
     } else if (rear && front) {
       const v = this.vAlong();
-      const fade = Math.max(0, 1 - v / this.spec.maxSpeed);
+      // Reaction to the thrust that reaches the ground (wheelspin on low grip gives less kick).
       const braking = input.brake > 0 && v > 8 ? 0.7 : 0;
-      torque = (braking - input.throttle) * GROUND_TORQUE * this.spec.power * fade * env.gravity;
+      torque = (braking - this.driveLoad) * GROUND_TORQUE * env.gravity;
     } else if (rear) {
       torque = input.brake * RECOVER_TORQUE * env.gravity;
     } else if (front) {
@@ -477,6 +479,7 @@ export class Vehicle {
     const rear = this.wheelDown(REAR);
     const front = this.wheelDown(FRONT);
     const n = (rear ? 1 : 0) + (front ? 1 : 0);
+    this.driveLoad = 0;
     if (n === 0) return;
     let tx = 0;
     let ty = 0;
@@ -497,7 +500,9 @@ export class Vehicle {
     let dv = 0;
     if (input.throttle > 0) {
       const fade = v > 0 ? Math.max(0, 1 - v / max) : 1;
-      dv = Math.min(DRIVE_ACCEL * this.spec.power * fade, traction) * input.throttle * dt;
+      const thrust = Math.min(DRIVE_ACCEL * this.spec.power * fade, traction);
+      this.driveLoad = (thrust / DRIVE_ACCEL) * input.throttle;
+      dv = thrust * input.throttle * dt;
     } else if (input.brake > 0 && (v > 8 || !input.canReverse)) {
       dv = -Math.sign(v) * Math.min(Math.abs(v), Math.min(BRAKE_DECEL, traction * 1.4) * dt);
     } else if (input.brake > 0) {
