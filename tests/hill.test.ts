@@ -29,7 +29,7 @@ export interface BotOptions {
   /** Start the car this many px above the ground at x = 200 (a drop test). */
   drop?: number;
   /** Called once per simulation step, before the step, with the car's state. */
-  trace?: (p: HillProbe, step: number, want: { gas: boolean; brake: boolean }) => void;
+  trace?: (p: HillProbe, step: number, want: { gas: boolean; brake: boolean }, game: HillGame) => void;
 }
 
 export interface BotRun {
@@ -114,7 +114,7 @@ export function runBot(opts: BotOptions): BotRun {
   while (steps < maxSteps && !game.isOver()) {
     const p = game.probe();
     const want = decide(p, mode, flips, st);
-    opts.trace?.(p, steps, want);
+    opts.trace?.(p, steps, want, game);
     input.setVirtual('right', want.gas, 'bot');
     input.setVirtual('left', want.brake, 'bot');
     game.update(DT);

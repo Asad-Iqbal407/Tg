@@ -469,9 +469,12 @@ export class HillGame extends BaseGame {
     }
   }
 
-  /** Spacing (m) to the next fuel can: grows with each can, scaled by the tank size. */
+  /**
+   * Spacing (m) to the next fuel can, scaled by the vehicle's tank. The cap sits inside what a full
+   * tank covers at full throttle (about 430 m for the Trail Jeep), so the next can is always reachable.
+   */
   private fuelGap(): number {
-    return Math.min(450, 260 + 25 * this.fuelCount) * this.fuelRange;
+    return Math.min(360, 240 + 20 * this.fuelCount) * this.fuelRange;
   }
 
   /** Bonus coins along the flight path of a well-taken jump. */
