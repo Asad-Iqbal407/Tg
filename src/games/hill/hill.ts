@@ -62,6 +62,8 @@ const FLIP_SLACK = 0.95;
 const LAND_TOLERANCE = 0.6;
 const BANNER_TIME = 2.6;
 
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
 const FLIP_NAMES = ['', '', 'DOUBLE ', 'TRIPLE ', 'QUAD '];
 
 export class HillGame extends BaseGame {
@@ -651,8 +653,9 @@ export class HillGame extends BaseGame {
     }
   }
 
-  private readonly pose = {
-    style: 0 as CarStyle,
+  /** Reused render pose (no per-frame allocation). */
+  private readonly pose: Mutable<CarPose> & { wheelAngles: number[] } = {
+    style: 0,
     wheels: [
       { x: 0, y: 0 },
       { x: 0, y: 0 },
@@ -666,7 +669,7 @@ export class HillGame extends BaseGame {
     head: { x: 0, y: 0 },
     braking: false,
     time: 0,
-  } satisfies CarPose;
+  };
 
   private drawVehicle(): void {
     const ctx = this.ctx;

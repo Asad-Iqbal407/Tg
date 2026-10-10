@@ -6,18 +6,19 @@ export const hillGame: GameDefinition = {
   title: 'Hill Rider',
   tagline: 'Physics, fuel and a lot of nerve.',
   description:
-    'Drive as far as you can across endless procedurally generated hills with real soft-body suspension physics. Manage your fuel, balance in the air, land flips for bonuses and push through desert, ice and the low-gravity lunar base.',
+    'Drive as far as you can across endless procedurally generated hills on sprung suspension. Manage your fuel, launch off jumps, land flips for bonuses and push through desert, ice, the low-gravity lunar base and a volcano, lap after lap.',
   genre: 'Physics driving',
   inspiredBy: 'Hill Climb Racing',
   width: 960,
   height: 540,
+  viewport: { minWidth: 880, maxWidth: 1280, minHeight: 540, maxHeight: 760 },
   accent: '#4dd9ff',
   gradient: ['#4dd9ff', '#2a7f62'],
   controls: [
     ['→ / D / ↑', 'Gas (tilts back in the air)'],
-    ['← / A / ↓', 'Brake / reverse (tilts forward in the air)'],
+    ['← / A / ↓', 'Brake, then reverse (tilts forward in the air)'],
   ],
-  touchHint: 'Hold GAS and BRAKE to drive and balance.',
+  touchHint: 'Hold GAS to drive. In the air, GAS tilts back and BRAKE tilts forward.',
   touchButtons: [
     { action: 'left', label: 'BRAKE', side: 'left', slot: 0, wide: true },
     { action: 'right', label: 'GAS', side: 'right', slot: 0, wide: true },
