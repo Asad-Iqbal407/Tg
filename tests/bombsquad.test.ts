@@ -216,6 +216,7 @@ describe('bombs and blasts', () => {
     expect(i.bombs.length).toBe(0);
     expect(i.explosions.length).toBeGreaterThan(0);
     expect(i.player.ammo).toBe(1);
+    expect(game.getResult().stats.bombs).toBe(1);
   });
 
   it('a blast stops at a pillar and destroys exactly one crate', () => {
