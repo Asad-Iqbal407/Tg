@@ -937,7 +937,7 @@ export class DuckGame extends BaseGame {
         ctx.strokeStyle = `rgba(255,210,63,${0.45 + 0.55 * blink})`;
         ctx.lineWidth = 2.5 * s;
         ctx.beginPath();
-        ctx.ellipse(cx + 3 * icon, iy - 2 * icon, 18 * icon, 14 * icon, 0, 0, TAU);
+        ctx.ellipse(cx + 3 * icon, iy - 2 * icon, 16 * icon, 13 * icon, 0, 0, TAU);
         ctx.stroke();
       }
     }
@@ -959,7 +959,7 @@ export class DuckGame extends BaseGame {
       const info = POWER_INFO[k];
       const w = 190 * s;
       hudPill(ctx, x, y, w, h);
-      text(ctx, boost && v <= 0 ? `${info.label} · ROUND` : info.label, x + 18 * s, y + 14 * s, {
+      text(ctx, boost && v <= 0 ? `${info.label} · ROUND 1` : info.label, x + 18 * s, y + 14 * s, {
         size: 15 * s,
         color: info.color,
       });

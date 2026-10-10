@@ -123,7 +123,8 @@ export class Scenery {
       ctx.beginPath();
       ctx.arc(sunX - 20, 90, 34, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = scene.sky[0];
+      // The crescent's bite is filled with the sky itself.
+      ctx.fillStyle = this.skyGradient(index, scene);
       ctx.beginPath();
       ctx.arc(sunX - 6, 80, 30, 0, TAU);
       ctx.fill();
@@ -363,22 +364,25 @@ export function drawDog(
   if (mood === 'happy') {
     // Ducks held up by the feet, head down, in the colours of the kinds that were hit.
     const n = held.length;
-    const gap = n > 2 ? 46 : 58;
+    const gap = n > 2 ? 50 : 66;
     for (let i = 0; i < n; i++) {
-      const hx = (i - (n - 1) / 2) * gap;
-      drawDuckSprite(ctx, held[i] as DuckKind, hx, -62, {
-        facing: i % 2 === 0 ? 1 : -1,
+      drawDuckSprite(ctx, held[i] as DuckKind, (i - (n - 1) / 2) * gap, -70, {
+        facing: 1,
         rot: Math.PI / 2,
         wing: -0.6,
         dead: true,
         scale: 0.85,
       });
     }
-    // Paws
+    // Paws gripping the outer ducks by the neck.
     ctx.fillStyle = '#b5733c';
     ctx.beginPath();
-    ctx.ellipse(-30, -22, 11, 9, 0, 0, TAU);
-    ctx.ellipse(30, -22, 11, 9, 0, 0, TAU);
+    const px = ((n - 1) / 2) * gap;
+    ctx.ellipse(-px, -46, 10, 9, 0, 0, TAU);
+    if (n > 1) {
+      ctx.moveTo(px + 10, -46);
+      ctx.ellipse(px, -46, 10, 9, 0, 0, TAU);
+    }
     ctx.fill();
   }
   // Head
