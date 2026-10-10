@@ -1439,7 +1439,6 @@ export class GalaxyGame extends BaseGame {
         this.boss.hp / this.boss.maxHp,
         '#ff4dd2',
       );
-      text(ctx, 'MOTHERSHIP', W / 2, 118 + top, { size: 12, align: 'center', color: '#ffb3ec' });
     }
 
     // Lives (bottom left)

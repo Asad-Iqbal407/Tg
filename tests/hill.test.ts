@@ -79,11 +79,12 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   st.airRot += delta;
   const w = delta / DT;
   st.lastAngle = p.angle;
-  // A jump that gives about a second of air, predicted from its angles and the speed.
+  // A jump with room for a full turn, predicted from its angles and the speed (real flights run
+  // about 0.7x the prediction, so this only picks the long jumps).
   const roomy = p.kickers.some((k) => {
     if (p.x < k.start || p.x > k.end) return false;
     const air = (2 * p.speed * (Math.sin(k.lipAngle) + Math.cos(k.lipAngle) * Math.tan(k.landAngle))) / 980;
-    return air >= 1.2;
+    return air >= 1.5;
   });
   const spinning = (mode === 'flip' && roomy) || mode === 'spin';
   if (spinning && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 1.2)
