@@ -23,6 +23,7 @@ interface Internals {
   explosions: Explosion[];
   items: Item[];
   spawnQueue: BotKind[];
+  spawnTimer: number;
   wave: number;
   lives: number;
   layout(): { ts: number; ox: number; oy: number };
