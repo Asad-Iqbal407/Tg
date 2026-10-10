@@ -14,7 +14,7 @@ const ROLL_DECEL = 22;
 const AIR_TORQUE = 22;
 const AIR_DELAY = 0.12;
 const AIR_RAMP = 0.08;
-/** Throttle reaction torque with both wheels down (rad/s², fades out towards top speed). */
+/** Throttle reaction torque with both wheels down (rad/s² per unit of delivered drive). */
 const GROUND_TORQUE = 2.4;
 /** Brake (rear wheel only) or gas (front wheel only) torque that helps level the car. */
 const RECOVER_TORQUE = 3.5;
