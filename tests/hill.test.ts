@@ -26,6 +26,8 @@ export interface BotOptions {
   width?: number;
   height?: number;
   insets?: Insets;
+  /** Called once per simulation step, before the step, with the car's state. */
+  trace?: (p: HillProbe, step: number) => void;
 }
 
 export interface BotRun {
@@ -58,7 +60,10 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   }
   st.airRot += wrap(p.angle - st.lastAngle);
   st.lastAngle = p.angle;
-  if (mode === 'flip' && Math.abs(st.airRot) < Math.PI * 2 * flips - 0.25) return { gas: false, brake: true };
+  // Only spin on a jump, once clearly airborne (not on a micro-hop).
+  const onJump = p.kickers.some((k) => p.x >= k.start && p.x <= k.lip + 200);
+  if (mode === 'flip' && onJump && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 0.25)
+    return { gas: false, brake: true };
   // Level out for the landing: brake tilts nose down, gas tilts nose up.
   const err = wrap(p.angle - p.groundAngle(p.x));
   if (err < -0.18) return { gas: false, brake: true };
@@ -86,6 +91,7 @@ export function runBot(opts: BotOptions): BotRun {
   let steps = 0;
   while (steps < maxSteps && !game.isOver()) {
     const p = game.probe();
+    opts.trace?.(p, steps);
     const want = decide(p, mode, flips, st);
     input.setVirtual('right', want.gas, 'bot');
     input.setVirtual('left', want.brake, 'bot');
