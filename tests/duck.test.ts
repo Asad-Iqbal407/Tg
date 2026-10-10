@@ -53,6 +53,7 @@ interface DuckSim extends GameInstance {
   phaseT: number;
   plan: number[];
   ducks: SimDuck[];
+  leaving: SimDuck[];
   crates: SimCrate[];
   results: string[];
   shots: number;
@@ -156,6 +157,8 @@ interface BotOptions {
   reaction: number;
   /** Aim error standard deviation in px. */
   noise: number;
+  /** Click timing jitter (s): the error grows with the duck's speed. */
+  jitter: number;
 }
 
 interface BotStats {
@@ -181,7 +184,12 @@ function playBot(seed: number, seconds: number, bot: BotOptions): BotStats {
       cool -= DT;
       const target = flying[0];
       if (cool <= 0 && target && target.y < g.grassTop - 30) {
-        tap(input, target.x + gauss() * bot.noise, target.y + gauss() * bot.noise);
+        const lag = gauss() * bot.jitter;
+        tap(
+          input,
+          target.x + target.vx * lag + gauss() * bot.noise,
+          target.y + target.vy * lag + gauss() * bot.noise,
+        );
         cool = bot.cadence;
       }
     } else {
@@ -189,7 +197,7 @@ function playBot(seed: number, seconds: number, bot: BotOptions): BotStats {
     }
     out.frames++;
     if (flying.length > 0) out.flying++;
-    if (g.ducks.some((d) => d.state !== 'gone')) out.onScreen++;
+    if (g.ducks.length + g.leaving.length > 0) out.onScreen++;
     g.update(DT);
     input.postUpdate();
   }
@@ -204,15 +212,16 @@ function playBot(seed: number, seconds: number, bot: BotOptions): BotStats {
 describe('Duck Season pacing', () => {
   it('explores', () => {
     for (const bot of [
-      { cadence: 0.45, reaction: 0.5, noise: 14 },
-      { cadence: 0.6, reaction: 0.7, noise: 24 },
+      { cadence: 0.45, reaction: 0.45, noise: 10, jitter: 0.04 },
+      { cadence: 0.55, reaction: 0.6, noise: 14, jitter: 0.06 },
+      { cadence: 0.7, reaction: 0.8, noise: 18, jitter: 0.08 },
     ]) {
       let frames = 0;
       let flying = 0;
       let onScreen = 0;
       const rows: string[] = [];
       for (let seed = 1; seed <= 12; seed++) {
-        const s = playBot(seed, 240, bot);
+        const s = playBot(seed, 400, bot);
         frames += s.frames;
         flying += s.flying;
         onScreen += s.onScreen;
