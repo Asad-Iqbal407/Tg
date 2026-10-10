@@ -158,6 +158,22 @@ export const MISSION_TEMPLATES: readonly MissionTemplate[] = [
     targets: [2, 3, 5],
     label: (n) => `Reach wave ${n} in Bomb Squad`,
   },
+  {
+    id: 'tetris-lines',
+    gameId: 'tetris',
+    kind: 'total',
+    stat: 'lines',
+    targets: [10, 30, 60],
+    label: (n) => `Clear ${n} lines in Block Drop`,
+  },
+  {
+    id: 'tetris-level',
+    gameId: 'tetris',
+    kind: 'best',
+    stat: 'level',
+    targets: [3, 5, 8],
+    label: (n) => `Reach level ${n} in Block Drop`,
+  },
 ];
 
 const TIER_REWARDS = [

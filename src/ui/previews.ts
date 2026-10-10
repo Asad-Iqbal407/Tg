@@ -13,6 +13,7 @@ import type { SkinItem } from '../meta/catalog';
 const PREVIEW: Record<string, { seed: number; seconds: number; focus: number }> = {
   snake: { seed: 4, seconds: 1.6, focus: 0.5 },
   bombsquad: { seed: 6, seconds: 1.5, focus: 0.5 },
+  tetris: { seed: 8, seconds: 2.0, focus: 0.5 },
   runner: { seed: 4, seconds: 2.6, focus: 0.75 },
   platformer: { seed: 9, seconds: 2.6, focus: 0.5 },
   duck: { seed: 3, seconds: 2.4, focus: 0.5 },
@@ -274,6 +275,29 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
       ctx.arc(-6, 2, 3, 0, TAU);
       ctx.arc(8, 2, 3, 0, TAU);
       ctx.fill();
+      break;
+    }
+    case 'tetris': {
+      // A T piece in its own colour, with a faint well behind it.
+      const cell = 22;
+      const x0 = -cell * 1.5;
+      const y0 = -cell * 1.5;
+      ctx.fillStyle = p.grid ?? '#16203a';
+      fillRoundRect(ctx, x0 - 6, y0 - 6, cell * 3 + 12, cell * 2 + 12, 6, p.grid ?? '#16203a');
+      const tColour = p.T ?? '#a855f7';
+      const cells: [number, number][] = [
+        [0, 0],
+        [1, 0],
+        [2, 0],
+        [1, 1],
+      ];
+      for (const [cx, cy] of cells) {
+        fillRoundRect(ctx, x0 + cx * cell + 1, y0 + cy * cell + 1, cell - 2, cell - 2, 4, tColour);
+      }
+      ctx.fillStyle = p.frame ?? '#334155';
+      ctx.fillRect(x0 + cell * 3 + 6, y0, 3, cell * 2);
+      fillRoundRect(ctx, x0 + cell * 3 + 12, y0 + cell * 0.2, cell * 0.8, cell * 0.8, 3, p.O ?? '#facc15');
+      fillRoundRect(ctx, x0 + cell * 3 + 12, y0 + cell * 1.2, cell * 0.8, cell * 0.8, 3, p.I ?? '#22d3ee');
       break;
     }
     case 'galaxy': {

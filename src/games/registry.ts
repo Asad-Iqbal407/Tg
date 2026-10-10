@@ -5,6 +5,7 @@ import { hillGame } from './hill';
 import { platformerGame } from './platformer';
 import { runnerGame } from './runner';
 import { snakeGame } from './snake';
+import { tetrisGame } from './tetris';
 import type { GameDefinition, GameId } from './types';
 
 export const GAMES: readonly GameDefinition[] = [
@@ -15,6 +16,7 @@ export const GAMES: readonly GameDefinition[] = [
   galaxyGame,
   snakeGame,
   bombsquadGame,
+  tetrisGame,
 ];
 
 const BY_ID = new Map<string, GameDefinition>(GAMES.map((g) => [g.id, g]));

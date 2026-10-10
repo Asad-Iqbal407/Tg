@@ -348,6 +348,34 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
     reward: { coins: 400, gems: 2 },
     goal: { type: 'best', key: 'bombsquad.multikill', target: 3 },
   },
+  // Block Drop
+  {
+    id: 'tetris-lines100',
+    name: 'Line Sweeper',
+    description: 'Clear 100 lines in total.',
+    gameId: 'tetris',
+    tier: 'silver',
+    reward: { coins: 250, gems: 0 },
+    goal: { type: 'total', key: 'tetris.lines', target: 100 },
+  },
+  {
+    id: 'tetris-tetris5',
+    name: 'Four in a Row',
+    description: 'Make 5 four-line clears in total.',
+    gameId: 'tetris',
+    tier: 'gold',
+    reward: { coins: 400, gems: 2 },
+    goal: { type: 'total', key: 'tetris.tetrises', target: 5 },
+  },
+  {
+    id: 'tetris-level8',
+    name: 'Speed Stacker',
+    description: 'Reach level 8 in one run.',
+    gameId: 'tetris',
+    tier: 'gold',
+    reward: { coins: 500, gems: 3 },
+    goal: { type: 'best', key: 'tetris.level', target: 8 },
+  },
 ];
 
 export function achievementProgress(def: AchievementDef, p: Profile): { current: number; target: number } {
