@@ -1,0 +1,448 @@
+import { describe, expect, it } from 'vitest';
+import { NullAudio } from '../src/core/audio';
+import { Input } from '../src/core/input';
+import { Rng } from '../src/core/rng';
+import { snakeGame } from '../src/games/snake';
+import {
+  advance,
+  type Apple,
+  type Cell,
+  type Dir,
+  type Grid,
+  manhattan,
+  opposite,
+  sameCell,
+} from '../src/games/snake/board';
+import { levelFor, SnakeGame } from '../src/games/snake/snake';
+import { type BoostId, type GameInstance, NO_INSETS } from '../src/games/types';
+import { defaultSkin, toSkinData } from '../src/meta/catalog';
+import { cornerSizes, createGame, mockCtx } from './helpers';
+
+const DT = 1 / 60;
+const DIRS: readonly Dir[] = ['up', 'down', 'left', 'right'];
+
+/** The private state the tests need to set up scenarios and read results. */
+interface Internals {
+  body: Cell[];
+  heading: Dir;
+  turns: Dir[];
+  apple: Apple | null;
+  applesEaten: number;
+  level: number;
+  slowT: number;
+  invulnT: number;
+  shieldUsed: boolean;
+  grid: Grid;
+  stepInterval(): number;
+  levelUp(level: number): void;
+}
+
+function peek(game: GameInstance): Internals {
+  return game as unknown as Internals;
+}
+
+function start(seed: number, boosts: BoostId[] = [], width?: number, height?: number) {
+  return createGame(snakeGame, { seed, boosts, width, height });
+}
+
+/** One fixed simulation step, as the shell runs it. */
+function step(game: GameInstance, input: Input, n = 1): void {
+  for (let i = 0; i < n; i++) {
+    game.update(DT);
+    input.postUpdate();
+  }
+}
+
+/** Press a direction during one step, the way a key tap does. */
+function tap(game: GameInstance, input: Input, dir: Dir): void {
+  input.setVirtual(dir, true, 'test');
+  step(game, input);
+  input.setVirtual(dir, false, 'test');
+}
+
+function headOf(game: GameInstance): Cell {
+  return peek(game).body[0] as Cell;
+}
+
+/** Step until the head moves into a new cell, or the run ends. */
+function untilMove(game: GameInstance, input: Input, max = 40): void {
+  const before = headOf(game);
+  for (let i = 0; i < max && !game.isOver(); i++) {
+    step(game, input);
+    if (!sameCell(headOf(game), before)) return;
+  }
+}
+
+/** Step until the run is over; false when it takes more than `max` steps. */
+function untilOver(game: GameInstance, input: Input, max = 900): boolean {
+  for (let i = 0; i < max && !game.isOver(); i++) step(game, input);
+  return game.isOver();
+}
+
+/** The cell straight ahead of the head. */
+function front(s: Internals): Cell {
+  return advance(s.body[0] as Cell, s.heading);
+}
+
+function placeApple(s: Internals, c: Cell, golden = false): void {
+  s.apple = { x: c.x, y: c.y, golden, left: golden ? 6 : Number.POSITIVE_INFINITY, age: 0 };
+}
+
+/** Number of cells reachable from `from` through cells that are not solid (walls or border). */
+function reachableCount(grid: Grid, from: Cell): number {
+  const seen = new Set<number>([grid.index(from)]);
+  const queue: Cell[] = [from];
+  for (let q = 0; q < queue.length; q++) {
+    const c = queue[q] as Cell;
+    for (const d of DIRS) {
+      const n = advance(c, d);
+      if (grid.solid(n) || seen.has(grid.index(n))) continue;
+      seen.add(grid.index(n));
+      queue.push(n);
+    }
+  }
+  return seen.size;
+}
+
+/** Heading of the first step on a shortest path to the apple over open cells. Null when there is none. */
+function planStep(s: Internals): Dir | null {
+  const { grid, body, apple } = s;
+  if (!apple) return null;
+  const head = body[0] as Cell;
+  const occupied = new Set<number>(body.slice(0, -1).map((c) => grid.index(c)));
+  const open = (c: Cell): boolean => !grid.solid(c) && !occupied.has(grid.index(c));
+  const target = grid.index(apple);
+  const firstStep = new Map<number, Dir>();
+  const queue: Cell[] = [];
+  for (const d of DIRS) {
+    const n = advance(head, d);
+    if (!open(n)) continue;
+    if (grid.index(n) === target) return d;
+    if (firstStep.has(grid.index(n))) continue;
+    firstStep.set(grid.index(n), d);
+    queue.push(n);
+  }
+  for (let q = 0; q < queue.length; q++) {
+    const c = queue[q] as Cell;
+    const d0 = firstStep.get(grid.index(c)) as Dir;
+    for (const d of DIRS) {
+      const n = advance(c, d);
+      if (!open(n) || firstStep.has(grid.index(n))) continue;
+      if (grid.index(n) === target) return d0;
+      firstStep.set(grid.index(n), d0);
+      queue.push(n);
+    }
+  }
+  return null;
+}
+
+/** A test autopilot: presses the next turn of the shortest path to the apple, one pending turn at a time. */
+function autoSteer(game: GameInstance, input: Input): void {
+  const s = peek(game);
+  if (s.turns.length > 0) return;
+  const want = planStep(s);
+  if (!want || want === s.heading || want === opposite(s.heading)) return;
+  input.setVirtual(want, true, 'auto');
+  input.setVirtual(want, false, 'auto');
+}
+
+function autoplay(seed: number, maxSteps = 6000) {
+  const { game, input } = start(seed);
+  let maxLevel = 1;
+  for (let i = 0; i < maxSteps && !game.isOver(); i++) {
+    autoSteer(game, input);
+    step(game, input);
+    maxLevel = Math.max(maxLevel, peek(game).level);
+  }
+  return { maxLevel, result: game.getResult(), over: game.isOver() };
+}
+
+/** Preview services (card art): no HUD or banner is drawn. */
+function previewGame(seed = 2): GameInstance {
+  return snakeGame.create({
+    ctx: mockCtx(),
+    width: snakeGame.width,
+    height: snakeGame.height,
+    input: new Input(),
+    audio: new NullAudio(),
+    rng: new Rng(seed),
+    loadout: { skin: toSkinData(defaultSkin('snake')), boosts: new Set(), powerDuration: 1 },
+    insets: NO_INSETS,
+    reducedMotion: false,
+    haptic: () => undefined,
+    preview: true,
+  });
+}
+
+/**
+ * From the start position (head at (9, 14), six long with head-start), a down-left-up loop makes the third
+ * move bite the body at (8, 14). Steps until that crash is absorbed by the shield, or the run ends.
+ */
+function biteOwnBody(game: GameInstance, input: Input): void {
+  tap(game, input, 'down');
+  untilMove(game, input);
+  tap(game, input, 'left');
+  untilMove(game, input);
+  tap(game, input, 'up');
+  for (let i = 0; i < 40 && !peek(game).shieldUsed && !game.isOver(); i++) step(game, input);
+}
+
+describe('snake rules', () => {
+  it('is deterministic for the same seed and inputs', () => {
+    const run = (seed: number) => {
+      const { game, input } = start(seed);
+      const pick = new Rng(seed * 7 + 1);
+      for (let i = 0; i < 1500 && !game.isOver(); i++) {
+        if (i % 25 === 0) tap(game, input, pick.pick(DIRS));
+        else step(game, input);
+      }
+      return {
+        result: game.getResult(),
+        body: peek(game)
+          .body.map((c) => `${c.x},${c.y}`)
+          .join(';'),
+      };
+    };
+    expect(run(5)).toEqual(run(5));
+  });
+
+  it('grows the snake by one segment per apple', () => {
+    const { game, input } = start(3);
+    const s = peek(game);
+    for (let n = 1; n <= 3; n++) {
+      const before = s.body.length;
+      placeApple(s, front(s));
+      untilMove(game, input);
+      expect(s.body.length).toBe(before + 1);
+      expect(game.getResult().stats['food']).toBe(n);
+      // One red apple at a time, never on the snake or a wall.
+      expect(s.apple).not.toBeNull();
+      expect(s.body.some((c) => sameCell(c, s.apple as Cell))).toBe(false);
+      expect(s.grid.solid(s.apple as Cell)).toBe(false);
+    }
+  });
+
+  it('rejects a 180-degree reversal of the current heading', () => {
+    const { game, input } = start(4);
+    const s = peek(game);
+    const x0 = headOf(game).x;
+    tap(game, input, 'left');
+    expect(s.turns).toEqual([]);
+    untilMove(game, input);
+    expect(s.heading).toBe('right');
+    expect(headOf(game).x).toBe(x0 + 1);
+    expect(game.isOver()).toBe(false);
+  });
+
+  it('queues at most two turns, applies one per move, and drops a queued reversal', () => {
+    const { game, input } = start(4);
+    const s = peek(game);
+    // Up, down, left and right in one step: left reverses the heading and right repeats it.
+    input.setVirtual('up', true, 'test');
+    input.setVirtual('down', true, 'test');
+    input.setVirtual('left', true, 'test');
+    input.setVirtual('right', true, 'test');
+    step(game, input);
+    expect(s.turns).toEqual(['up', 'down']);
+    untilMove(game, input);
+    expect(s.heading).toBe('up');
+    // The queued down now reverses the heading, so it is dropped on the next move.
+    untilMove(game, input);
+    expect(s.heading).toBe('up');
+    expect(s.turns).toEqual([]);
+    expect(game.isOver()).toBe(false);
+  });
+
+  it('turns on swipes as well as keys', () => {
+    const { game, input } = start(4);
+    const s = peek(game);
+    input.pushSwipe('up');
+    step(game, input);
+    expect(s.turns).toEqual(['up']);
+  });
+
+  it('ends the run when the snake drives into the border', () => {
+    const { game, input } = start(6);
+    expect(untilOver(game, input)).toBe(true);
+    // The head stopped on the last column, the move into the border was the crash.
+    expect(headOf(game).x).toBe(peek(game).grid.cols - 1);
+    expect(headOf(game).y).toBe(Math.floor(peek(game).grid.rows / 2));
+  });
+
+  it('ends the run when the snake bites its body', () => {
+    const { game, input } = start(7, ['head-start']);
+    biteOwnBody(game, input);
+    expect(game.isOver()).toBe(false);
+    expect(untilOver(game, input)).toBe(true);
+    // The crash cancelled the last move, so the head stayed in the cell it bit from.
+    expect(headOf(game)).toEqual({ x: 8, y: 15 });
+  });
+
+  it('lets the shield absorb the first crash and turn the snake', () => {
+    const { game, input } = start(7, ['head-start', 'shield']);
+    const s = peek(game);
+    biteOwnBody(game, input);
+    expect(game.isOver()).toBe(false);
+    expect(s.shieldUsed).toBe(true);
+    expect(s.invulnT).toBeGreaterThan(0);
+    expect(headOf(game)).toEqual({ x: 8, y: 15 });
+    // Up was blocked by the body, so the snake turns to the free side (left).
+    expect(s.heading).toBe('left');
+  });
+
+  it('lets the snake pass its body while invulnerable, but a later crash is fatal', () => {
+    const { game, input } = start(7, ['head-start', 'shield']);
+    const s = peek(game);
+    biteOwnBody(game, input);
+    tap(game, input, 'up');
+    untilMove(game, input);
+    expect(headOf(game)).toEqual({ x: 8, y: 14 });
+    expect(s.invulnT).toBeGreaterThan(0);
+    expect(game.isOver()).toBe(false);
+    // Once invulnerability has run out, the column above leads to the north border.
+    expect(untilOver(game, input)).toBe(true);
+    expect(headOf(game).y).toBe(0);
+  });
+
+  it('makes golden apples slow the snake for four seconds', () => {
+    const { game, input } = start(8);
+    const s = peek(game);
+    expect(s.stepInterval()).toBeCloseTo(0.14, 6);
+    placeApple(s, front(s), true);
+    untilMove(game, input);
+    expect(s.slowT).toBeCloseTo(4, 1);
+    expect(s.stepInterval()).toBeCloseTo((0.14 - 0.004) * 1.8, 6);
+    // Walk a bent path (down, then left) so the snake stays on the board while the timer runs out.
+    tap(game, input, 'down');
+    for (let i = 0; i < 8 && s.slowT > 0; i++) untilMove(game, input);
+    tap(game, input, 'left');
+    for (let i = 0; i < 9 && s.slowT > 0 && !game.isOver(); i++) untilMove(game, input);
+    expect(game.isOver()).toBe(false);
+    expect(s.slowT).toBe(0);
+    expect(s.stepInterval()).toBeCloseTo(Math.max(0.07, 0.14 - 0.004 * s.applesEaten), 6);
+  });
+
+  it('moves fewer times per second in slow motion', () => {
+    const movesIn = (eatGolden: boolean): number => {
+      const { game, input } = start(11);
+      const s = peek(game);
+      if (eatGolden) {
+        placeApple(s, front(s), true);
+        untilMove(game, input);
+      }
+      let moves = 0;
+      let last = headOf(game);
+      for (let i = 0; i < 60; i++) {
+        step(game, input);
+        if (!sameCell(headOf(game), last)) {
+          moves++;
+          last = headOf(game);
+        }
+      }
+      return moves;
+    };
+    expect(movesIn(true)).toBeLessThan(movesIn(false));
+  });
+
+  it('speeds up with apples eaten, never below 0.07 s per move', () => {
+    const { game } = start(12);
+    const s = peek(game);
+    s.applesEaten = 10;
+    expect(s.stepInterval()).toBeCloseTo(0.1, 6);
+    s.applesEaten = 30;
+    expect(s.stepInterval()).toBeCloseTo(0.07, 6);
+  });
+
+  it('maps apples eaten to levels: one per six apples, capped at 9', () => {
+    expect([0, 5, 6, 11, 12, 47, 48, 500].map(levelFor)).toEqual([1, 1, 2, 2, 3, 8, 9, 9]);
+  });
+
+  it('adds walls at each level-up that keep every open cell reachable from the head (200 seeds)', () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const { game } = start(seed);
+      const s = peek(game);
+      const head = headOf(game);
+      for (let level = 2; level <= 9; level++) {
+        s.levelUp(level);
+        const { grid } = s;
+        expect(grid.wallCount).toBeLessThanOrEqual(90);
+        const walls: Cell[] = [];
+        for (let i = 0; i < grid.size; i++) {
+          if (!grid.walls[i]) continue;
+          const x = i % grid.cols;
+          walls.push({ x, y: (i - x) / grid.cols });
+        }
+        expect(walls.length).toBe(grid.wallCount);
+        expect(reachableCount(grid, head)).toBe(grid.size - grid.wallCount);
+        for (const w of walls) {
+          expect(manhattan(w, head)).toBeGreaterThanOrEqual(5);
+          expect(s.body.some((b) => manhattan(b, w) <= 1)).toBe(false);
+        }
+      }
+      expect(s.level).toBe(9);
+    }
+  });
+
+  it('reports food, golden, length and level stats, with score and coins', () => {
+    const { game, input } = start(9);
+    const s = peek(game);
+    for (let i = 0; i < 5; i++) {
+      placeApple(s, front(s));
+      untilMove(game, input);
+    }
+    // The sixth apple is golden and takes the snake to level 2 after it is eaten.
+    placeApple(s, front(s), true);
+    untilMove(game, input);
+    const r = game.getResult();
+    expect(r.stats).toMatchObject({ food: 5, golden: 1, length: 10, level: 2 });
+    expect(r.score).toBe(5 * 10 + 50);
+    expect(r.coins).toBe(2 * 1 + Math.floor(5 / 5));
+  });
+
+  it('scores apples by the current level', () => {
+    const { game, input } = start(10);
+    const s = peek(game);
+    s.applesEaten = 6;
+    s.level = 2;
+    placeApple(s, front(s));
+    untilMove(game, input);
+    expect(game.getResult().score).toBe(20);
+    placeApple(s, front(s), true);
+    untilMove(game, input);
+    expect(game.getResult().score).toBe(20 + 100);
+  });
+
+  it('plays a simple autopilot through the early levels in some seeds', () => {
+    const runs = [1, 2, 3, 4, 5].map((seed) => autoplay(seed));
+    expect(Math.max(...runs.map((r) => r.maxLevel))).toBeGreaterThanOrEqual(3);
+    for (const r of runs) expect(r.result.stats['food'] ?? 0).toBeGreaterThanOrEqual(0);
+  });
+
+  it('draws in preview mode without throwing, at every corner size and with a touch inset', () => {
+    const game = previewGame();
+    for (let i = 0; i < 300; i++) game.update(DT);
+    expect(() => game.render()).not.toThrow();
+    for (const size of cornerSizes(snakeGame)) {
+      const { game: g, input } = createGame(snakeGame, {
+        seed: 3,
+        width: size.width,
+        height: size.height,
+        insets: { top: 0, right: 0, bottom: 110, left: 0 },
+      });
+      for (let i = 0; i < 200; i++) {
+        g.update(DT);
+        input.postUpdate();
+      }
+      expect(() => g.render()).not.toThrow();
+    }
+    expect(() => previewGame(9).render()).not.toThrow();
+  });
+
+  it('keeps the grid fixed at construction: 24 px cells at the design size', () => {
+    const { game } = start(1);
+    const s = peek(game);
+    expect(s.grid.cols).toBe(23);
+    expect(s.grid.rows).toBe(29);
+    expect(game).toBeInstanceOf(SnakeGame);
+  });
+});

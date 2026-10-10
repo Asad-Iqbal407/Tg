@@ -148,7 +148,15 @@ export class SnakeGame extends BaseGame {
         slow: this.slowT / SLOW_SEC,
       });
       if (this.bannerT > 0) {
-        banner(ctx, this.W, this.H, `LEVEL ${this.level}`, 'New walls!', 1 - this.bannerT / BANNER_SEC, pal.gold);
+        banner(
+          ctx,
+          this.W,
+          this.H,
+          `LEVEL ${this.level}`,
+          'New walls!',
+          1 - this.bannerT / BANNER_SEC,
+          pal.gold,
+        );
       }
     }
   }
@@ -255,7 +263,15 @@ export class SnakeGame extends BaseGame {
     this.shake.add(0.35);
     this.audio.play('bump');
     const at = cellCentre(this.layout(), this.head);
-    this.particles.emit({ x: at.x, y: at.y, count: 20, speed: 200, life: 0.6, size: 3.5, colors: ['#67e8f9', '#ffffff'] });
+    this.particles.emit({
+      x: at.x,
+      y: at.y,
+      count: 20,
+      speed: 200,
+      life: 0.6,
+      size: 3.5,
+      colors: ['#67e8f9', '#ffffff'],
+    });
     this.texts.add(at.x, at.y - this.layout().cell, 'GUARDIAN!', '#67e8f9', 18, 1.2);
   }
 
@@ -284,7 +300,13 @@ export class SnakeGame extends BaseGame {
       drag: 2.4,
       colors: [colour, '#ffffff'],
     });
-    this.texts.add(at.x, at.y - rect.cell * 0.5, `+${points}`, golden ? pal.gold : '#ffffff', golden ? 22 : 18);
+    this.texts.add(
+      at.x,
+      at.y - rect.cell * 0.5,
+      `+${points}`,
+      golden ? pal.gold : '#ffffff',
+      golden ? 22 : 18,
+    );
     this.audio.play(golden ? 'reward' : 'pop');
     if (golden) {
       this.shake.add(0.12);
@@ -299,12 +321,28 @@ export class SnakeGame extends BaseGame {
   private levelUp(level: number): void {
     this.level = level;
     this.maxStat('level', level);
-    addWallRuns(this.grid, this.rng, this.head, this.markBusy(true), WALL_RUNS_PER_LEVEL, WALL_CAP, WALL_MIN_HEAD_DIST);
+    addWallRuns(
+      this.grid,
+      this.rng,
+      this.head,
+      this.markBusy(true),
+      WALL_RUNS_PER_LEVEL,
+      WALL_CAP,
+      WALL_MIN_HEAD_DIST,
+    );
     this.bannerT = BANNER_SEC;
     this.audio.play('levelup');
     const pal = this.palette();
     const at = cellCentre(this.layout(), this.head);
-    this.particles.emit({ x: at.x, y: at.y, count: 24, speed: 190, life: 0.7, size: 3, colors: [pal.gold, '#ffffff', pal.body] });
+    this.particles.emit({
+      x: at.x,
+      y: at.y,
+      count: 24,
+      speed: 190,
+      life: 0.7,
+      size: 3,
+      colors: [pal.gold, '#ffffff', pal.body],
+    });
   }
 
   /** Every 7th apple is golden. An apple goes on a random open cell, never on the snake or a wall. */

@@ -46,7 +46,15 @@ export function frameWidth(cell: number): number {
  * A stone block: a dark rim, a lit face and a highlight bevel along the top. Used for the frame and for
  * every wall cell.
  */
-function stone(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, base: string) {
+function stone(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+  base: string,
+) {
   fillRoundRect(ctx, x, y, w, h, r, shade(base, -0.45));
   fillRoundRect(ctx, x + 1, y + 1, w - 2, h - 3, Math.max(0, r - 1), base);
   fillRoundRect(ctx, x + 2, y + 2, w - 4, Math.min(3, h * 0.18), 1.5, shade(base, 0.4));
@@ -95,7 +103,13 @@ function sparkle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number,
 }
 
 /** Red or golden apple. A golden one sparkles, shows its time left and blinks at the end. */
-export function drawApple(ctx: CanvasRenderingContext2D, apple: Apple, rect: BoardRect, pal: Palette, time: number): void {
+export function drawApple(
+  ctx: CanvasRenderingContext2D,
+  apple: Apple,
+  rect: BoardRect,
+  pal: Palette,
+  time: number,
+): void {
   const c = cellCentre(rect, apple);
   const pop = Math.min(1, 0.3 + apple.age * 4);
   const r = rect.cell * 0.36 * pop;

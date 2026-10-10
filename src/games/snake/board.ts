@@ -86,7 +86,13 @@ export function gridSize(width: number, height: number): { cols: number; rows: n
  * The largest whole-pixel cell that fits the grid into the play area (below the HUD, above the touch
  * inset), centred. Only the drawing uses this, so a live inset change never alters the simulation.
  */
-export function fitBoard(cols: number, rows: number, width: number, height: number, bottom: number): BoardRect {
+export function fitBoard(
+  cols: number,
+  rows: number,
+  width: number,
+  height: number,
+  bottom: number,
+): BoardRect {
   const availW = width - 2 * MARGIN_PX;
   const availH = height - MARGIN_PX - bottom - HUD_PX;
   const cell = Math.max(1, Math.floor(Math.min(availW / cols, availH / rows)));
@@ -181,7 +187,15 @@ function runFits(
   return true;
 }
 
-function paintRun(grid: Grid, x0: number, y0: number, dx: number, dy: number, len: number, on: boolean): void {
+function paintRun(
+  grid: Grid,
+  x0: number,
+  y0: number,
+  dx: number,
+  dy: number,
+  len: number,
+  on: boolean,
+): void {
   for (let i = 0; i < len; i++) grid.walls[grid.index({ x: x0 + dx * i, y: y0 + dy * i })] = on ? 1 : 0;
   grid.wallCount += on ? len : -len;
 }
