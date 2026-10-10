@@ -3,7 +3,6 @@ import { NullAudio } from '../src/core/audio';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import type { Action } from '../src/core/input';
-import { BombSquadGame } from '../src/games/bombsquad/bombsquad';
 import { Arena, BORDER, CRATE, FLOOR, PILLAR } from '../src/games/bombsquad/grid';
 import type { Bomb, Bot, BotKind, Explosion, Item, Player } from '../src/games/bombsquad/types';
 import { FLIGHT_TIME, LIVES } from '../src/games/bombsquad/types';
