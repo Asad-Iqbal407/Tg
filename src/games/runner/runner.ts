@@ -29,6 +29,7 @@ import {
   drawTrain,
   fogAt,
   POWER_INFO,
+  POWER_KINDS,
 } from './props';
 import { drawRig, type RigColors, rigColors, RigPose } from './rig';
 import { GANTRY_EVERY, gantryAt, Scenery, type View } from './scenery';
@@ -142,7 +143,9 @@ export class RunnerGame extends BaseGame {
   private readonly view: View;
   private readonly items: DrawItem[] = [];
   private itemCount = 0;
-  private readonly hs: number;
+  /** HUD scale: follows the logical size, then grows when the canvas is shown small (see hudScale). */
+  private hs: number;
+  private readonly baseHs: number;
   private readonly preview: boolean;
   private touchUi: boolean;
   private chaserT = 0;
@@ -159,9 +162,10 @@ export class RunnerGame extends BaseGame {
   constructor(s: GameServices) {
     super(s);
     this.shield = this.hasBoost('shield');
-    this.preview = (s as GameServices & { preview?: boolean }).preview === true;
+    this.preview = s.preview === true;
     this.touchUi = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-    this.hs = clamp(Math.min(this.H / 960, this.W / 540), 0.9, 1.3);
+    this.baseHs = clamp(Math.min(this.H / 960, this.W / 540), 0.9, 1.3);
+    this.hs = this.baseHs;
     this.framing.update(this.W, this.H, this.insets);
     this.scenery = new Scenery(
       this.W,
@@ -239,7 +243,7 @@ export class RunnerGame extends BaseGame {
     this.landT += dt;
     this.takeoffT += dt;
 
-    for (const k of Object.keys(this.powers) as PowerKind[]) {
+    for (const k of POWER_KINDS) {
       if (this.powers[k] <= 0) continue;
       this.powers[k] = Math.max(0, this.powers[k] - dt);
       if (k === 'jetpack' && this.powers.jetpack === 0) this.endJetpack();
@@ -755,7 +759,22 @@ export class RunnerGame extends BaseGame {
     this.texts.render(ctx);
     ctx.restore();
     this.drawVignette();
-    if (!this.preview) this.drawHud();
+    if (!this.preview) {
+      this.hs = this.hudScale();
+      this.drawHud();
+    }
+  }
+
+  /**
+   * The logical size can be shown at well under 1 CSS px per logical px (a 1706 px wide run on a
+   * landscape phone), so the HUD grows until its main numbers are at least ~15 CSS px tall.
+   */
+  private hudScale(): number {
+    const canvas = this.ctx.canvas as HTMLCanvasElement | undefined;
+    const cssH = canvas && typeof canvas.clientHeight === 'number' ? canvas.clientHeight : 0;
+    if (!(cssH > 0)) return this.baseHs;
+    const css = cssH / this.H;
+    return this.baseHs * clamp(15 / (24 * this.baseHs * css), 1, 1.8);
   }
 
   private pushItem(
@@ -1042,7 +1061,7 @@ export class RunnerGame extends BaseGame {
     );
 
     let y = top + 54 * s;
-    for (const k of Object.keys(this.powers) as PowerKind[]) {
+    for (const k of POWER_KINDS) {
       const t = this.powers[k];
       if (t <= 0) continue;
       const info = POWER_INFO[k];

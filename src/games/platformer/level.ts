@@ -12,6 +12,10 @@ export const GROUND_ROW = 13;
 const BUMP_ROWS = { min: 2, max: 6 } as const;
 /** Enemies spawned on a surface narrower than this turn around at ledges. */
 const PATROL_MAX_SURFACE = 7;
+/** A checkpoint this many columns from the nearest enemy counts as fully safe. */
+const CHECKPOINT_CLEARANCE = 7;
+/** Row of an added power block: four rows above the ground, like the usual block rows. */
+const ADDED_BLOCK_ROW = GROUND_ROW - 4;
 
 export const Tile = {
   Empty: 0,
@@ -165,7 +169,8 @@ function tileIn(data: LevelData, col: number, row: number): TileId {
 
 /** Columns a walker can stand on around (`col`, `row`): floor below, nothing in the way. */
 function surfaceWidth(data: LevelData, col: number, row: number): number {
-  const standable = (c: number) => tileIn(data, c, row) === Tile.Empty && tileIn(data, c, row + 1) !== Tile.Empty;
+  const standable = (c: number) =>
+    tileIn(data, c, row) === Tile.Empty && tileIn(data, c, row + 1) !== Tile.Empty;
   let n = 1;
   for (let c = col - 1; standable(c); c--) n++;
   for (let c = col + 1; standable(c); c++) n++;
@@ -179,34 +184,80 @@ function openGround(data: LevelData, col: number): boolean {
   return !data.spawns.some((s) => Math.abs(Math.floor(s.x / T) - col) <= 2);
 }
 
+/** Columns between `col` and the nearest enemy spawn, capped at `cap`. */
+function enemyClearance(data: LevelData, col: number, cap: number): number {
+  let d = cap;
+  for (const s of data.spawns) d = Math.min(d, Math.abs(Math.floor(s.x / T) - col));
+  return d;
+}
+
 /**
- * The checkpoint sits on the last open ground column of the chunk before the middle one: always
- * on the floor, away from enemies, with the next chunk's enemies still a few tiles ahead.
+ * The checkpoint stands on open ground near the middle of the course (columns [from, to)), on the
+ * column furthest from any enemy, up to CHECKPOINT_CLEARANCE columns; ties go to the column nearest
+ * `pivot`. A respawn never starts next to a walker.
  */
-function placeCheckpoint(data: LevelData, x0: number, w: number): void {
-  for (let col = x0 + w - 1; col > x0; col--) {
+function placeCheckpoint(data: LevelData, from: number, to: number, pivot: number): void {
+  let best = pivot;
+  let bestClear = -1;
+  for (let col = from; col < to; col++) {
     if (!openGround(data, col)) continue;
-    data.checkpoint = { x: col * T + T / 2, y: GROUND_ROW * T };
-    return;
+    const clear = enemyClearance(data, col, CHECKPOINT_CLEARANCE);
+    if (clear > bestClear || (clear === bestClear && Math.abs(col - pivot) < Math.abs(best - pivot))) {
+      best = col;
+      bestClear = clear;
+    }
   }
-  data.checkpoint = { x: (x0 + w - 1) * T + T / 2, y: GROUND_ROW * T };
+  data.checkpoint = { x: best * T + T / 2, y: GROUND_ROW * T };
+}
+
+/**
+ * A free spot for an extra block in columns [from, to): open ground under it and its neighbours,
+ * and nothing else in that part of the sky, so it can be bumped from the floor and blocks no path.
+ */
+function freeBlockColumn(data: LevelData, from: number, to: number): number {
+  const clearAbove = (col: number) => {
+    for (let r = ADDED_BLOCK_ROW - 2; r < GROUND_ROW - 3; r++)
+      if (tileIn(data, col, r) !== Tile.Empty) return false;
+    return true;
+  };
+  for (let col = Math.max(1, from); col < to - 1; col++) {
+    let ok = true;
+    for (let c = col - 1; ok && c <= col + 1; c++) ok = openGround(data, c) && clearAbove(c);
+    const cx = col * T + T / 2;
+    const cy = ADDED_BLOCK_ROW * T + T / 2;
+    if (ok && !data.coins.some((k) => Math.abs(k.x - cx) < T && Math.abs(k.y - cy) < T)) return col;
+  }
+  return -1;
 }
 
 /**
  * Make sure there is a power-up on each side of the checkpoint (so a respawn has one ahead too):
- * if a half has none, its first coin block becomes a power block. The start chunk's block
- * guarantees the first half always has a candidate.
+ * if a half has none, its first coin block becomes a power block, or, without one, a power block
+ * is added over open ground. The start chunk's block gives the first half a candidate.
  */
-function ensurePowerUps(data: LevelData): void {
+function ensurePowerUps(data: LevelData, endCol: number): void {
   const cpCol = Math.floor(data.checkpoint.x / T);
   const blocks = [...data.contents.entries()]
     .map(([idx, content]) => ({ idx, content, col: idx % data.cols }))
     .sort((a, b) => a.col - b.col || a.idx - b.idx);
-  for (const half of [(c: number) => c < cpCol, (c: number) => c >= cpCol]) {
-    const inHalf = blocks.filter((b) => half(b.col));
+  const halves = [
+    { from: 0, to: cpCol },
+    { from: cpCol, to: endCol },
+  ];
+  for (const { from, to } of halves) {
+    const inHalf = blocks.filter((b) => b.col >= from && b.col < to);
     if (inHalf.some((b) => b.content === 'power')) continue;
     const first = inHalf.find((b) => b.content === 'coin');
-    if (first) data.contents.set(first.idx, 'power');
+    if (first) {
+      data.contents.set(first.idx, 'power');
+      continue;
+    }
+    // A few steps past the checkpoint, so a respawned hero finds it straight away.
+    const col = freeBlockColumn(data, from + 3, to);
+    if (col < 0) continue;
+    const idx = ADDED_BLOCK_ROW * data.cols + col;
+    data.tiles[idx] = Tile.Question;
+    data.contents.set(idx, 'power');
   }
 }
 
@@ -289,9 +340,11 @@ export function buildLevel(level: number, seed: number): LevelData {
   for (const s of data.spawns) {
     s.patrol = surfaceWidth(data, Math.floor(s.x / T), Math.floor(s.y / T) - 1) < PATROL_MAX_SURFACE;
   }
+  // Around the seam between the two middle chunks.
   const mid = Math.floor(chunks.length / 2);
-  placeCheckpoint(data, xs[mid - 1] as number, chunkWidth(chunks[mid - 1] as Chunk));
-  ensurePowerUps(data);
+  const midX = xs[mid] as number;
+  placeCheckpoint(data, (xs[mid - 1] as number) + 1, midX + chunkWidth(chunks[mid] as Chunk) - 1, midX);
+  ensurePowerUps(data, xs[chunks.length - 1] as number);
   addExtraWalkers(data, chunks, xs, level, rng);
   return data;
 }

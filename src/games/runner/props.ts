@@ -6,6 +6,9 @@ import type { View } from './scenery';
 import { createSurface, rand, resolutionOf, type Surface } from './surface';
 import type { Obstacle, Power, PowerKind } from './track';
 
+/** Power-up kinds in HUD order (a constant, so per-frame loops don't allocate key arrays). */
+export const POWER_KINDS: readonly PowerKind[] = ['magnet', 'double', 'sneakers', 'jetpack'];
+
 export const POWER_INFO: Record<PowerKind, { label: string; color: string; base: number }> = {
   magnet: { label: 'COIN MAGNET', color: '#ff4d6d', base: 10 },
   double: { label: '2X SCORE', color: '#ffc21a', base: 12 },
@@ -80,17 +83,26 @@ export function drawTrain(v: View, ob: Obstacle, rel: number, alpha: number): vo
 
   // Oncoming train: headlight cone on its lane.
   if (ob.vz !== 0 && ob.armed && rel > 1) {
+    // Three bands that widen and fade toward the runner, so the cone reads as light, not a slab.
     const reach = Math.min(rel - 0.5, 34);
-    ctx.fillStyle = 'rgba(255,244,190,0.2)';
-    ctx.beginPath();
-    const sa = cam.scale(rel);
-    const sb = cam.scale(rel - reach);
-    ctx.moveTo(cam.sx(cx - 0.9, sa), cam.sy(0.02, sa));
-    ctx.lineTo(cam.sx(cx + 0.9, sa), cam.sy(0.02, sa));
-    ctx.lineTo(cam.sx(cx + 1.4, sb), cam.sy(0.02, sb));
-    ctx.lineTo(cam.sx(cx - 1.4, sb), cam.sy(0.02, sb));
-    ctx.closePath();
-    ctx.fill();
+    ctx.fillStyle = 'rgb(255,236,170)';
+    for (let k = 0; k < 3; k++) {
+      const za = rel - (reach * k) / 3;
+      const zb = rel - (reach * (k + 1)) / 3;
+      const wa = 0.9 + (0.5 * k) / 3;
+      const wb = 0.9 + (0.5 * (k + 1)) / 3;
+      const sa = cam.scale(za);
+      const sb = cam.scale(zb);
+      ctx.globalAlpha = alpha * (0.3 - 0.09 * k);
+      ctx.beginPath();
+      ctx.moveTo(cam.sx(cx - wa, sa), cam.sy(0.02, sa));
+      ctx.lineTo(cam.sx(cx + wa, sa), cam.sy(0.02, sa));
+      ctx.lineTo(cam.sx(cx + wb, sb), cam.sy(0.02, sb));
+      ctx.lineTo(cam.sx(cx - wb, sb), cam.sy(0.02, sb));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = alpha;
   }
 
   // Visible side face (the one facing the camera axis).

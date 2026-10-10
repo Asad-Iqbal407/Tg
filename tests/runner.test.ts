@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { NullAudio } from '../src/core/audio';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
-import { MILESTONE_M, progressAt, speedAt, TRAIN_H, WARMUP_M } from '../src/games/runner/config';
+import {
+  Kinematics,
+  MAX_MULTIPLIER,
+  MILESTONE_M,
+  progressAt,
+  speedAt,
+  TRAIN_H,
+  viewDistance,
+  WARMUP_M,
+} from '../src/games/runner/config';
 import { depthKey, PLAYER_KEY } from '../src/games/runner/runner';
 import { envAt } from '../src/games/runner/scenery';
 import type { Coin, Obstacle, ObKind, TrackGenerator } from '../src/games/runner/track';
@@ -32,11 +41,21 @@ interface Runner extends GameInstance {
   powers: Record<string, number>;
   stats: Record<string, number>;
   gen: TrackGenerator;
+  milestone: number;
+  hint: string | null;
+  multiplier(): number;
 }
 
-function make(
-  opts: { seed?: number; boosts?: BoostId[]; width?: number; height?: number; insets?: Insets } = {},
-): { g: Runner; input: Input } {
+interface MakeOptions {
+  seed?: number;
+  boosts?: BoostId[];
+  width?: number;
+  height?: number;
+  insets?: Insets;
+  reducedMotion?: boolean;
+}
+
+function make(opts: MakeOptions = {}): { g: Runner; input: Input } {
   const input = new Input();
   const game = def.create({
     ctx: mockCtx(),
@@ -51,7 +70,7 @@ function make(
       boosts: new Set(opts.boosts ?? []),
       powerDuration: 1,
     },
-    reducedMotion: false,
+    reducedMotion: opts.reducedMotion ?? false,
     haptic: () => undefined,
   });
   return { g: game as unknown as Runner, input };
@@ -79,7 +98,7 @@ function addOb(g: Runner, kind: ObKind, lane: number, rel: number, len: number, 
 }
 
 /** Run past the obstacle-free warm-up with collisions off, then hand back a clean track. */
-function warmedUp(opts: Parameters<typeof make>[0] = {}): { g: Runner; input: Input } {
+function warmedUp(opts: MakeOptions = {}): { g: Runner; input: Input } {
   const r = make(opts);
   step(r.g, r.input, 3, () => (r.g.graceT = 1));
   r.g.graceT = 0;
@@ -293,6 +312,121 @@ describe('Metro Dash progression', () => {
         if (walled) expect(statics.some((o) => o.kind === 'ramp' && o.z <= z && o.z > z - 60)).toBe(true);
       }
     }
+  });
+});
+
+describe('Metro Dash speed scaling', () => {
+  it('keeps the jump apex while airtime, roll time and stride adapt to speed', () => {
+    const k = new Kinematics();
+    const apex = (v: number) => {
+      k.update(v);
+      return k.jumpV ** 2 / (2 * k.gravity);
+    };
+    const base = apex(13);
+    for (const v of [16, 20, 25, 30, 33]) expect(apex(v)).toBeCloseTo(base, 2);
+    k.update(13);
+    const { airtime, rollTime, strideHz } = k;
+    k.update(33);
+    expect(k.airtime).toBeLessThan(airtime * 0.8);
+    // A jump at top speed covers ~16 m of track instead of ~21 m with a fixed airtime.
+    expect(k.airtime * 33).toBeLessThan(17.5);
+    expect(k.rollTime).toBeLessThan(rollTime);
+    expect(strideHz).toBeGreaterThanOrEqual(2.4);
+    expect(k.strideHz).toBeLessThanOrEqual(3.5);
+    expect(viewDistance(13)).toBe(110);
+    expect(viewDistance(33)).toBe(175);
+  });
+
+  it('arms oncoming trains with the same warning time at any speed', () => {
+    for (const d of [1500, 6000]) {
+      const { g, input } = warmedUp();
+      g.distance = d;
+      g.speed = speedAt(d);
+      clearTrack(g);
+      const train = addOb(g, 'train', 1, 140, 20, TRAIN_H, -12);
+      train.armed = false;
+      let warning = 0;
+      step(g, input, 6, () => {
+        if (train.armed && !warning) warning = (train.z - g.distance) / (g.speed - train.vz);
+      });
+      expect(warning, `at ${d} m`).toBeGreaterThan(2.2);
+      expect(warning, `at ${d} m`).toBeLessThan(2.6);
+    }
+  });
+
+  it('raises the multiplier once per 1000 m milestone, capped at 8', () => {
+    const { g, input } = warmedUp();
+    expect(g.multiplier()).toBe(1);
+    g.distance = MILESTONE_M - 1;
+    clearTrack(g);
+    step(g, input, 0.2, () => (g.graceT = 1));
+    expect(g.milestone).toBe(1);
+    expect(g.multiplier()).toBe(2);
+    g.distance = 20 * MILESTONE_M;
+    expect(g.multiplier()).toBe(MAX_MULTIPLIER);
+    g.powers.double = 5;
+    expect(g.multiplier()).toBe(2 * MAX_MULTIPLIER);
+  });
+});
+
+describe('Metro Dash input forgiveness and onboarding', () => {
+  it('buffers a jump pressed just before landing', () => {
+    const { g, input } = warmedUp();
+    input.pushSwipe('up');
+    step(g, input, 0.5);
+    expect(g.grounded).toBe(false);
+    input.pushSwipe('up');
+    step(g, input, 0.6);
+    expect(g.stats.jumps).toBe(2);
+  });
+
+  it('allows a jump for a moment after running off the end of a roof (coyote time)', () => {
+    const { g, input } = warmedUp();
+    addOb(g, 'train', g.lane, -10, 12, TRAIN_H);
+    g.py = TRAIN_H;
+    g.grounded = true;
+    for (let i = 0; i < 60 && g.grounded; i++) step(g, input, DT);
+    expect(g.grounded).toBe(false);
+    step(g, input, 2 * DT);
+    input.pushSwipe('up');
+    step(g, input, DT);
+    expect(g.stats.jumps).toBe(1);
+    expect(g.vy).toBeGreaterThan(0);
+  });
+
+  it("explains the first obstacle in the runner's lane well before it arrives", () => {
+    let checked = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const { g, input } = make({ seed });
+      g.gen.fill(400);
+      const ahead = g.obstacles.filter((o) => o.lane === 1).sort((a, b) => a.z - b.z)[0];
+      if (!ahead) continue;
+      let warnedAt = -1;
+      step(g, input, 30, () => {
+        if (warnedAt < 0 && g.hint !== null && g.hint !== 'lanes') warnedAt = ahead.z - g.distance;
+      });
+      if (warnedAt < 0) continue;
+      checked++;
+      // At least a second of running at the warm-up speed.
+      expect(warnedAt, `seed ${seed}`).toBeGreaterThan(13);
+    }
+    expect(checked).toBeGreaterThan(20);
+  });
+
+  it('plays the same track with and without reduced motion', () => {
+    const run = (reducedMotion: boolean) => {
+      const { g, input } = make({ seed: 12, reducedMotion });
+      const rng = new Rng(3);
+      for (let i = 0; i < 60 * 30; i++) {
+        if (i % 15 === 0) input.pushSwipe(rng.pick(['left', 'right', 'up', 'down'] as const));
+        g.update(DT);
+        input.postUpdate();
+        if (i % 10 === 0) g.render();
+      }
+      const track = g.obstacles.map((o) => `${o.kind}${o.lane}@${o.z.toFixed(2)}`).join(',');
+      return `${JSON.stringify(g.getResult())}|${track}`;
+    };
+    expect(run(true)).toBe(run(false));
   });
 });
 

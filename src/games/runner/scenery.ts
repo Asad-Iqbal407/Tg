@@ -142,8 +142,15 @@ export class Scenery {
       return;
     }
     if (oy > 0) {
-      ctx.fillStyle = ZONES[look.to]!.skyTop;
+      // Above the cached image (camera pulled back at speed): extend the sky top, cross-fading too.
+      ctx.fillStyle = ZONES[a ? look.from : look.to]!.skyTop;
       ctx.fillRect(-20, -20, this.W + 40, oy + 21);
+      if (a) {
+        ctx.globalAlpha = look.t;
+        ctx.fillStyle = ZONES[look.to]!.skyTop;
+        ctx.fillRect(-20, -20, this.W + 40, oy + 21);
+        ctx.globalAlpha = 1;
+      }
     }
     const w = this.W + 2 * SKY_MARGIN;
     const h = this.skyHz + SKY_BELOW;
@@ -578,10 +585,15 @@ export class Scenery {
       const color = look.neon[Math.floor(rand(j, 80 + sk) * 3)]!;
       const top = Math.min(h - 1, 9.5);
       ctx.fillStyle = color;
-      ctx.globalAlpha = fogA * 0.22;
-      ctx.beginPath();
-      cam.front(ctx, Math.min(xi, x) - 0.5, Math.max(xi, x) + 0.5, 3.4, top + 0.6, zs);
-      ctx.fill();
+      // The halo would become a huge translucent slab right next to the camera, so it fades out
+      // once the sign has passed the runner.
+      const halo = Math.min(1, Math.max(0, (zs - 1) / 6));
+      if (halo > 0) {
+        ctx.globalAlpha = fogA * 0.22 * halo;
+        ctx.beginPath();
+        cam.front(ctx, Math.min(xi, x) - 0.5, Math.max(xi, x) + 0.5, 3.4, top + 0.6, zs);
+        ctx.fill();
+      }
       ctx.globalAlpha = fogA;
       ctx.beginPath();
       cam.front(ctx, Math.min(xi, x), Math.max(xi, x), 4, top, zs);

@@ -26,8 +26,6 @@ const STOMP_TOLERANCE = 10;
 /** Score per second left on the clock at the end of a course. */
 const TIME_BONUS = 100;
 const SHELL_KICK_POINTS = 400;
-/** After a fresh course or a respawn, enemies wait this long (or until the hero moves). */
-const ENEMY_HOLD = 1.5;
 const RESPAWN_INVULN = 1.2;
 const BANNER_TIME = 2;
 const HUD_PAD = 12;
@@ -106,6 +104,19 @@ interface Debris {
 
 type Phase = 'play' | 'dying' | 'flag' | 'walkoff' | 'tally';
 
+/** Drop the entries `keep` rejects, in place (no per-frame array allocation). */
+function prune<V>(list: V[], keep: (v: V) => boolean): void {
+  let n = 0;
+  for (const v of list) if (keep(v)) list[n++] = v;
+  list.length = n;
+}
+
+const alive = (v: { life: number }): boolean => v.life > 0;
+const itemInWorld = (it: Item): boolean => it.y < ROWS * T + 100;
+const debrisInWorld = (d: Debris): boolean => d.y < ROWS * T + 50;
+const enemyLingers = (e: Enemy): boolean =>
+  !(e.state === 'dead' && e.y > ROWS * T + 80) && !(e.state === 'squished' && e.timer <= 0);
+
 export class PlatformerGame extends BaseGame {
   private readonly seed: number;
   private readonly preview: boolean;
@@ -129,7 +140,8 @@ export class PlatformerGame extends BaseGame {
   private fireworkAt = 0;
   private bannerT = 0;
   private showBanner = true;
-  private enemyHold = 0;
+  /** After a fresh course or a respawn, enemies stand still until the hero first moves or jumps. */
+  private enemiesWaiting = true;
   private pitDeath = false;
   private readonly bumps = new Map<number, number>();
   private player!: Player;
@@ -223,7 +235,7 @@ export class PlatformerGame extends BaseGame {
     this.fireworkAt = 0;
     this.bannerT = 0;
     this.showBanner = fresh;
-    this.enemyHold = ENEMY_HOLD;
+    this.enemiesWaiting = true;
     this.pitDeath = false;
     this.camX = this.cameraTargetX();
     this.camY = this.cameraTargetY();
@@ -467,7 +479,7 @@ export class PlatformerGame extends BaseGame {
     const jumpPressed = this.input.wasPressed('primary') || this.input.wasPressed('up');
     p.coyote = p.onGround ? PHYS.coyote : Math.max(0, p.coyote - dt);
     p.jumpBuf = jumpPressed ? PHYS.buffer : Math.max(0, p.jumpBuf - dt);
-    if (this.enemyHold > 0) this.enemyHold = ax !== 0 || jumpPressed ? 0 : this.enemyHold - dt;
+    if (ax !== 0 || jumpPressed) this.enemiesWaiting = false;
     const holding = this.input.isDown('primary') || this.input.isDown('up');
     if (p.jumpBuf > 0 && p.coyote > 0) {
       p.vy = -(PHYS.jumpV + Math.abs(p.vx) * 0.18);
@@ -655,7 +667,7 @@ export class PlatformerGame extends BaseGame {
       c.vy += 1800 * dt;
       c.y += c.vy * dt;
     }
-    this.popCoins = this.popCoins.filter((c) => c.life > 0);
+    prune(this.popCoins, alive);
   }
 
   private updateItems(dt: number): void {
@@ -688,7 +700,7 @@ export class PlatformerGame extends BaseGame {
         }
       }
     }
-    this.items = this.items.filter((it) => it.y < ROWS * T + 100);
+    prune(this.items, itemInWorld);
   }
 
   /** True when a walking enemy's next step would take it off a ledge. */
@@ -700,16 +712,17 @@ export class PlatformerGame extends BaseGame {
 
   /**
    * `prevBottom` is the hero's feet before this step's move and `descending` whether that move was
-   * downward; both are captured before any stomp bounces the hero, so landing on two enemies at
-   * once squashes both.
+   * downward; both are captured before any stomp bounces the hero, and the hero is only lifted onto
+   * the stomped enemies after the loop, so landing on two enemies at once squashes both.
    */
   private updateEnemies(dt: number, prevBottom: number, descending: boolean): void {
     const p = this.player;
     const viewL = this.camX - 3 * T;
     const viewR = this.camX + this.W + 3 * T;
+    let landTop = Infinity;
     for (const e of this.enemies) {
       if (!e.active) {
-        if (this.enemyHold > 0 || e.x >= viewR || e.x + e.w <= viewL) continue;
+        if (this.enemiesWaiting || e.x >= viewR || e.x + e.w <= viewL) continue;
         e.active = true;
         e.vx = e.dir * e.speed;
       }
@@ -755,6 +768,7 @@ export class PlatformerGame extends BaseGame {
       if (p.dead || this.phase !== 'play' || !rectsOverlap(p, e)) continue;
       const fromAbove = prevBottom <= e.y + STOMP_TOLERANCE;
       if ((descending || p.stompGrace > 0) && fromAbove && e.kind !== 'spiky') {
+        landTop = Math.min(landTop, e.y);
         this.stomp(e);
       } else if (e.kickGrace > 0) {
         // Just stomped or kicked: harmless, and not kicked again by the same contact.
@@ -764,15 +778,13 @@ export class PlatformerGame extends BaseGame {
         this.hurt();
       }
     }
-    this.enemies = this.enemies.filter(
-      (e) => !(e.state === 'dead' && e.y > ROWS * T + 80) && !(e.state === 'squished' && e.timer <= 0),
-    );
+    // Sit the hero on top of what it stomped, so the bounce starts clear of the enemies.
+    if (landTop < Infinity) p.y = Math.min(p.y, landTop - p.h);
+    prune(this.enemies, enemyLingers);
   }
 
   private stomp(e: Enemy): void {
     const p = this.player;
-    // Sit the hero on top so the bounce starts clear of the enemy.
-    p.y = Math.min(p.y, e.y - p.h);
     p.vy = this.input.isDown('primary') || this.input.isDown('up') ? -720 : -460;
     p.jumping = true;
     p.stompGrace = PHYS.stompGrace;
@@ -991,7 +1003,7 @@ export class PlatformerGame extends BaseGame {
           colors: ['#ffb703', '#fb5607'],
         });
     }
-    this.fireballs = this.fireballs.filter((f) => f.life > 0);
+    prune(this.fireballs, alive);
   }
 
   private updateDebris(dt: number): void {
@@ -1001,7 +1013,7 @@ export class PlatformerGame extends BaseGame {
       d.y += d.vy * dt;
       d.rot += dt * 12;
     }
-    this.debris = this.debris.filter((d) => d.y < ROWS * T + 50);
+    prune(this.debris, debrisInWorld);
   }
 
   // ------------------------------------------------------------------ render
@@ -1527,13 +1539,14 @@ export class PlatformerGame extends BaseGame {
     });
 
     // Banners sit in the open sky under the HUD, clear of the rows the hero plays in.
-    const sky = top + HUD_H;
+    const sky = wy + HUD_H;
     const mid = ins.top + (this.H - ins.top - ins.bottom) * 0.38;
     if (this.phase === 'play' && this.showBanner && this.bannerT < BANNER_TIME) {
       const t = this.bannerT / BANNER_TIME;
       this.drawBanner(`WORLD ${worldLabel(this.levelNum)}`, this.theme.name, t, '#ffd23f', sky + 72);
     }
-    if (this.phase === 'play' && this.hurryT < 2) this.drawBanner('HURRY UP!', '', this.hurryT / 2, '#ff6b6b', sky + 56);
+    if (this.phase === 'play' && this.hurryT < 2)
+      this.drawBanner('HURRY UP!', '', this.hurryT / 2, '#ff6b6b', sky + 56);
     if (this.phase === 'tally' && this.timeLeft <= 0) {
       const next = `Next: World ${worldLabel(this.levelNum + 1)}`;
       this.drawBanner('COURSE CLEAR!', next, clamp(this.phaseT / 2.6, 0, 1), '#7CFC00', mid);
