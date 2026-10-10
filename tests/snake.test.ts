@@ -13,6 +13,7 @@ import {
   opposite,
   sameCell,
 } from '../src/games/snake/board';
+import { bodyShades, drawSnake, mixHex } from '../src/games/snake/draw';
 import { levelFor, SnakeGame } from '../src/games/snake/snake';
 import { type BoostId, type GameInstance, NO_INSETS } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
@@ -185,6 +186,18 @@ function biteOwnBody(game: GameInstance, input: Input): void {
   untilMove(game, input);
   tap(game, input, 'up');
   for (let i = 0; i < 40 && !peek(game).shieldUsed && !game.isOver(); i++) step(game, input);
+}
+
+/** A canvas stand-in that records every strokeStyle the drawing code sets, in order. */
+function recordStrokes(): { ctx: CanvasRenderingContext2D; strokes: string[] } {
+  const strokes: string[] = [];
+  const ctx = new Proxy(mockCtx(), {
+    set(target, key, value) {
+      if (key === 'strokeStyle') strokes.push(String(value));
+      return Reflect.set(target, key, value);
+    },
+  });
+  return { ctx, strokes };
 }
 
 describe('snake rules', () => {
@@ -444,5 +457,43 @@ describe('snake rules', () => {
     expect(s.grid.cols).toBe(23);
     expect(s.grid.rows).toBe(29);
     expect(game).toBeInstanceOf(SnakeGame);
+  });
+
+  it('fades the body from its colour at the head to a darker tail', () => {
+    expect(mixHex('#000000', '#ffffff', 0.5)).toBe('rgb(128,128,128)');
+    const shades = bodyShades('#4ade80');
+    expect(shades).toHaveLength(8);
+    expect(shades[0]).toBe('rgb(74,222,128)');
+    expect(shades[7]).toBe('rgb(48,144,83)');
+    const sums = shades.map((c) => (c.match(/\d+/g) ?? []).reduce((sum, v) => sum + Number(v), 0));
+    for (let k = 1; k < sums.length; k++) expect(sums[k]).toBeLessThan(sums[k - 1] as number);
+  });
+
+  it('draws the body as fading strokes, tail darkest, not one flat colour', () => {
+    const palette = {
+      body: '#4ade80',
+      head: '#bbf7d0',
+      food: '#ef4444',
+      gold: '#fde047',
+      board1: '#0f2a1a',
+      board2: '#123421',
+      wall: '#64748b',
+    };
+    const { ctx, strokes } = recordStrokes();
+    const body: Cell[] = Array.from({ length: 10 }, (_, i) => ({ x: 10 - i, y: 5 }));
+    drawSnake(ctx, body, { x: 0, y: 0, cell: 24 }, palette, {
+      heading: 'right',
+      thick: 0,
+      ghost: false,
+      dead: false,
+      time: 0,
+    });
+    const shades = bodyShades(palette.body);
+    const bodyStrokes = strokes.filter((s) => shades.includes(s));
+    // One stroke per segment, drawn from the tail forward: the first is the darkest step, the last the body colour.
+    expect(bodyStrokes).toHaveLength(9);
+    expect(bodyStrokes[0]).toBe(shades[7]);
+    expect(bodyStrokes[8]).toBe(shades[0]);
+    expect(new Set(bodyStrokes).size).toBeGreaterThan(4);
   });
 });

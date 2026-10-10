@@ -3,7 +3,7 @@ import { NullAudio } from '../src/core/audio';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import type { Action } from '../src/core/input';
-import { Arena, BORDER, CRATE, FLOOR, PILLAR } from '../src/games/bombsquad/grid';
+import { Arena, BORDER, CRATE, FLOOR, manhattan, PILLAR } from '../src/games/bombsquad/grid';
 import type { Bomb, Bot, BotKind, Explosion, Item, Player } from '../src/games/bombsquad/types';
 import { FLIGHT_TIME, LIVES } from '../src/games/bombsquad/types';
 import type { BoostId, GameInstance, GameServices } from '../src/games/types';
@@ -25,6 +25,7 @@ interface Internals {
   spawnQueue: BotKind[];
   wave: number;
   lives: number;
+  layout(): { ts: number; ox: number; oy: number };
   addBomb(
     owner: Bomb['owner'],
     tx: number,
@@ -320,6 +321,74 @@ describe('bombs and blasts', () => {
     const landed = i.bombs[0];
     expect(landed?.tx).toBe(3);
     expect(landed?.ty).toBe(1);
+  });
+});
+
+describe('spawns and aim', () => {
+  it('never spawns a bot on top of the player, even when the player stands on a spawn point', () => {
+    const { game, input, i, arena } = quietGame(15);
+    const spawn = arena.botSpawns[0];
+    if (!spawn) throw new Error('no bot spawn point');
+    i.player.invuln = 0;
+    i.player.x = spawn.x + 0.5;
+    i.player.y = spawn.y + 0.5;
+    const px = Math.floor(i.player.x);
+    const py = Math.floor(i.player.y);
+    i.spawnQueue = ['walker', 'walker', 'bomber'];
+    i.spawnTimer = 0;
+    let checked = 0;
+    for (let t = 0; t < 2; t += DT) {
+      game.update(DT);
+      input.postUpdate();
+      // Each bot is checked on the step it appears, before it has had time to walk toward the player.
+      for (; checked < i.bots.length; checked++) {
+        const bot = i.bots[checked];
+        if (!bot) continue;
+        expect(manhattan(Math.floor(bot.x), Math.floor(bot.y), px, py)).toBeGreaterThanOrEqual(6);
+      }
+    }
+    expect(checked).toBe(3);
+    expect(i.lives).toBe(LIVES);
+  });
+
+  it('a due bot waits while every far spawn point is taken, then appears', () => {
+    const { game, input, i, arena } = quietGame(16);
+    // Long-fused bombs hold every spawn point without going off during the test.
+    for (const s of arena.botSpawns) i.addBomb('bot', s.x, s.y, s.x + 0.5, s.y + 0.5, 1, 100, 0);
+    i.spawnQueue = ['walker'];
+    i.spawnTimer = 0;
+    run(game, input, 1);
+    expect(i.bots.length).toBe(0);
+    expect(i.spawnQueue.length).toBe(1);
+    i.bombs = [];
+    run(game, input, 0.2);
+    expect(i.bots.length).toBe(1);
+    expect(i.spawnQueue.length).toBe(0);
+  });
+
+  it('a pointer resting over the HUD or the margins does not steer the throw off the grid', () => {
+    const { game, input, i, arena } = quietGame(17);
+    clearInterior(arena);
+    const { ts, ox, oy } = i.layout();
+    const centre = (tx: number, ty: number) => ({ x: ox + (tx + 0.5) * ts, y: oy + (ty + 0.5) * ts });
+    i.player.x = 5.5;
+    i.player.y = 5.5;
+    i.player.facingX = 1;
+    i.player.facingY = 0;
+    const throwAt = (x: number, y: number): number[] | null => {
+      Object.assign(input.pointer, { x, y, inside: true, active: true, touch: false });
+      i.bombs = [];
+      i.player.ammo = 1;
+      press(game, input, 'primary');
+      const b = i.bombs[0];
+      return b ? [b.tx, b.ty] : null;
+    };
+    // Over the HUD strip and in the left margin: both fall back to the facing direction (right).
+    expect(throwAt(480, 20)).toEqual([8, 5]);
+    expect(throwAt(4, oy + 2 * ts)).toEqual([8, 5]);
+    // Over the arena itself, the throw follows the pointer's tile.
+    const up = centre(5, 2);
+    expect(throwAt(up.x, up.y)).toEqual([5, 2]);
   });
 });
 

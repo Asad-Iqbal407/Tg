@@ -419,13 +419,14 @@ export class BombSquadGame extends BaseGame {
       const tx = Math.floor((pt.x - lay.ox) / lay.ts);
       const ty = Math.floor((pt.y - lay.oy) / lay.ts);
       // Only a pointer over the arena itself aims: the HUD strip and the margins fall back to facing.
-      if (!this.arena.inBounds(tx, ty)) return { dx: p.facingX, dy: p.facingY, reach: THROW_RANGE };
-      const ddx = tx - ox;
-      const ddy = ty - oy;
-      if (Math.abs(ddx) >= Math.abs(ddy) && ddx !== 0) {
-        return { dx: Math.sign(ddx), dy: 0, reach: Math.min(THROW_RANGE, Math.abs(ddx)) };
+      if (this.arena.inBounds(tx, ty)) {
+        const ddx = tx - ox;
+        const ddy = ty - oy;
+        if (Math.abs(ddx) >= Math.abs(ddy) && ddx !== 0) {
+          return { dx: Math.sign(ddx), dy: 0, reach: Math.min(THROW_RANGE, Math.abs(ddx)) };
+        }
+        if (ddy !== 0) return { dx: 0, dy: Math.sign(ddy), reach: Math.min(THROW_RANGE, Math.abs(ddy)) };
       }
-      if (ddy !== 0) return { dx: 0, dy: Math.sign(ddy), reach: Math.min(THROW_RANGE, Math.abs(ddy)) };
     }
     return { dx: p.facingX, dy: p.facingY, reach: THROW_RANGE };
   }
@@ -730,22 +731,32 @@ export class BombSquadGame extends BaseGame {
     return dead.length;
   }
 
-  private spawnBot(kind: BotKind): void {
+  /**
+   * The spawn point for the next bot: the first free one, in rotation order, that is at least
+   * MIN_BOT_SPAWN_DIST tiles from the player's current tile. Null while none qualifies.
+   */
+  private pickSpawn(): Cell | null {
     const spawns = this.arena.botSpawns;
-    const n = spawns.length;
-    let pick = this.spawnCursor % n;
-    for (let i = 0; i < n; i++) {
-      const idx = (this.spawnCursor + i) % n;
+    const px = Math.floor(this.player.x);
+    const py = Math.floor(this.player.y);
+    for (let i = 0; i < spawns.length; i++) {
+      const idx = (this.spawnCursor + i) % spawns.length;
       const s = spawns[idx];
-      if (!s) continue;
-      const busy = this.bots.some((b) => Math.hypot(b.x - (s.x + 0.5), b.y - (s.y + 0.5)) < 0.9);
-      if (!busy) {
-        pick = idx;
-        break;
-      }
+      if (!s || manhattan(s.x, s.y, px, py) < MIN_BOT_SPAWN_DIST) continue;
+      if (this.spawnBusy(s)) continue;
+      this.spawnCursor = idx + 1;
+      return s;
     }
-    this.spawnCursor = pick + 1;
-    const s = spawns[pick] ?? this.arena.playerSpawn;
+    return null;
+  }
+
+  /** A spawn point is busy while a bot stands on it or a bomb lies on it. */
+  private spawnBusy(s: Cell): boolean {
+    if (this.bombAt(s.x, s.y)) return true;
+    return this.bots.some((b) => Math.hypot(b.x - (s.x + 0.5), b.y - (s.y + 0.5)) < 0.9);
+  }
+
+  private spawnBot(kind: BotKind, s: Cell): void {
     const bomber = kind === 'bomber';
     this.bots.push({
       kind,
@@ -788,10 +799,13 @@ export class BombSquadGame extends BaseGame {
   private updateWaves(dt: number): void {
     if (this.spawnQueue.length > 0) {
       this.spawnTimer -= dt;
-      if (this.spawnTimer <= 0) {
+      // A due bot stays queued until a spawn point clear of the player is free, never appearing on top of them.
+      const at = this.spawnTimer <= 0 ? this.pickSpawn() : null;
+      const kind = this.spawnQueue[0];
+      if (at && kind) {
+        this.spawnQueue.shift();
         this.spawnTimer = SPAWN_STAGGER;
-        const kind = this.spawnQueue.shift();
-        if (kind) this.spawnBot(kind);
+        this.spawnBot(kind, at);
       }
       return;
     }
