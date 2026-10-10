@@ -50,13 +50,17 @@ export interface HillProbe {
 
 const FUEL_IDLE = 1.2;
 const FUEL_BURN = 3;
-/** Out of fuel: the run ends once the car is this slow for SLOW_END s, or stops gaining ground. */
+/**
+ * Out of fuel: the run ends OUT_END s after the tank empties once the car has stopped (slower
+ * than SLOW_SPEED for SLOW_END s), or after OUT_STALL s without covering new ground.
+ */
 const SLOW_SPEED = 25;
 const SLOW_END = 1;
-const NO_PROGRESS_END = 3.5;
+const OUT_END = 3;
+const OUT_STALL = 3.5;
 /** Tail stand / roof / side: tilted beyond TIP_ANGLE while resting for TIP_END seconds. */
 const TIP_ANGLE = 1.35;
-const TIP_END = 1.6;
+const TIP_END = 2;
 /** A flip needs ~305° of rotation in the air and a landing on both wheels within this angle. */
 const FLIP_SLACK = 0.95;
 const LAND_TOLERANCE = 0.6;
@@ -104,6 +108,9 @@ export class HillGame extends BaseGame {
   private tipT = 0;
   private fuelOutT = 0;
   private slowT = 0;
+  /** Seconds on an empty tank without new ground, and the furthest x reached since it ran dry. */
+  private outStallT = 0;
+  private outMaxX = 0;
   private crashed = false;
   private crashReason = '';
   private shield: boolean;
@@ -288,23 +295,31 @@ export class HillGame extends BaseGame {
     this.bannerT = 0;
   }
 
-  /** Out of fuel: end quickly once the car stops making headway. */
+  /** Out of fuel: the run winds down a few seconds after the tank empties, once the car stops. */
   private checkFuel(dt: number): void {
     if (this.crashed || this.fuel > 0) {
-      this.fuelOutT = this.slowT = 0;
+      this.fuelOutT = this.slowT = this.outStallT = 0;
+      this.outMaxX = this.maxX;
       return;
     }
-    if (this.fuelOutT === 0) this.audio.play('empty');
+    if (this.fuelOutT === 0) {
+      this.audio.play('empty');
+      this.outMaxX = this.maxX;
+    }
     this.fuelOutT += dt;
     this.slowT = this.car.speed() < SLOW_SPEED ? this.slowT + dt : 0;
-    if (this.fuelOutT > 0.5 && (this.slowT > SLOW_END || this.progressT > NO_PROGRESS_END))
+    if (this.maxX > this.outMaxX + 1) {
+      this.outMaxX = this.maxX;
+      this.outStallT = 0;
+    } else this.outStallT += dt;
+    if ((this.fuelOutT >= OUT_END && this.slowT >= SLOW_END) || this.outStallT >= OUT_STALL)
       this.crash('Out of fuel!');
   }
 
   /** 0..1 progress towards the out-of-fuel ending (for the HUD ring). */
   private get fuelEndProgress(): number {
     if (this.fuel > 0) return 0;
-    return clamp(Math.max(this.slowT / SLOW_END, this.progressT / NO_PROGRESS_END), 0, 1);
+    return clamp(Math.max(this.fuelOutT / OUT_END, this.outStallT / OUT_STALL), 0, 1);
   }
 
   private trackAir(dt: number): void {
