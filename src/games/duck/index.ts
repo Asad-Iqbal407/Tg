@@ -19,6 +19,7 @@ export const duckGame: GameDefinition = {
     ['Mouse / tap', 'Aim and shoot'],
     ['Arrow keys / WASD / stick', 'Move crosshair (hold to speed up; it drifts with nearby ducks)'],
     ['Space / Enter', 'Shoot'],
+    ['Shift / X / right click', 'Snap onto the nearest duck'],
   ],
   touchHint: 'Tap anywhere to shoot at that spot.',
   touchButtons: [],

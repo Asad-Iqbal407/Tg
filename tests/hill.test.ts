@@ -61,7 +61,7 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   st.airRot += wrap(p.angle - st.lastAngle);
   st.lastAngle = p.angle;
   // Only spin on a jump, once clearly airborne (not on a micro-hop).
-  const onJump = p.kickers.some((k) => p.x >= k.start && p.x <= k.lip + 200);
+  const onJump = p.kickers.some((k) => p.x >= k.start && p.x <= k.end);
   if (mode === 'flip' && onJump && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 0.25)
     return { gas: false, brake: true };
   // Level out for the landing: brake tilts nose down, gas tilts nose up.

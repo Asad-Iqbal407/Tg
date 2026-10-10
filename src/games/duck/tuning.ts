@@ -82,6 +82,8 @@ export const AIM = {
   /** Pull towards the duck (1/s) and the share of the duck's motion the crosshair follows. */
   assistPull: 6,
   assistFollow: 0.5,
+  /** The secondary action (Shift / X / B, right click) snaps onto the nearest flying duck and holds. */
+  snapLock: 0.25,
 } as const;
 
 /** Extra hit radius for touch, where the finger hides the target. */

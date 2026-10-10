@@ -86,6 +86,8 @@ interface BarLayout {
 }
 
 const HOLE_LIFE = 0.4;
+/** Status pill widths (logical px at HUD scale 1). */
+const PILL = { power: 210, guardian: 140, combo: 118, gap: 8 } as const;
 /** Zig-zag ducks climb or dive at this angle (radians) from the horizontal. */
 const ZIGZAG_ANGLE = 0.55;
 /** Minimum horizontal gap between ducks of the same wave when they take off. */
@@ -123,6 +125,8 @@ export class DuckGame extends BaseGame {
   private aimVX = 0;
   private aimVY = 0;
   private aimHold = 0;
+  /** Seconds left in which keys can't move the crosshair, after a snap onto a duck. */
+  private snapLock = 0;
   /** Keyboard / gamepad steers the crosshair (until the pointer moves or presses again). */
   private aimByKeys = false;
   /** The pointer driving the crosshair is a finger: larger hit radius. */
@@ -337,8 +341,11 @@ export class DuckGame extends BaseGame {
     }
     this.lastPtrX = ptr.x;
     this.lastPtrY = ptr.y;
-    let ax = this.input.axisX();
-    let ay = this.input.axisY();
+    if (this.phase === 'wave' && this.input.wasPressed('secondary')) this.snapToDuck();
+    this.snapLock = Math.max(0, this.snapLock - dt);
+    // Right after a snap the keys wait, so the reticle stays on the duck long enough to shoot.
+    let ax = this.snapLock > 0 ? 0 : this.input.axisX();
+    let ay = this.snapLock > 0 ? 0 : this.input.axisY();
     if (ax !== 0 || ay !== 0) {
       if (ax !== 0 && ay !== 0) {
         ax *= Math.SQRT1_2;
@@ -368,22 +375,40 @@ export class DuckGame extends BaseGame {
 
   /** Light magnetism for keys and pads: drift with a nearby duck and ease onto it. */
   private assistAim(dt: number): void {
-    let best: Duck | null = null;
-    let bestD: number = AIM.assistRadius;
-    for (const d of this.ducks) {
-      if (d.state !== 'fly') continue;
-      const dd = Math.hypot(d.x - this.aimX, d.y - this.aimY);
-      if (dd < bestD) {
-        bestD = dd;
-        best = d;
-      }
-    }
+    const best = this.nearestFlying(this.aimX, this.aimY, AIM.assistRadius);
     if (!best) return;
     this.aimX += (best.x - (best.hx[0] ?? best.x)) * AIM.assistFollow;
     this.aimY += (best.y - (best.hy[0] ?? best.y)) * AIM.assistFollow;
     const k = damp(AIM.assistPull, dt);
     this.aimX += (best.x - this.aimX) * k;
     this.aimY += (best.y - this.aimY) * k;
+  }
+
+  /** The flying duck closest to (x, y), if one lies within `within` px. */
+  private nearestFlying(x: number, y: number, within: number): Duck | null {
+    let best: Duck | null = null;
+    let bestD = within;
+    for (const d of this.ducks) {
+      if (d.state !== 'fly') continue;
+      const dd = Math.hypot(d.x - x, d.y - y);
+      if (dd < bestD) {
+        bestD = dd;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  /** Secondary action: jump the crosshair onto the nearest flying duck and hold it there briefly. */
+  private snapToDuck(): void {
+    const d = this.nearestFlying(this.aimX, this.aimY, Infinity);
+    if (!d) return;
+    this.aimX = d.x;
+    this.aimY = d.y;
+    this.aimVX = this.aimVY = 0;
+    this.aimByKeys = true;
+    this.touchAim = false;
+    this.snapLock = AIM.snapLock;
   }
 
   /** Current hit radius: the reticle ring is drawn at exactly this size. */
@@ -588,16 +613,7 @@ export class DuckGame extends BaseGame {
     this.quackT -= dt;
     if (this.quackT > 0) return;
     this.quackT = QUACK_EVERY;
-    let best: Duck | null = null;
-    let bestD = Infinity;
-    for (const d of this.ducks) {
-      if (d.state !== 'fly') continue;
-      const dd = Math.hypot(d.x - this.aimX, d.y - this.aimY);
-      if (dd < bestD) {
-        bestD = dd;
-        best = d;
-      }
-    }
+    const best = this.nearestFlying(this.aimX, this.aimY, Infinity);
     if (best) this.audio.play('quack', { volume: 0.3, pitch: best.kind === 'gold' ? 1.25 : 1 });
   }
 
@@ -875,11 +891,20 @@ export class DuckGame extends BaseGame {
     return false;
   }
 
+  /**
+   * Extra HUD size on small screens. A phone draws the canvas at few CSS px per logical px, so the
+   * text needs more logical px to stay readable. Reads 1 when the canvas is not laid out (tests).
+   */
+  private phoneScale(): number {
+    const css = (this.ctx.canvas as HTMLCanvasElement | undefined)?.clientWidth ?? 0;
+    return css > 0 ? clamp(0.8 / (css / this.W), 1, 1.2) : 1;
+  }
+
   /** Bottom HUD bar: anchored to the canvas edges and lifted above the bottom inset. */
   private layoutBar(): BarLayout {
     const b = this.bar;
     const ins = this.insets;
-    b.s = clamp(this.H / 540, 1, 1.5);
+    b.s = clamp(this.H / 540, 1, 1.5) * this.phoneScale();
     b.h = 58 * b.s;
     b.x = 10 + ins.left;
     b.w = Math.max(0, this.W - ins.left - ins.right - 20);
@@ -967,39 +992,52 @@ export class DuckGame extends BaseGame {
     ctx.fillRect(x0 + labelW + this.required * sp - 0.18 * sp - 1.5 * s, cy - 22 * s, 3 * s, 44 * s);
   }
 
-  /** Power timers (left), combo and Guardian (right): just above the bar, below the flight band. */
+  /**
+   * Power timers (left), combo and Guardian (right), just above the bar and below the flight band.
+   * The whole row shrinks when its pills would not fit the bar.
+   */
   private drawStatusRow(b: BarLayout): void {
     const ctx = this.ctx;
-    const s = b.s;
+    const mult = this.multiplier;
+    // Scatter also shows while the Power Start runs, even with no crate timer.
+    const kinds = (['slowmo', 'scatter'] as const).filter(
+      (k) => this.powers[k] > 0 || (k === 'scatter' && this.headStart),
+    );
+    const widths = [
+      ...kinds.map(() => PILL.power),
+      ...(this.guardian ? [PILL.guardian] : []),
+      ...(mult > 1 ? [PILL.combo] : []),
+    ];
+    if (widths.length === 0) return;
+    const total = widths.reduce((a, w) => a + w, 0) + PILL.gap * (widths.length - 1);
+    const s = Math.min(b.s, b.w / total);
     const h = 40 * s;
-    const y = b.y - h - 8 * s;
+    const y = b.y - h - PILL.gap * s;
     let x = b.x;
-    for (const k of ['slowmo', 'scatter'] as const) {
+    for (const k of kinds) {
       const v = this.powers[k];
-      const boost = k === 'scatter' && this.headStart;
-      if (v <= 0 && !boost) continue;
       const info = POWER_INFO[k];
-      const w = 190 * s;
+      const w = PILL.power * s;
       hudPill(ctx, x, y, w, h);
-      text(ctx, boost && v <= 0 ? `${info.label} · ROUND 1` : info.label, x + 18 * s, y + 14 * s, {
+      // Only the Power Start is running: the timer is still full and says so.
+      text(ctx, v > 0 ? info.label : `${info.label} · ROUND 1`, x + 18 * s, y + 14 * s, {
         size: 15 * s,
         color: info.color,
       });
       const frac = v > 0 ? v / this.powerTime(info.dur) : 1;
       progressBar(ctx, x + 18 * s, y + 25 * s, w - 36 * s, 7 * s, frac, info.color);
-      x += w + 8 * s;
+      x += w + PILL.gap * s;
     }
     let rx = b.x + b.w;
     if (this.guardian) {
-      const w = 140 * s;
+      const w = PILL.guardian * s;
       rx -= w;
       hudPill(ctx, rx, y, w, h);
       text(ctx, 'GUARDIAN', rx + w / 2, y + h / 2, { size: 16 * s, align: 'center', color: '#7cf' });
-      rx -= 8 * s;
+      rx -= PILL.gap * s;
     }
-    const mult = this.multiplier;
     if (mult > 1) {
-      const w = 118 * s;
+      const w = PILL.combo * s;
       rx -= w;
       hudPill(ctx, rx, y, w, h);
       text(ctx, `COMBO x${mult}`, rx + w / 2, y + h / 2, { size: 16 * s, align: 'center', color: '#ffb703' });

@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { AudioLike, PlayOptions, SfxName } from '../src/core/audio';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
-import { BALLOON_DY } from '../src/games/duck/art';
+import { BALLOON_DY, sceneFor } from '../src/games/duck/art';
 import {
   AIM,
+  DUCK_INFO,
   DUCKS_PER_ROUND,
   flyTime,
   hitRadius,
@@ -76,6 +77,7 @@ interface DuckSim extends GameInstance {
   stats: Record<string, number>;
   readonly scatterActive: boolean;
   readonly shotRadius: number;
+  snapLock: number;
   layoutBar(): { x: number; y: number; w: number; h: number; s: number };
 }
 
@@ -717,5 +719,90 @@ describe('Duck Season determinism', () => {
     for (const k of Object.keys(run.stats)) expect(known).toContain(k);
     expect(run.stats.ducks).toBeGreaterThan(0);
     expect(run.stats.bestRound).toBe(run.rounds);
+  });
+});
+
+/** A context stand-in that records every fillStyle it is given, in drawing order. */
+function fillRecorder(): { ctx: CanvasRenderingContext2D; fills: unknown[] } {
+  const fills: unknown[] = [];
+  const ctx = new Proxy(mockCtx(), {
+    set(target, key, value) {
+      if (key === 'fillStyle') fills.push(value);
+      return Reflect.set(target, key, value);
+    },
+  });
+  return { ctx, fills };
+}
+
+describe('Duck Season draw order and snapping', () => {
+  it('draws the big tree behind the ducks, so a duck in the air is never hidden by it', () => {
+    const { ctx, fills } = fillRecorder();
+    const { g } = inWave(2, { ctx });
+    expect(g.ducks.some((d) => d.state === 'fly')).toBe(true);
+    fills.length = 0;
+    g.render();
+    const canopy = sceneFor(g.round).canopy;
+    let lastCanopy = -1;
+    let firstDuck = -1;
+    fills.forEach((f, i) => {
+      if (canopy.includes(f as string)) lastCanopy = i;
+      if (firstDuck < 0 && g.ducks.some((d) => f === DUCK_INFO[d.kind].body)) firstDuck = i;
+    });
+    expect(lastCanopy).toBeGreaterThanOrEqual(0);
+    expect(firstDuck).toBeGreaterThan(lastCanopy);
+  });
+
+  it('lets the secondary action snap onto the nearest duck, then holds the reticle briefly', () => {
+    const { g, input } = inWave(3);
+    parkDucks(g);
+    const d = g.ducks[0]!;
+    placeDuck(d, 300, 200);
+    g.aimX = 270;
+    g.aimY = 200;
+    input.setVirtual('secondary', true, 't');
+    step(g, input, DT);
+    input.setVirtual('secondary', false, 't');
+    expect(Math.hypot(g.aimX - 300, g.aimY - 200)).toBeLessThan(2);
+    // Keys wait during the lock, so the reticle stays on the duck long enough to shoot.
+    input.setVirtual('right', true, 't');
+    step(g, input, 0.15);
+    expect(Math.abs(g.aimX - 300)).toBeLessThan(2);
+    step(g, input, 0.3);
+    expect(g.snapLock).toBe(0);
+    // Once the lock is over (and the duck is out of reach), the keys steer again.
+    d.state = 'escape';
+    const x0 = g.aimX;
+    step(g, input, 0.2);
+    input.setVirtual('right', false, 't');
+    expect(g.aimX).toBeGreaterThan(x0 + 20);
+  });
+
+  it('does nothing when there is no flying duck to snap onto', () => {
+    const { g, input } = inWave(4);
+    for (const d of g.ducks) d.state = 'escape';
+    g.aimX = 300;
+    g.aimY = 200;
+    input.setVirtual('secondary', true, 't');
+    step(g, input, DT);
+    input.setVirtual('secondary', false, 't');
+    expect(g.snapLock).toBe(0);
+    expect(g.aimX).toBe(300);
+  });
+});
+
+describe('Duck Season HUD on small screens', () => {
+  it('draws the HUD larger when the canvas is drawn small, and keeps the design size on desktop', () => {
+    // A phone draws the 800-wide canvas at about 0.49 CSS px per logical px.
+    const phoneCtx = mockCtx();
+    (phoneCtx as unknown as { canvas: unknown }).canvas = { clientWidth: 390 };
+    const phone = make({ ctx: phoneCtx, width: 800, height: 540 }).g;
+    expect(phone.layoutBar().s).toBeCloseTo(1.2);
+
+    const landscapeCtx = mockCtx();
+    (landscapeCtx as unknown as { canvas: unknown }).canvas = { clientWidth: 844 };
+    expect(make({ ctx: landscapeCtx, width: 1170, height: 540 }).g.layoutBar().s).toBeCloseTo(1.11, 1);
+
+    expect(make({ width: 800, height: 540 }).g.layoutBar().s).toBe(1);
+    expect(make({ width: 1280, height: 540 }).g.layoutBar().s).toBe(1);
   });
 });

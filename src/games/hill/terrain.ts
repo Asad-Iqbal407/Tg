@@ -118,8 +118,11 @@ export class Terrain {
     const k = this.kickers.length;
     const m = this.metres(x);
     const d = this.difficulty(m);
-    const lipAngle = (14 + 12 * Math.min(1, d) + 3 * Math.max(0, d - 1) * 2 + (this.rand(k, 1) - 0.5) * 4) * DEG;
-    const landAngle = (26 + 8 * Math.min(1, d)) * DEG;
+    // Steeper lips and landings with distance give 0.8 s of air early and about 1.1 s later on,
+    // enough for a full turn with good air control.
+    const lipDeg = 22 + 10 * Math.min(1, d) + 3 * clamp(d - 1, 0, 1) + (this.rand(k, 1) - 0.5) * 4;
+    const lipAngle = lipDeg * DEG;
+    const landAngle = (24 + 8 * Math.min(1, d)) * DEG;
     const runIn = 200 + 100 * this.rand(k, 2);
     const rampLen = 170 + 90 * this.rand(k, 3);
     // Size the landing for the design speed: flight time on a slope falling away at landAngle.
