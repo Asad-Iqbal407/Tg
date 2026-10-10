@@ -5,8 +5,8 @@ export const SUBSTEPS = 6;
 const ITERATIONS = 6;
 export const GRAVITY = 980;
 
-/** Chassis acceleration (px/s²) at full throttle from standstill, before power and grip. */
-const DRIVE_ACCEL = 640;
+/** Engine acceleration (px/s²) at standstill, before the vehicle's power (traction limits it too). */
+const DRIVE_ACCEL = 650;
 const BRAKE_DECEL = 950;
 const REVERSE_ACCEL = 320;
 const ROLL_DECEL = 22;
@@ -106,7 +106,8 @@ export class Vehicle {
   private readonly springK: number;
   private readonly springC: number;
   private readonly preload: number;
-  private readonly traction: number;
+  /** Tyre friction coefficient: the jeep's 0.32 grip climbs ~30° on dry ground. */
+  private readonly mu: number;
   private readonly spinCap: number;
   // Scratch frame, recomputed by frame().
   private ox = 0;
@@ -120,7 +121,7 @@ export class Vehicle {
     private readonly terrain: Terrain,
     readonly spec: VehicleSpec,
   ) {
-    this.traction = Math.sqrt(spec.grip / 0.32);
+    this.mu = Math.tan((30 * Math.PI) / 180) * (spec.grip / 0.32);
     this.spinCap = 5 + 1.5 * spec.airControl;
     // Body mass is fixed by the layout below; derive the spring from a target bounce frequency.
     const bodyMass = 4 + 1 / 2.4;
@@ -490,18 +491,19 @@ export class Vehicle {
     this.tangent.y = ty / len;
     const v = this.vAlong();
     const share = n / 2;
-    const grip = this.traction * env.grip;
+    // Traction limit: friction coefficient times the normal load (cos of the slope).
+    const traction = this.mu * env.grip * GRAVITY * env.gravity * Math.abs(this.tangent.x) * share;
     const max = this.spec.maxSpeed;
     let dv = 0;
     if (input.throttle > 0) {
       const fade = v > 0 ? Math.max(0, 1 - (v / max) ** 2) : 1;
-      dv = DRIVE_ACCEL * this.spec.power * grip * fade * share * input.throttle * dt;
+      dv = Math.min(DRIVE_ACCEL * this.spec.power * fade, traction) * input.throttle * dt;
     } else if (input.brake > 0 && (v > 8 || !input.canReverse)) {
-      dv = -Math.sign(v) * Math.min(Math.abs(v), BRAKE_DECEL * grip * share * dt);
+      dv = -Math.sign(v) * Math.min(Math.abs(v), Math.min(BRAKE_DECEL, traction * 1.4) * dt);
     } else if (input.brake > 0) {
       const revMax = max * 0.4;
       const fade = v < 0 ? Math.max(0, 1 - (v / revMax) ** 2) : 1;
-      dv = -REVERSE_ACCEL * this.spec.power * grip * fade * share * input.brake * dt;
+      dv = -Math.min(REVERSE_ACCEL * this.spec.power * fade, traction) * input.brake * dt;
     } else {
       dv = -Math.sign(v) * Math.min(Math.abs(v), ROLL_DECEL * dt);
     }

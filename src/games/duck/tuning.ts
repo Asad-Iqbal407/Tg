@@ -31,7 +31,9 @@ export const SLOWMO_SCALE = 0.45;
 
 /** Pacing in seconds. Tuned so ducks are in the air for well over half of a typical session. */
 export const PACE = {
+  /** The round banner shows this long; the first pair takes off under it at `introWave`. */
   intro: 1.2,
+  introWave: 0.7,
   /** Mid-air freeze after a hit, before the fall. */
   hitFreeze: 0.22,
   fallGravity: 2400,
@@ -42,11 +44,16 @@ export const PACE = {
   dog: 1.0,
   dogRise: 0.18,
   dogSink: 0.3,
-  /** The next pair takes off this long after the dog appears (it sinks while they emerge). */
-  nextWave: 0.55,
-  roundEnd: 2.0,
+  /**
+   * The next ducks take off this long after the last one of a wave was hit or fled, while the
+   * shot ones are still falling; the dog pops up behind them once those have landed.
+   */
+  nextWave: 0.6,
+  /** After the last wave of a round, the dog shows this long before the round result. */
+  lastWaveHold: 0.45,
+  roundEnd: 1.6,
   /** A click or Shoot press skips the round result banner after this long. */
-  roundSkip: 0.8,
+  roundSkip: 0.6,
   /** With no shells left, the remaining ducks fly off this long after the last shot. */
   outOfShells: 0.3,
   /** "HURRY!" warning before the fly-away clock runs out. */

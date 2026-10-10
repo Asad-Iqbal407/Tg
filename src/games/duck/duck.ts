@@ -98,7 +98,10 @@ export class DuckGame extends BaseGame {
   private waveIndex = 0;
   /** Tracker index of the current wave's first duck. */
   private waveStart = 0;
+  /** The current wave. */
   private ducks: Duck[] = [];
+  /** Ducks of a finished wave that are still falling or flying off. */
+  private leaving: Duck[] = [];
   private crates: Crate[] = [];
   private holes: Hole[] = [];
   private readonly results: Slot[] = Array.from({ length: DUCKS_PER_ROUND }, (): Slot => 'pending');
@@ -129,7 +132,11 @@ export class DuckGame extends BaseGame {
   private guardian: boolean;
   /** The current round is a Guardian retry. */
   private retry = false;
+  /** Seconds since the round started (drives the round banner). */
+  private introT = 0;
   private dogMode: 'none' | 'happy' | 'laugh' = 'none';
+  /** The dog pops up as soon as the finished wave's ducks have landed or flown off. */
+  private dogPending = false;
   private dogT = 0;
   private dogX = 0;
   /** Game over: the dog rises and stays. */
@@ -183,6 +190,7 @@ export class DuckGame extends BaseGame {
   private startRound(): void {
     this.phase = 'intro';
     this.phaseT = 0;
+    this.introT = 0;
     this.waveIndex = 0;
     this.waveStart = 0;
     this.results.fill('pending');
@@ -248,6 +256,7 @@ export class DuckGame extends BaseGame {
 
   protected tick(dt: number): void {
     this.phaseT += dt;
+    this.introT += dt;
     this.dogT += dt;
     this.shotT += dt;
     this.flash = Math.max(0, this.flash - dt);
@@ -270,12 +279,15 @@ export class DuckGame extends BaseGame {
     const slow = this.powers.slowmo > 0 ? SLOWMO_SCALE : 1;
     // Shots are tested before the ducks move: against what the last rendered frame showed.
     if (this.phase === 'wave' && fire) this.shoot();
-    this.updateDucks(dt * slow);
+    this.updateDucks(this.ducks, dt * slow);
+    this.updateDucks(this.leaving, dt * slow);
     this.updateCrates(dt);
+    if (this.dogPending && this.leaving.every((d) => d.state === 'gone')) this.showDog();
 
     switch (this.phase) {
       case 'intro':
-        if (this.phaseT >= PACE.intro) this.startWave();
+        // The first pair takes off while the round banner is still fading out.
+        if (this.phaseT >= PACE.introWave) this.startWave();
         break;
       case 'wave':
         this.waveT += dt * slow;
@@ -283,15 +295,15 @@ export class DuckGame extends BaseGame {
         this.checkWaveEnd();
         break;
       case 'waveEnd':
-        // The next ducks take off while the dog is still sinking back into the grass.
-        if (this.phaseT >= PACE.nextWave) {
-          if (this.waveIndex + 1 < this.plan.length) {
+        if (this.waveIndex + 1 < this.plan.length) {
+          // The next ducks take off while the last ones are still falling.
+          if (this.phaseT >= PACE.nextWave) {
             this.waveStart += this.plan[this.waveIndex] ?? 2;
             this.waveIndex++;
             this.startWave();
-          } else {
-            this.endRound();
           }
+        } else if (!this.dogPending && this.dogT >= PACE.lastWaveHold) {
+          this.endRound();
         }
         break;
       case 'roundEnd':
@@ -487,8 +499,8 @@ export class DuckGame extends BaseGame {
     else this.powers[kind] = Math.max(this.powers[kind], this.powerTime(POWER_INFO[kind].dur));
   }
 
-  private updateDucks(dt: number): void {
-    for (const d of this.ducks) {
+  private updateDucks(ducks: readonly Duck[], dt: number): void {
+    for (const d of ducks) {
       d.t += dt;
       d.flap += dt * (d.state === 'fly' ? 14 : 22);
       switch (d.state) {
@@ -587,13 +599,7 @@ export class DuckGame extends BaseGame {
   }
 
   private checkWaveEnd(): void {
-    let flying = 0;
-    let gone = 0;
-    for (const d of this.ducks) {
-      if (d.state === 'fly') flying++;
-      else if (d.state === 'gone') gone++;
-    }
-    if (flying > 0) {
+    if (this.ducks.some((d) => d.state === 'fly')) {
       if (!this.hurryWarned && this.waveT > this.waveFly - PACE.hurry) {
         this.hurryWarned = true;
         this.audio.play('warning', { volume: 0.5 });
@@ -601,9 +607,14 @@ export class DuckGame extends BaseGame {
       // Out of shells: the rest fly off right away instead of idling until the clock runs out.
       const dry = this.shots <= 0 && this.shotT >= PACE.outOfShells;
       if (this.waveT > this.waveFly || dry) this.escapeAll();
-      return;
+      if (this.ducks.some((d) => d.state === 'fly')) return;
     }
-    if (gone === this.ducks.length) this.showDog();
+    // Every duck of the wave was shot or fled: hand them over to the dog and move on.
+    for (const d of this.ducks) this.leaving.push(d);
+    this.ducks = [];
+    this.dogPending = true;
+    this.phase = 'waveEnd';
+    this.phaseT = 0;
   }
 
   private escapeAll(): void {
@@ -629,19 +640,19 @@ export class DuckGame extends BaseGame {
   private showDog(): void {
     this.dogKinds.length = 0;
     let sumX = 0;
-    for (const d of this.ducks) {
+    for (const d of this.leaving) {
       if (!d.hit) continue;
       this.dogKinds.push(d.kind);
       sumX += d.x;
     }
+    this.leaving = [];
+    this.dogPending = false;
     const n = this.dogKinds.length;
     this.dogX = n > 0 ? sumX / n : this.W / 2;
     this.dogMode = n > 0 ? 'happy' : 'laugh';
     this.dogT = 0;
     this.dogStay = false;
     this.laughStep = 0;
-    this.phase = 'waveEnd';
-    this.phaseT = 0;
     if (n > 0) this.audio.play(n > 1 ? 'coin' : 'select');
   }
 
@@ -714,6 +725,7 @@ export class DuckGame extends BaseGame {
       );
     }
     for (const c of this.crates) drawCrate(ctx, c);
+    for (const d of this.leaving) if (d.state !== 'gone') this.drawDuck(d);
     for (const d of this.ducks) if (d.state !== 'gone') this.drawDuck(d);
     this.scenery.drawFront(this.round, this.time);
     this.particles.render(ctx);
@@ -986,7 +998,7 @@ export class DuckGame extends BaseGame {
 
   private drawBanners(): void {
     const ctx = this.ctx;
-    if (this.phase === 'intro') {
+    if (this.introT < PACE.intro) {
       const goal = `Hit ${this.required} of ${DUCKS_PER_ROUND} ducks`;
       banner(
         ctx,
@@ -994,7 +1006,7 @@ export class DuckGame extends BaseGame {
         this.H,
         `ROUND ${this.round}`,
         this.retry ? `Guardian retry · ${goal}` : goal,
-        this.phaseT / PACE.intro,
+        this.introT / PACE.intro,
         this.retry ? '#77ccff' : '#7CFC00',
       );
     } else if (this.phase === 'roundEnd') {
