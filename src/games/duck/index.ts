@@ -22,8 +22,8 @@ export const duckGame: GameDefinition = {
   ],
   touchHint: 'Tap anywhere to shoot at that spot.',
   touchButtons: [],
-  scorePerCoin: 900,
-  scorePerXp: 150,
+  scorePerCoin: 4000,
+  scorePerXp: 650,
   music: { bpm: 112, root: 55, scale: 'pentatonic', progression: [0, 3, 1, 4], seed: 33, lead: 'triangle' },
   statLabels: {
     ducks: 'Ducks hit',

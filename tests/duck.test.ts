@@ -268,7 +268,7 @@ describe('Duck Season pacing', () => {
         frames += s.frames;
         flying += s.flying;
         onScreen += s.onScreen;
-        rows.push(`r${s.rounds} ${s.score} c${s.coins} ${(s.frames / 60).toFixed(0)}s`);
+        rows.push(`r${s.rounds} ${s.score} c${s.coins} =${s.coins + Math.floor(s.score / (legacy ? 900 : def.scorePerCoin))} ${(s.frames / 60).toFixed(0)}s`);
       }
       console.log(name, legacy ? 'OLD' : 'NEW', (flying / frames).toFixed(3), (onScreen / frames).toFixed(3), rows.join(' | '));
      }

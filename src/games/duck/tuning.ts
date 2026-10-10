@@ -26,6 +26,11 @@ export const POWER_INFO: Readonly<
 };
 
 export const DUCKS_PER_ROUND = 10;
+/**
+ * Arcade coins collected in a run (score converts separately via scorePerCoin): only the
+ * standout moments pay out directly, so long runs don't flood the economy.
+ */
+export const COINS = { gold: 3, perfect: 5, multiKill: 1 } as const;
 /** Time scale applied to ducks (and the fly-away clock) while slow-mo is active. */
 export const SLOWMO_SCALE = 0.45;
 

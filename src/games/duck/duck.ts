@@ -16,6 +16,7 @@ import {
 } from './art';
 import {
   AIM,
+  COINS,
   DUCK_INFO,
   DUCKS_PER_ROUND,
   type DuckKind,
@@ -438,6 +439,7 @@ export class DuckGame extends BaseGame {
       });
     } else if (hits > 1) {
       this.addStat('doubleKills');
+      this.coins += COINS.multiKill * (hits - 1);
       const bonus = hits > 2 ? 5000 : 2000;
       this.score += bonus;
       this.texts.add(x, y - 54, `${hits > 2 ? 'TRIPLE' : 'DOUBLE'}! +${bonus}`, '#ffd23f', 26);
@@ -456,11 +458,9 @@ export class DuckGame extends BaseGame {
     this.addStat('ducks');
     this.addStat('hits');
     if (d.kind === 'gold') {
-      this.coins += 5;
+      this.coins += COINS.gold;
       this.addStat('goldenDucks');
       this.audio.play('reward');
-    } else {
-      this.coins += 1;
     }
     this.audio.play('quack', { pitch: 1.4 });
     const idx = this.results.indexOf('pending');
@@ -664,7 +664,7 @@ export class DuckGame extends BaseGame {
       this.audio.play('win');
       if (hits === DUCKS_PER_ROUND) {
         this.score += 10000;
-        this.coins += 10;
+        this.coins += COINS.perfect;
         this.addStat('perfectRounds');
         this.texts.add(this.W / 2, this.grassTop * 0.75, 'PERFECT! +10000', '#ffd23f', 34, 1.6);
       }
