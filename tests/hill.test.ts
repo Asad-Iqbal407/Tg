@@ -13,7 +13,7 @@ const hillDef = GAMES.find((g) => g.id === 'hill')!;
  * also lifts off a wheelie. `flip` rotates forward in the air until `flips` full turns are done,
  * then balances for the landing.
  */
-export type BotMode = 'hold' | 'skilled' | 'flip';
+export type BotMode = 'hold' | 'skilled' | 'flip' | 'spin';
 
 export interface BotOptions {
   seed: number;
@@ -26,6 +26,8 @@ export interface BotOptions {
   width?: number;
   height?: number;
   insets?: Insets;
+  /** Start the car this many px above the ground at x = 200 (a drop test). */
+  drop?: number;
   /** Called once per simulation step, before the step, with the car's state. */
   trace?: (p: HillProbe, step: number, want: { gas: boolean; brake: boolean }) => void;
 }
@@ -68,12 +70,16 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   const roomy = p.kickers.some((k) => {
     if (p.x < k.start || p.x > k.end) return false;
     const air = (2 * p.speed * (Math.sin(k.lipAngle) + Math.cos(k.lipAngle) * Math.tan(k.landAngle))) / 980;
-    return air >= 1.0;
+    return air >= 1.2;
   });
-  if (mode === 'flip' && roomy && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 1.2)
+  const spinning = (mode === 'flip' && roomy) || mode === 'spin';
+  if (spinning && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 1.2)
     return { gas: false, brake: true };
-  // PD on the chassis angle against the ground under the car: brake pitches nose-down, gas nose-up.
-  const err = wrap(p.angle - p.groundAngle(p.x));
+  // PD on the chassis angle against the surface it will land on: brake pitches nose-down, gas
+  // nose-up. Over a jump that is the landing slope, so the nose comes down before touchdown.
+  const landing = p.kickers.find((k) => p.x >= k.lip && p.x <= k.landEnd);
+  const target = landing ? landing.landAngle : p.groundAngle(p.x);
+  const err = wrap(p.angle - target);
   const u = -(6 * err + 3.5 * w);
   (globalThis as unknown as { __r?: number }).__r = st.airRot;
   (globalThis as unknown as { __dbg?: string[] }).__dbg?.push(`x=${p.x.toFixed(1)} a=${p.angle.toFixed(4)} err=${err.toFixed(4)} w=${w.toFixed(4)} u=${u.toFixed(3)} airRot=${st.airRot.toFixed(3)} onJump=${onJump}`);
@@ -95,6 +101,13 @@ export function runBot(opts: BotOptions): BotRun {
     insets: opts.insets,
   });
   const game = instance as HillGame;
+  if (opts.drop) {
+    const car = (game as unknown as { car: { reset(x: number, a: number): void } }).car;
+    car.reset(200, 0);
+    const cars = (game as unknown as { car: { pts: { y: number }[]; reset(x: number, a: number): void } }).car;
+    for (const p of cars.pts) p.y -= opts.drop;
+    for (const p of cars.pts) (p as unknown as { py: number }).py = p.y;
+  }
   const mode = opts.mode ?? 'hold';
   const flips = opts.flips ?? 1;
   const maxSteps = Math.round((opts.seconds ?? 300) * 60);

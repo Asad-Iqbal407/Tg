@@ -11,7 +11,7 @@ const BRAKE_DECEL = 950;
 const REVERSE_ACCEL = 320;
 const ROLL_DECEL = 22;
 /** Air control (rad/s²) once truly airborne, after a short debounce that ignores micro-hops. */
-const AIR_TORQUE = 18;
+const AIR_TORQUE = 22;
 const AIR_DELAY = 0.12;
 const AIR_RAMP = 0.08;
 /** Throttle reaction torque with both wheels down (rad/s², fades out towards top speed). */
@@ -122,7 +122,7 @@ export class Vehicle {
     readonly spec: VehicleSpec,
   ) {
     this.mu = Math.tan((30 * Math.PI) / 180) * Math.sqrt(spec.grip / 0.32);
-    this.spinCap = 7 + 1.5 * spec.airControl;
+    this.spinCap = 8.5 + 1.5 * spec.airControl;
     // Body mass is fixed by the layout below; derive the spring from a target bounce frequency.
     const bodyMass = 4 + 1 / 2.4;
     const freq = 1.7 + 2.2 * spec.suspension;

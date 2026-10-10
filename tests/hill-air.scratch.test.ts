@@ -21,3 +21,7 @@ it('air', () => {
   }
   writeFileSync('/tmp/claude-0/-home-user-Tg/1469e30c-e6d3-59df-b920-1336e6322472/scratchpad/air.txt', out.join('\n') + '\n');
 }, 300000);
+
+export function dropSpin(skinId: string, height: number, flips: number) {
+  return runBot({ seed: 1, skinId, mode: 'spin', flips, seconds: 6, drop: height });
+}
