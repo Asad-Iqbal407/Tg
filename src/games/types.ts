@@ -47,7 +47,10 @@ export interface GameServices {
   /** Logical size chosen for this run (within the definition's viewport range). */
   width: number;
   height: number;
-  /** Areas of the canvas covered by touch controls / cutouts; keep important HUD out of them. */
+  /**
+   * Areas of the canvas covered by touch controls / cutouts; keep important HUD out of them.
+   * The object is live: the shell updates it in place when the layout changes mid-run.
+   */
   insets: Readonly<Insets>;
   input: Input;
   audio: AudioLike;
@@ -55,6 +58,8 @@ export interface GameServices {
   loadout: Loadout;
   reducedMotion: boolean;
   haptic(ms: number): void;
+  /** True when rendering a static thumbnail (card art); games may skip HUD and banners. */
+  preview?: boolean;
 }
 
 export interface GameResult {
@@ -68,6 +73,10 @@ export interface GameResult {
 
 export interface GameInstance {
   update(dt: number): void;
+  /**
+   * Draw the current state. Must be a pure function of simulation state (no wall-clock time, no
+   * gameplay RNG): the shell renders only after a simulation step ran or the canvas was resized.
+   */
   render(): void;
   isOver(): boolean;
   getResult(): GameResult;

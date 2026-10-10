@@ -6,18 +6,21 @@ export const runnerGame: GameDefinition = {
   title: 'Metro Dash',
   tagline: 'Dodge trains. Grab coins. Never stop running.',
   description:
-    'An endless 3-lane rail runner. Jump barriers, roll under signals, ride ramps onto train roofs and dodge oncoming trains while magnets, jetpacks and super sneakers keep the run alive.',
+    'An endless 3-lane rail runner through a city that changes every 1000 m. Jump hurdles, roll under gantries, ride ramps onto train roofs and dodge oncoming trains as the pace keeps rising, while magnets, jetpacks and super sneakers keep the run alive.',
   genre: 'Endless runner',
   inspiredBy: 'Subway Surfers',
   width: 540,
   height: 960,
+  // Portrait design size; wider screens see more of the city (Hor+), taller ones more sky.
+  viewport: { minWidth: 540, maxWidth: 1706, minHeight: 900, maxHeight: 1200 },
   accent: '#ff6b6b',
   gradient: ['#ff6b6b', '#7a2f7d'],
   controls: [
     ['← / → or A / D', 'Change lane'],
     ['↑ / W / Space', 'Jump'],
-    ['↓ / S', 'Roll (slam down mid-air)'],
+    ['↓ / S', 'Roll under gantries (slam down mid-air)'],
     ['Swipe', 'Same as arrows on touch screens'],
+    ['White hurdle / yellow gantry', 'Jump over / roll under'],
   ],
   touchHint: 'Swipe left/right to change lanes, up to jump, down to roll.',
   touchButtons: [],

@@ -11,7 +11,14 @@ export abstract class BaseGame implements GameInstance {
   protected readonly H: number;
   protected readonly input: Input;
   protected readonly audio: AudioLike;
+  /** Gameplay randomness. Never consume it from render() or for purely cosmetic effects. */
   protected readonly rng: Rng;
+  /**
+   * Cosmetic randomness (particles, debris, twinkles), forked once from the gameplay RNG, so
+   * effects and the reduced-motion setting can't change what the same seed plays like.
+   */
+  protected readonly fxRng: Rng;
+  /** Logical px at each edge covered by touch controls or cutouts (live: may change on resize). */
   protected readonly insets: Readonly<Insets>;
   protected readonly particles: Particles;
   protected readonly shake: Shake;
@@ -33,7 +40,8 @@ export abstract class BaseGame implements GameInstance {
     this.audio = services.audio;
     this.rng = services.rng;
     this.insets = services.insets;
-    this.particles = new Particles(services.rng);
+    this.fxRng = services.rng.fork();
+    this.particles = new Particles(this.fxRng);
     this.particles.density = services.reducedMotion ? 0.35 : 1;
     this.shake = new Shake();
     this.shake.enabled = !services.reducedMotion;

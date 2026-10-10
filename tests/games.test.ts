@@ -5,9 +5,9 @@ import { CHUNKS, END_CHUNK, START_CHUNK } from '../src/games/platformer/chunks';
 import { buildLevel, validateChunk } from '../src/games/platformer/level';
 import { GAMES } from '../src/games/registry';
 import { Terrain } from '../src/games/hill/terrain';
-import type { BoostId, GameResult } from '../src/games/types';
+import type { BoostId, GameResult, Insets } from '../src/games/types';
 import { SKINS, toSkinData } from '../src/meta/catalog';
-import { createGame } from './helpers';
+import { cornerSizes, createGame } from './helpers';
 
 const ACTIONS: Action[] = ['left', 'right', 'up', 'down', 'primary', 'secondary'];
 const SWIPES: SwipeDir[] = ['left', 'right', 'up', 'down'];
@@ -25,17 +25,35 @@ function expectSaneResult(r: GameResult): void {
   }
 }
 
+interface FuzzOptions {
+  boosts?: BoostId[];
+  skinId?: string;
+  /** Logical size (defaults to the design size). */
+  size?: { width: number; height: number };
+  insets?: Insets;
+  reducedMotion?: boolean;
+}
+
 /** Drive a game with random (but seeded) inputs, rendering periodically. */
 function fuzz(
   id: string,
   seed: number,
   seconds: number,
-  boosts: BoostId[] = [],
-  skinId?: string,
+  opts: FuzzOptions = {},
 ): { result: GameResult; over: boolean } {
   const def = GAMES.find((g) => g.id === id)!;
-  const skin = skinId ? toSkinData(SKINS.find((s) => s.id === skinId)!) : undefined;
-  const { game, input } = createGame(def, { seed, boosts, skin });
+  const skin = opts.skinId ? toSkinData(SKINS.find((s) => s.id === opts.skinId)!) : undefined;
+  const width = opts.size?.width ?? def.width;
+  const height = opts.size?.height ?? def.height;
+  const { game, input } = createGame(def, {
+    seed,
+    boosts: opts.boosts ?? [],
+    skin,
+    width,
+    height,
+    insets: opts.insets,
+    reducedMotion: opts.reducedMotion,
+  });
   const rng = new Rng(seed * 31 + 7);
   const held = new Set<Action>();
   let over = false;
@@ -52,9 +70,10 @@ function fuzz(
         }
       }
       if (rng.chance(0.2)) input.pushSwipe(rng.pick(SWIPES));
-      input.pointer.x = rng.range(0, def.width);
-      input.pointer.y = rng.range(0, def.height);
+      input.pointer.x = rng.range(0, width);
+      input.pointer.y = rng.range(0, height);
       input.pointer.active = true;
+      input.pointer.inside = true;
       input.pointer.pressed = rng.chance(0.3);
       input.pointer.down = rng.chance(0.5);
     }
@@ -78,9 +97,9 @@ describe.each(GAMES.map((g) => g.id))('%s', (id) => {
   });
 
   it('works with every boost and every skin', () => {
-    expectSaneResult(fuzz(id, 5, 30, ['shield', 'head-start']).result);
+    expectSaneResult(fuzz(id, 5, 30, { boosts: ['shield', 'head-start'] }).result);
     for (const skin of SKINS.filter((s) => s.gameId === id))
-      expectSaneResult(fuzz(id, 9, 8, [], skin.id).result);
+      expectSaneResult(fuzz(id, 9, 8, { skinId: skin.id }).result);
   });
 
   it('is deterministic for the same seed and inputs', () => {
@@ -88,6 +107,33 @@ describe.each(GAMES.map((g) => g.id))('%s', (id) => {
     const b = fuzz(id, 77, 20).result;
     expect(a).toEqual(b);
   });
+
+  it('plays the same with and without reduced motion (effects never touch gameplay RNG)', () => {
+    const a = fuzz(id, 31, 20, { reducedMotion: false }).result;
+    const b = fuzz(id, 31, 20, { reducedMotion: true }).result;
+    expect(b).toEqual(a);
+  });
+
+  // Every corner of the game's flexible viewport range (a no-op for fixed-size games).
+  const corners = cornerSizes(GAMES.find((g) => g.id === id)!);
+  const touchInsets: Insets = { top: 0, right: 0, bottom: 110, left: 0 };
+
+  it.each(corners.map((c) => [`${c.width}x${c.height}`, c] as const))(
+    'survives 30s of random input at %s',
+    (_label, size) => {
+      expectSaneResult(fuzz(id, 3, 30, { size, insets: touchInsets }).result);
+      expectSaneResult(fuzz(id, 4, 30, { size, boosts: ['shield', 'head-start'] }).result);
+    },
+  );
+
+  it.each(corners.map((c) => [`${c.width}x${c.height}`, c] as const))(
+    'is deterministic at %s',
+    (_label, size) => {
+      const a = fuzz(id, 77, 20, { size }).result;
+      const b = fuzz(id, 77, 20, { size }).result;
+      expect(a).toEqual(b);
+    },
+  );
 });
 
 describe('game over conditions', () => {

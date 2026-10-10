@@ -95,10 +95,15 @@ export class AudioEngine implements AudioLike {
 
   private musicTimer: ReturnType<typeof setInterval> | null = null;
   private theme: MusicTheme | null = null;
+  /** Theme requested before the context was unlocked; starts on unlock. */
+  private pendingTheme: MusicTheme | null = null;
   private melody: (number | null)[] = [];
   private step = 0;
   private nextNoteTime = 0;
   private musicPaused = false;
+  /** Gameplay paused: sound effects and engine drones are silenced. */
+  private sfxPaused = false;
+  private readonly engines = new Set<LazyEngine>();
 
   /** True once a user gesture has created the audio context. */
   get unlocked(): boolean {
@@ -137,6 +142,12 @@ export class AudioEngine implements AudioLike {
       const data = this.noiseBuffer.getChannelData(0);
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
       this.applyVolumes();
+      const pending = this.pendingTheme;
+      if (pending) {
+        const paused = this.musicPaused;
+        this.startMusic(pending);
+        if (paused) this.setMusicPaused(true);
+      }
     }
     if (this.ac.state === 'suspended') void this.ac.resume().catch(() => undefined);
   }
@@ -151,13 +162,13 @@ export class AudioEngine implements AudioLike {
     const t = this.ac.currentTime;
     const m = this.volumes.muted ? 0 : this.volumes.masterVolume;
     this.master.gain.setTargetAtTime(m, t, 0.02);
-    this.sfxBus.gain.setTargetAtTime(this.volumes.sfxVolume, t, 0.02);
+    this.sfxBus.gain.setTargetAtTime(this.sfxPaused ? 0 : this.volumes.sfxVolume, t, 0.02);
     this.musicBus.gain.setTargetAtTime(this.musicPaused ? 0 : this.volumes.musicVolume * 0.55, t, 0.05);
   }
 
   play(name: SfxName, opts: PlayOptions = {}): void {
     const ac = this.ac;
-    if (!ac || !this.sfxBus || this.volumes.muted || ac.state !== 'running') return;
+    if (!ac || !this.sfxBus || this.volumes.muted || this.sfxPaused || ac.state !== 'running') return;
     const now = ac.currentTime;
     const last = this.lastPlayed.get(name) ?? -1;
     if (now - last < 0.03) return; // collapse bursts of identical sounds
@@ -328,9 +339,43 @@ export class AudioEngine implements AudioLike {
     }
   }
 
+  /**
+   * A looping engine drone. The handle works before the audio context exists (e.g. after a deep
+   * link or refresh, before the first gesture): it binds to real nodes on the first `set()` once
+   * the context is unlocked, and stays silent while gameplay is paused.
+   */
   engine(): EngineSound {
+    const handle = new LazyEngine(this);
+    this.engines.add(handle);
+    return handle;
+  }
+
+  /** Silence (or restore) gameplay sound: effects, in-flight tails and engine drones. Music is separate. */
+  setPaused(paused: boolean): void {
+    if (this.sfxPaused === paused) return;
+    this.sfxPaused = paused;
+    this.applyVolumes();
+    for (const e of this.engines) e.refresh();
+  }
+
+  get paused(): boolean {
+    return this.sfxPaused;
+  }
+
+  /** Stop every engine drone (a run ended); their handles become inert. */
+  stopEngines(): void {
+    for (const e of [...this.engines]) e.stop();
+  }
+
+  /** @internal Called by engine handles. */
+  forgetEngine(e: LazyEngine): void {
+    this.engines.delete(e);
+  }
+
+  /** @internal Build the oscillator graph for an engine handle, or null while locked. */
+  createEngineNodes(): EngineNodes | null {
     const ac = this.ac;
-    if (!ac || !this.sfxBus) return new NullAudio().engine();
+    if (!ac || !this.sfxBus) return null;
     const o1 = ac.createOscillator();
     const o2 = ac.createOscillator();
     o1.type = 'sawtooth';
@@ -345,33 +390,18 @@ export class AudioEngine implements AudioLike {
     lp.connect(g).connect(this.sfxBus);
     o1.start();
     o2.start();
-    let stopped = false;
-    return {
-      set: (rpm: number, load: number) => {
-        if (stopped) return;
-        const t = ac.currentTime;
-        const f = 38 + rpm * 110;
-        o1.frequency.setTargetAtTime(f, t, 0.05);
-        o2.frequency.setTargetAtTime(f * 0.501, t, 0.05);
-        lp.frequency.setTargetAtTime(300 + rpm * 900 + load * 400, t, 0.05);
-        g.gain.setTargetAtTime(0.035 + load * 0.05 + rpm * 0.02, t, 0.08);
-      },
-      stop: () => {
-        if (stopped) return;
-        stopped = true;
-        const t = ac.currentTime;
-        g.gain.setTargetAtTime(0, t, 0.05);
-        o1.stop(t + 0.3);
-        o2.stop(t + 0.3);
-      },
-    };
+    return { ac, o1, o2, lp, g };
   }
 
   // ---------------------------------------------------------------- music
 
+  /** Start a music theme now, or as soon as a user gesture unlocks audio. */
   startMusic(theme: MusicTheme): void {
     this.stopMusic();
-    if (!this.ac) return;
+    if (!this.ac) {
+      this.pendingTheme = theme;
+      return;
+    }
     this.theme = theme;
     this.step = 0;
     this.melody = this.composeMelody(theme);
@@ -385,6 +415,7 @@ export class AudioEngine implements AudioLike {
     if (this.musicTimer !== null) clearInterval(this.musicTimer);
     this.musicTimer = null;
     this.theme = null;
+    this.pendingTheme = null;
   }
 
   setMusicPaused(paused: boolean): void {
@@ -484,5 +515,67 @@ export class AudioEngine implements AudioLike {
     }
     if (s === 4 || s === 12) this.noise(0.12, 0.18, 'bandpass', 1800, 900, t, bus);
     if (s % 2 === 1) this.noise(0.03, 0.06, 'highpass', 7000, 9000, t, bus);
+  }
+}
+
+interface EngineNodes {
+  ac: AudioContext;
+  o1: OscillatorNode;
+  o2: OscillatorNode;
+  lp: BiquadFilterNode;
+  g: GainNode;
+}
+
+/** Engine drone handle that binds to audio nodes lazily and follows the engine's pause state. */
+class LazyEngine implements EngineSound {
+  private nodes: EngineNodes | null = null;
+  private stopped = false;
+  private rpm = 0;
+  private load = 0;
+  private touched = false;
+
+  constructor(private readonly audio: AudioEngine) {}
+
+  set(rpm: number, load: number): void {
+    if (this.stopped) return;
+    this.rpm = rpm;
+    this.load = load;
+    this.touched = true;
+    if (!this.nodes && !this.audio.paused) this.nodes = this.audio.createEngineNodes();
+    this.apply();
+  }
+
+  /** Re-apply the current level (after pause / resume). */
+  refresh(): void {
+    if (this.touched) this.apply();
+  }
+
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.audio.forgetEngine(this);
+    const n = this.nodes;
+    this.nodes = null;
+    if (!n) return;
+    const t = n.ac.currentTime;
+    n.g.gain.cancelScheduledValues(t);
+    n.g.gain.setTargetAtTime(0, t, 0.05);
+    n.o1.stop(t + 0.3);
+    n.o2.stop(t + 0.3);
+  }
+
+  private apply(): void {
+    const n = this.nodes;
+    if (!n) return;
+    const t = n.ac.currentTime;
+    if (this.audio.paused) {
+      n.g.gain.setTargetAtTime(0, t, 0.03);
+      return;
+    }
+    const f = 38 + this.rpm * 110;
+    n.o1.frequency.setTargetAtTime(f, t, 0.05);
+    n.o2.frequency.setTargetAtTime(f * 0.501, t, 0.05);
+    n.lp.frequency.setTargetAtTime(300 + this.rpm * 900 + this.load * 400, t, 0.05);
+    n.g.gain.setTargetAtTime(0.035 + this.load * 0.05 + this.rpm * 0.02, t, 0.08);
   }
 }

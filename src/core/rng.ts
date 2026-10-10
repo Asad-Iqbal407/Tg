@@ -14,6 +14,17 @@ export class Rng {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
+  /**
+   * An independent generator derived from this one's current state *without advancing it*, so
+   * cosmetic randomness (particles, debris) can never shift the gameplay sequence.
+   */
+  fork(salt = 0x9e3779b9): Rng {
+    let x = (this.state ^ salt) >>> 0;
+    x = Math.imul(x ^ (x >>> 16), 0x85ebca6b);
+    x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35);
+    return new Rng((x ^ (x >>> 16)) >>> 0);
+  }
+
   range(min: number, max: number): number {
     return min + (max - min) * this.next();
   }

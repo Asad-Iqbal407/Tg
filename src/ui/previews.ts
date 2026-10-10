@@ -1,4 +1,5 @@
 import { NullAudio } from '../core/audio';
+import { chooseLogicalSize } from '../core/engine';
 import { Input } from '../core/input';
 import { TAU } from '../core/math';
 import { Rng } from '../core/rng';
@@ -19,15 +20,25 @@ const PREVIEW: Record<string, { seed: number; seconds: number; focus: number }> 
 
 const cache = new Map<string, HTMLCanvasElement>();
 
-/** Render a real frame of the game (simulated headlessly for a few seconds) for card art. */
-function renderFrame(def: GameDefinition, skin: SkinData): HTMLCanvasElement | null {
-  const key = `${def.id}:${skin.id}`;
+/**
+ * Render a real frame of the game (simulated headlessly for a few seconds) for card art. The
+ * logical size is chosen for the card's aspect, exactly as the play screen would for a stage of
+ * that shape, and the frame is rendered at the resolution the card will show it at.
+ */
+function renderFrame(
+  def: GameDefinition,
+  skin: SkinData,
+  targetW: number,
+  targetH: number,
+): HTMLCanvasElement | null {
+  const size = chooseLogicalSize(def, targetW, targetH);
+  const key = `${def.id}:${skin.id}:${size.width}x${size.height}@${targetW}x${targetH}`;
   const hit = cache.get(key);
   if (hit) return hit;
-  const scale = 0.5;
+  const scale = Math.min(1, Math.max(targetW / size.width, targetH / size.height));
   const off = document.createElement('canvas');
-  off.width = Math.round(def.width * scale);
-  off.height = Math.round(def.height * scale);
+  off.width = Math.max(1, Math.round(size.width * scale));
+  off.height = Math.max(1, Math.round(size.height * scale));
   const ctx = off.getContext('2d');
   if (!ctx) return null;
   const cfg = PREVIEW[def.id] ?? { seed: 1, seconds: 2.5, focus: 0.5 };
@@ -36,8 +47,8 @@ function renderFrame(def: GameDefinition, skin: SkinData): HTMLCanvasElement | n
   if (def.id === 'hill') input.setVirtual('right', true, 'preview');
   const game = def.create({
     ctx,
-    width: def.width,
-    height: def.height,
+    width: size.width,
+    height: size.height,
     input,
     audio: new NullAudio(),
     rng: new Rng(cfg.seed),
@@ -45,6 +56,7 @@ function renderFrame(def: GameDefinition, skin: SkinData): HTMLCanvasElement | n
     insets: NO_INSETS,
     reducedMotion: true,
     haptic: () => undefined,
+    preview: true,
   });
   try {
     const steps = Math.round(cfg.seconds * 60);
@@ -52,7 +64,7 @@ function renderFrame(def: GameDefinition, skin: SkinData): HTMLCanvasElement | n
       game.update(1 / 60);
       input.postUpdate();
     }
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.setTransform(off.width / size.width, 0, 0, off.height / size.height, 0, 0);
     game.render();
   } finally {
     game.destroy();
@@ -63,7 +75,7 @@ function renderFrame(def: GameDefinition, skin: SkinData): HTMLCanvasElement | n
 
 /** Draw a game preview into `target` using object-fit: cover. */
 export function drawGamePreview(def: GameDefinition, skin: SkinData, target: HTMLCanvasElement): void {
-  const frame = renderFrame(def, skin);
+  const frame = renderFrame(def, skin, target.width, target.height);
   const ctx = target.getContext('2d');
   if (!frame || !ctx) return;
   const tw = target.width;

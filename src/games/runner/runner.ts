@@ -1,212 +1,307 @@
 import { clamp, damp, TAU } from '../../core/math';
 import { BaseGame } from '../base';
-import { drawCoin, fillRoundRect, hash1, hudPill, progressBar, shade, text, banner } from '../draw';
+import { FONT, hudPill, progressBar, text } from '../draw';
 import type { GameServices } from '../types';
+import { Camera, Framing, NEAR } from './camera';
+import {
+  GEN_AHEAD,
+  HIGH_BOTTOM,
+  HIGH_TOP,
+  JETPACK_Y,
+  Kinematics,
+  laneOf,
+  laneX,
+  MAX_MULTIPLIER,
+  MILESTONE_M,
+  ROLL_H,
+  speedAt,
+  STAND_H,
+  TRAIN_H,
+  viewDistance,
+} from './config';
+import { Look, zoneDef } from './palette';
+import {
+  CoinSprites,
+  drawBarrier,
+  drawPower,
+  drawPowerIcon,
+  drawRamp,
+  drawTrain,
+  fogAt,
+  POWER_INFO,
+} from './props';
+import { drawRig, type RigColors, rigColors, RigPose } from './rig';
+import { GANTRY_EVERY, gantryAt, Scenery, type View } from './scenery';
+import { GlowSprites, rand } from './surface';
+import { type Coin, type ObKind, type Obstacle, type Power, type PowerKind, TrackGenerator } from './track';
 
-// World units are metres. The camera sits behind and above the runner, looking down the track.
-const LANE_W = 2.4;
-const CAM_H = 8.4;
-const CAM_D = 7;
-const FOCAL = 448;
-const HORIZON = 250;
-const FAR = 150;
-const NEAR = -CAM_D + 1.4;
-const GRAVITY = 34;
-const TRAIN_H = 3.3;
-const STAND_H = 1.8;
-const ROLL_H = 0.8;
-const WALL_X = LANE_W * 1.5 + 1.6;
+/** Painter's-order key of the runner; larger keys paint first. */
+export const PLAYER_KEY = 0.01;
+/** Key for long obstacles that span the runner's plane, so they paint before the runner. */
+export const SPAN_KEY = 0.02;
 
-type ObKind = 'low' | 'high' | 'train' | 'ramp';
-type PowerKind = 'magnet' | 'double' | 'sneakers' | 'jetpack';
-
-interface Obstacle {
-  kind: ObKind;
-  lane: number;
-  z: number;
-  len: number;
-  h: number;
-  vz: number;
-  armed: boolean;
-  livery: number;
-  dead: boolean;
+/**
+ * Depth-sort key for an object whose near end is `rel` metres ahead and which is `len` long.
+ * Trains and ramps sorted by their front alone would paint over a runner standing on them once
+ * the front has passed, so anything spanning the runner's plane is keyed just behind the runner.
+ */
+export function depthKey(rel: number, len: number): number {
+  return len > 1 && rel < SPAN_KEY && rel + len > 0 ? SPAN_KEY : rel;
 }
 
-interface Coin {
-  x: number;
-  y: number;
-  z: number;
-  taken: boolean;
-  pulled: boolean;
+const ITEM_OBSTACLE = 0;
+const ITEM_COIN = 1;
+const ITEM_POWER = 2;
+const ITEM_PLAYER = 3;
+const ITEM_GANTRY = 4;
+const ITEM_CHASER = 5;
+
+interface DrawItem {
+  key: number;
+  kind: number;
+  rel: number;
+  ob: Obstacle | null;
+  coin: Coin | null;
+  power: Power | null;
 }
 
-interface Power {
-  kind: PowerKind;
-  lane: number;
-  z: number;
-  taken: boolean;
-}
+type HintId = 'lanes' | 'jump' | 'roll' | 'dodge' | 'ramp' | 'oncoming';
+type HintIcon = 'lr' | 'up' | 'down';
 
-const POWER_INFO: Record<PowerKind, { label: string; color: string; base: number }> = {
-  magnet: { label: 'MAGNET', color: '#ff4d6d', base: 10 },
-  double: { label: '2X SCORE', color: '#ffd23f', base: 12 },
-  sneakers: { label: 'SUPER JUMP', color: '#4dd9ff', base: 12 },
-  jetpack: { label: 'JETPACK', color: '#b06bff', base: 7 },
+const HINTS: Record<HintId, { touch: string; keys: string; icon: HintIcon }> = {
+  lanes: {
+    touch: 'Swipe left or right to change lanes',
+    keys: 'Left / Right or A / D to change lanes',
+    icon: 'lr',
+  },
+  jump: { touch: 'Swipe up to jump the barrier', keys: 'Up, W or Space to jump', icon: 'up' },
+  roll: { touch: 'Swipe down to roll under', keys: 'Down or S to roll under', icon: 'down' },
+  dodge: { touch: 'Swipe sideways to dodge the train', keys: 'Change lanes to dodge trains', icon: 'lr' },
+  ramp: { touch: 'Run up the ramp to ride the roofs', keys: 'Run up the ramp to ride the roofs', icon: 'up' },
+  oncoming: { touch: 'Oncoming train! Swipe away', keys: 'Oncoming train! Change lanes', icon: 'lr' },
 };
 
-const LIVERIES = [
-  { body: '#d7263d', stripe: '#f4f4f4', roof: '#9c1c2c' },
-  { body: '#1b998b', stripe: '#f2e94e', roof: '#126b61' },
-  { body: '#3a86ff', stripe: '#ffbe0b', roof: '#2a5fb5' },
-  { body: '#8d99ae', stripe: '#ef233c', roof: '#5c6475' },
-];
-
-const laneX = (lane: number) => (lane - 1) * LANE_W;
+/** Seconds the world freezes on impact before the crash animation plays. */
+const HIT_STOP = 0.12;
+/** First-encounter hints are only offered early in a run. */
+const HINT_UNTIL_M = 2000;
+const STREAKS = 26;
 
 export class RunnerGame extends BaseGame {
+  // Track
+  private readonly obstacles: Obstacle[] = [];
+  private readonly coinList: Coin[] = [];
+  private readonly powerList: Power[] = [];
+  private readonly gen: TrackGenerator;
+
+  // Runner
   private distance = 0;
-  private speed = 0;
+  private speed = 8;
+  private readonly kin = new Kinematics();
   private lane = 1;
   private px = 0;
+  private prevPx = 0;
   private py = 0;
   private vy = 0;
   private grounded = true;
+  private coyoteT = 0;
   private rollT = 0;
   private jumpBuffer = 0;
   private stumbleT = 0;
   private graceT = 0;
+  private shield: boolean;
   private crashed = false;
   private crashT = 0;
-  private shield: boolean;
+  private crashOb: Obstacle | null = null;
+  /** 1 = splat against a train front, 2 = tripped (barrier or stumble). */
+  private crashKind = 0;
+  private roofOb: Obstacle | null = null;
+  private runPhase = 0;
+  private rollAngle = 0;
+  private landT = 1;
+  private takeoffT = 1;
+  private readonly powers: Record<PowerKind, number> = { magnet: 0, double: 0, sneakers: 0, jetpack: 0 };
+
+  // Ground probe output, written by probeGround() to avoid allocating a result.
+  private gKind: ObKind | null = null;
+  private gOb: Obstacle | null = null;
+
+  // Presentation
+  private readonly cam = new Camera();
+  private readonly framing = new Framing();
   private camX = 0;
   private camLift = 0;
-  private runPhase = 0;
-  private nextZ = 30;
-  private lastPowerZ = 0;
+  private viewSpeed = 13;
+  private readonly look = new Look();
+  private readonly scenery: Scenery;
+  private readonly coinSprites = new CoinSprites();
+  private readonly pose = new RigPose();
+  private readonly chaserPose = new RigPose();
+  private readonly colors: RigColors;
+  private readonly chaserColors: RigColors;
+  private readonly view: View;
+  private readonly items: DrawItem[] = [];
+  private itemCount = 0;
+  private readonly hs: number;
+  private readonly preview: boolean;
+  private touchUi: boolean;
+  private chaserT = 0;
   private bannerT = 0;
-  private readonly powers: Record<PowerKind, number> = { magnet: 0, double: 0, sneakers: 0, jetpack: 0 };
-  private obstacles: Obstacle[] = [];
-  private coinList: Coin[] = [];
-  private powerList: Power[] = [];
-  private readonly skyline: { x: number; w: number; h: number; layer: number; seed: number }[] = [];
+  private milestone = 0;
+  private milestoneT = 99;
+  private hint: HintId | null = null;
+  private hintT = 0;
+  private readonly hintsShown = new Set<HintId>();
+  private readonly streakAngle = new Float32Array(STREAKS);
+  private readonly streakSeed = new Float32Array(STREAKS);
+  private vignette: CanvasGradient | null = null;
 
   constructor(s: GameServices) {
     super(s);
     this.shield = this.hasBoost('shield');
+    this.preview = (s as GameServices & { preview?: boolean }).preview === true;
+    this.touchUi = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    this.hs = clamp(Math.min(this.H / 960, this.W / 540), 0.9, 1.3);
+    this.framing.update(this.W, this.H, this.insets);
+    this.scenery = new Scenery(
+      this.W,
+      this.H,
+      this.framing.unit,
+      this.framing.horizonFor(this.framing.focal),
+    );
+    this.colors = rigColors(
+      this.skinColor('body', '#e63946'),
+      this.skinColor('accent', '#1d3557'),
+      this.skinColor('skin', '#f1c27d'),
+      this.skinColor('hair', '#2b2118'),
+      this.skinColor('shoes', '#f8f9fa'),
+    );
+    this.chaserColors = rigColors('#26315c', '#151a2e', '#c68642', '#1a1a1a', '#111111');
+    this.view = {
+      ctx: this.ctx,
+      cam: this.cam,
+      look: this.look,
+      dist: 0,
+      far: viewDistance(13),
+      time: 0,
+      speed: 0,
+      reducedMotion: s.reducedMotion,
+      glow: new GlowSprites(),
+    };
+    for (let i = 0; i < STREAKS; i++) {
+      // Streaks fan out over the sky and the sides, never over the track ahead.
+      const a = -Math.PI * (0.06 + 0.88 * rand(i, 3));
+      this.streakAngle[i] = rand(i, 4) < 0.25 ? (rand(i, 5) < 0.5 ? 0.12 : Math.PI - 0.12) + a * 0.15 : a;
+      this.streakSeed[i] = rand(i, 6);
+    }
+    this.gen = new TrackGenerator(this.rng, {
+      obstacles: this.obstacles,
+      coins: this.coinList,
+      powers: this.powerList,
+    });
+    this.gen.warmup();
     if (this.hasBoost('head-start')) {
       this.powers.jetpack = this.powerTime(5);
       this.powers.magnet = this.powerTime(10);
       this.spawnJetpackCoins(this.powers.jetpack);
     }
-    for (let layer = 0; layer < 2; layer++) {
-      let x = -400;
-      while (x < this.W + 400) {
-        const w = this.rng.range(30, 80);
-        this.skyline.push({
-          x,
-          w,
-          h: this.rng.range(40, 150) * (layer === 0 ? 1 : 0.6),
-          layer,
-          seed: this.rng.next() * 1000,
-        });
-        x += w + this.rng.range(-5, 10);
-      }
-    }
-    this.lastPowerZ = 0;
-    this.generate();
+    this.gen.fill(GEN_AHEAD);
   }
 
   // ------------------------------------------------------------------ simulation
 
-  private difficulty(): number {
-    return clamp(this.distance / 4000, 0, 1);
-  }
-
-  private targetSpeed(): number {
-    return 15 + 15 * this.difficulty();
-  }
-
   private multiplier(): number {
-    return Math.min(6, 1 + Math.floor(this.distance / 750)) * (this.powers.double > 0 ? 2 : 1);
+    return (
+      Math.min(MAX_MULTIPLIER, 1 + Math.floor(this.distance / MILESTONE_M)) * (this.powers.double > 0 ? 2 : 1)
+    );
   }
 
   protected tick(dt: number): void {
+    if (this.input.pointer.touch) this.touchUi = true;
     if (this.crashed) {
-      this.crashT += dt;
-      this.speed = Math.max(0, this.speed - 40 * dt);
-      this.distance += this.speed * dt;
-      this.vy -= GRAVITY * dt;
-      this.py = Math.max(this.groundAt(this.px).h, this.py + this.vy * dt);
+      this.tickCrashed(dt);
       return;
     }
     this.bannerT += dt;
-    this.handleInput();
+    this.milestoneT += dt;
 
-    // Speed ramps in at the start, then follows difficulty.
-    this.speed += (this.targetSpeed() - this.speed) * damp(this.time < 2 ? 2.5 : 0.6, dt);
+    // Speed follows the eased progress curve (quick run-up during the first two seconds).
+    this.speed += (speedAt(this.distance) - this.speed) * damp(this.time < 2 ? 2.5 : 0.6, dt);
+    this.viewSpeed = this.speed;
+    const kin = this.kin.update(this.speed);
+    this.handleInput(kin);
+
     const step = this.speed * dt;
     this.distance += step;
     this.score += step * this.multiplier();
-    this.runPhase += step * 1.3;
+    this.runPhase += TAU * kin.strideHz * dt;
+    this.rollAngle += dt * 13;
+    this.landT += dt;
+    this.takeoffT += dt;
 
     for (const k of Object.keys(this.powers) as PowerKind[]) {
-      if (this.powers[k] > 0) {
-        this.powers[k] = Math.max(0, this.powers[k] - dt);
-        if (k === 'jetpack' && this.powers[k] === 0) this.graceT = Math.max(this.graceT, 1.4);
-      }
+      if (this.powers[k] <= 0) continue;
+      this.powers[k] = Math.max(0, this.powers[k] - dt);
+      if (k === 'jetpack' && this.powers.jetpack === 0) this.endJetpack();
     }
     this.stumbleT = Math.max(0, this.stumbleT - dt);
     this.graceT = Math.max(0, this.graceT - dt);
     this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    this.coyoteT = Math.max(0, this.coyoteT - dt);
 
-    // Lateral movement
+    // Lateral movement: snappier lane changes at speed.
+    this.prevPx = this.px;
     const tx = laneX(this.lane);
-    this.px += (tx - this.px) * damp(16, dt);
+    this.px += (tx - this.px) * damp(kin.laneRate, dt);
     if (Math.abs(tx - this.px) < 0.01) this.px = tx;
 
+    // Oncoming trains arm with a fixed warning time at the closing speed.
     for (const ob of this.obstacles) {
-      if (ob.vz !== 0) {
-        if (!ob.armed && ob.z - this.distance < 85) {
-          ob.armed = true;
-          this.audio.play('whoosh', { volume: 0.6 });
-        }
-        if (ob.armed) ob.z += ob.vz * dt;
+      if (ob.vz === 0) continue;
+      if (!ob.armed && ob.z - this.distance < (this.speed - ob.vz) * 2.4) {
+        ob.armed = true;
+        this.audio.play('whoosh', { volume: 0.75, pitch: 0.55 });
       }
+      if (ob.armed) ob.z += ob.vz * dt;
     }
 
-    this.updateVertical(dt);
+    this.updateVertical(dt, kin);
     this.rollT = Math.max(0, this.rollT - dt);
-    if (this.powers.jetpack > 0) {
-      const p = this.project(this.px, this.py + 0.6, 0);
-      this.particles.emit({
-        x: p.x,
-        y: p.y,
-        count: 2,
-        speed: 260,
-        angle: Math.PI / 2,
-        spread: 0.5,
-        life: 0.35,
-        size: 0.18 * p.s,
-        colors: ['#ffb703', '#fb5607', '#fff'],
-      });
-    }
-
     this.collide();
-    this.collectCoins(dt);
-    this.collectPowers();
-
-    const cut = this.distance - 14;
-    this.obstacles = this.obstacles.filter((o) => !o.dead && o.z + o.len > cut);
-    this.coinList = this.coinList.filter((c) => !c.taken && c.z > cut);
-    this.powerList = this.powerList.filter((p) => !p.taken && p.z > cut);
-    this.generate();
-
-    this.camX += (this.px * 0.55 - this.camX) * damp(6, dt);
-    this.camLift += (Math.min(this.py, TRAIN_H) * 0.55 - this.camLift) * damp(4, dt);
+    if (!this.crashed) {
+      this.collectCoins(dt);
+      this.collectPowers();
+    }
+    this.cull();
+    this.gen.fill(this.distance + GEN_AHEAD);
+    this.checkMilestone();
+    this.updateHints(dt);
+    this.updateChaser(dt);
+    this.updateCamera(dt);
     this.maxStat('distance', this.distance);
   }
 
-  private handleInput(): void {
+  private tickCrashed(dt: number): void {
+    this.crashT += dt;
+    if (this.crashT > HIT_STOP) {
+      // Stop within ~0.2 s; never slide past the obstacle that caused the crash.
+      this.speed = Math.max(0, this.speed - 160 * dt);
+      const ob = this.crashOb;
+      const limit = ob ? ob.z - 0.45 : Infinity;
+      if (this.distance > limit) this.distance += (limit - this.distance) * damp(18, dt);
+      else this.distance = Math.min(limit, this.distance + this.speed * dt);
+      // Fall to the surface below, ignoring the obstacle we hit, and never rise onto anything.
+      this.vy -= this.kin.gravity * dt;
+      const below = this.probeGround(this.px, ob);
+      const floor = below > this.py + 0.05 ? 0 : below;
+      this.py = Math.max(floor, this.py + this.vy * dt);
+      if (this.py <= floor) this.vy = 0;
+    }
+    this.updateChaser(dt);
+    this.updateCamera(dt);
+  }
+
+  private handleInput(kin: Kinematics): void {
     const sw = this.input.consumeSwipe();
     const left = this.input.wasPressed('left') || sw === 'left';
     const right = this.input.wasPressed('right') || sw === 'right';
@@ -214,113 +309,157 @@ export class RunnerGame extends BaseGame {
     const down = this.input.wasPressed('down') || sw === 'down';
     if (left) this.changeLane(-1);
     if (right) this.changeLane(1);
-    if (up) this.jumpBuffer = 0.14;
+    if (up) {
+      this.jumpBuffer = 0.2;
+      this.dismissHint('jump', 'ramp');
+    }
     if (down && this.powers.jetpack <= 0) {
-      if (!this.grounded) this.vy = Math.min(this.vy, -26);
+      if (!this.grounded) this.vy = Math.min(this.vy, kin.slamV);
       if (this.rollT <= 0) {
         this.addStat('rolls');
         this.audio.play('whoosh', { volume: 0.5, pitch: 1.4 });
       }
-      this.rollT = 0.62;
+      this.rollT = kin.rollTime;
       this.jumpBuffer = 0;
+      this.dismissHint('roll');
     }
   }
 
   private changeLane(dir: number): void {
     const target = this.lane + dir;
     if (target < 0 || target > 2) {
-      this.stumble();
+      // Swiping into the outer wall just bounces off: no stumble, never lethal.
+      this.px += dir * 0.3;
+      this.audio.play('bump', { volume: 0.45, pitch: 1.2 });
+      this.shake.add(0.12);
+      this.services.haptic(15);
       return;
     }
-    if (this.powers.jetpack <= 0 && this.graceT <= 0 && this.laneBlocked(target)) {
+    if (this.powers.jetpack <= 0 && this.laneBlocked(target)) {
+      this.px += dir * 0.35;
       this.stumble();
       return;
     }
     this.lane = target;
     this.audio.play('whoosh', { volume: 0.35, pitch: 1.8 });
+    this.dismissHint('lanes', 'dodge', 'oncoming');
   }
 
+  /** A lane is blocked by the side of a train beside us, or one about to arrive while we move over. */
   private laneBlocked(lane: number): boolean {
     for (const ob of this.obstacles) {
-      if (ob.lane !== lane || ob.kind !== 'train') continue;
+      if (ob.lane !== lane || ob.kind !== 'train' || ob.dead) continue;
       const rel = ob.z - this.distance;
-      if (rel <= 0.6 && rel + ob.len >= -0.4 && this.py < ob.h - 0.45) return true;
+      const ahead = (this.speed + Math.abs(ob.vz)) * 0.12;
+      if (rel - ahead <= 0.6 && rel + ob.len >= -0.4 && this.py < ob.h - 0.45) return true;
     }
     return false;
   }
 
+  /** Bumping a train's side: slows the runner and brings the chaser close. A second bump is a hit. */
   private stumble(): void {
     this.audio.play('bump');
     this.shake.add(0.35);
     this.services.haptic(40);
     if (this.stumbleT > 0 && this.graceT <= 0) {
-      this.crash();
+      this.hit(null);
       return;
     }
     this.stumbleT = 2.5;
+    this.speed *= 0.85;
   }
 
-  private updateVertical(dt: number): void {
+  private updateVertical(dt: number, kin: Kinematics): void {
     if (this.powers.jetpack > 0) {
-      const targetY = 6;
-      this.py += (targetY - this.py) * damp(4, dt);
+      this.py += (JETPACK_Y - this.py) * damp(4, dt);
       this.vy = 0;
       this.grounded = false;
       this.rollT = 0;
+      this.coyoteT = 0;
+      this.roofOb = null;
       return;
     }
-    const ground = this.groundAt(this.px);
-    if (this.grounded && this.jumpBuffer > 0) this.jump();
-    this.vy -= GRAVITY * dt;
-    const prevY = this.py;
-    this.py += this.vy * dt;
-    if (this.py <= ground.h) {
-      const canSnap = ground.kind === 'ramp' || ground.h - this.py < 0.7 || prevY >= ground.h - 0.05;
-      if (canSnap) {
-        if (!this.grounded && this.vy < -8) {
-          this.audio.play('land', { volume: 0.6 });
-          if (ground.h >= TRAIN_H - 0.01) this.addStat('trainsRidden');
-        }
-        this.py = ground.h;
-        this.vy = 0;
-        this.grounded = true;
-      }
-    } else if (this.py > ground.h + 0.05) {
+    const h = this.probeGround(this.px);
+    const kind = this.gKind;
+    // Collisions are off during grace, so never let the runner sink into a train: vault onto it.
+    if (this.graceT > 0 && kind === 'train' && this.py < h - 0.7 && this.vy <= 0) {
+      this.vy = kin.vaultV;
       this.grounded = false;
     }
-    if (this.grounded && this.jumpBuffer > 0) this.jump();
+    if (this.jumpBuffer > 0 && (this.grounded || this.coyoteT > 0)) this.jump(kin);
+    this.vy -= kin.gravity * dt;
+    const prevY = this.py;
+    this.py += this.vy * dt;
+    // Snap onto a ramp or a roof only from above (or a small step up); beside a train the track is the floor.
+    const canSnap = kind === 'ramp' || h - this.py < 0.7 || prevY >= h - 0.05;
+    const floor = canSnap ? h : 0;
+    const wasGrounded = this.grounded;
+    if (this.py <= floor) {
+      if (!wasGrounded && this.vy < -4) {
+        this.audio.play('land', { volume: 0.6 });
+        this.landT = 0;
+      }
+      this.py = floor;
+      this.vy = 0;
+      this.grounded = true;
+    } else if (this.py > floor + 0.05) {
+      // Running off the end of a roof leaves a short window to still jump.
+      if (wasGrounded) this.coyoteT = 0.1;
+      this.grounded = false;
+    }
+    if (this.grounded) {
+      const roof = kind === 'train' && floor >= TRAIN_H - 0.05 ? this.gOb : null;
+      if (roof && roof !== this.roofOb) {
+        // Counted on every arrival on a new roof: up a ramp, a jump, or hopping roof to roof.
+        this.addStat('trainsRidden');
+        if (wasGrounded) this.audio.play('land', { volume: 0.4, pitch: 1.2 });
+      }
+      this.roofOb = roof;
+    }
+    if (this.grounded && this.jumpBuffer > 0) this.jump(kin);
   }
 
-  private jump(): void {
-    this.vy = this.powers.sneakers > 0 ? 15.5 : 11.5;
+  private jump(kin: Kinematics): void {
+    this.vy = this.powers.sneakers > 0 ? kin.superJumpV : kin.jumpV;
     this.grounded = false;
     this.jumpBuffer = 0;
+    this.coyoteT = 0;
     this.rollT = 0;
+    this.takeoffT = 0;
     this.addStat('jumps');
     this.audio.play('jump', { pitch: this.powers.sneakers > 0 ? 1.3 : 1 });
   }
 
-  private groundAt(x: number): { h: number; kind: ObKind | null } {
-    const lane = clamp(Math.round(x / LANE_W) + 1, 0, 2);
+  /**
+   * Height of the surface under lateral position x (ramp slope or train roof), optionally ignoring
+   * one obstacle. Also leaves the surface's kind and obstacle in gKind / gOb.
+   */
+  private probeGround(x: number, skip: Obstacle | null = null): number {
+    const lane = laneOf(x);
     let h = 0;
     let kind: ObKind | null = null;
+    let found: Obstacle | null = null;
     for (const ob of this.obstacles) {
-      if (ob.lane !== lane) continue;
+      if (ob.lane !== lane || ob === skip || ob.dead) continue;
       const rel = ob.z - this.distance;
       if (ob.kind === 'train' && rel <= 0.3 && rel + ob.len >= -0.3) {
         if (ob.h > h) {
           h = ob.h;
           kind = 'train';
+          found = ob;
         }
       } else if (ob.kind === 'ramp' && rel <= 0 && rel + ob.len >= 0) {
         const rh = ob.h * clamp(-rel / ob.len, 0, 1);
         if (rh > h) {
           h = rh;
           kind = 'ramp';
+          found = ob;
         }
       }
     }
-    return { h, kind };
+    this.gKind = kind;
+    this.gOb = found;
+    return h;
   }
 
   private collide(): void {
@@ -330,56 +469,103 @@ export class RunnerGame extends BaseGame {
       if (ob.kind === 'ramp' || ob.dead) continue;
       const rel = ob.z - this.distance;
       if (rel > 0.35 || rel + ob.len < -0.35) continue;
-      if (Math.abs(this.px - laneX(ob.lane)) > 1.15) continue;
+      const ox = laneX(ob.lane);
+      if (Math.abs(this.px - ox) > 1.15) continue;
       const hit =
         ob.kind === 'low'
           ? this.py < ob.h - 0.1
           : ob.kind === 'high'
-            ? this.py + height > 1.2 && this.py < 2.6
+            ? this.py + height > HIGH_BOTTOM - 0.05 && this.py < HIGH_TOP
             : this.py < ob.h - 0.45;
       if (!hit) continue;
-      if (this.shield) {
-        this.shield = false;
-        this.graceT = 1.6;
-        this.audio.play('pop');
-        this.shake.add(0.4);
-        this.burst(this.px, this.py + 1, '#7cf', 30);
-        if (ob.kind === 'train') {
-          this.py = ob.h;
-          this.vy = 4;
-        } else {
-          ob.dead = true;
-        }
-        this.texts.add(this.W / 2, 600, 'GUARDIAN SAVE!', '#7cf', 26);
+      if (ob.kind === 'train' && rel < -0.2 && Math.abs(this.prevPx - ox) > 1.15) {
+        // Moved sideways into a train whose front had already passed: a side-swipe, not a crash.
+        this.px = this.prevPx;
+        this.lane = laneOf(this.prevPx);
+        this.stumble();
         return;
       }
-      this.crash();
+      this.hit(ob);
       return;
     }
   }
 
-  private crash(): void {
-    if (this.crashed) return;
-    this.crashed = true;
-    this.vy = 6;
-    this.audio.play('hit');
-    this.shake.add(0.9);
-    this.burst(this.px, this.py + 1, '#fff', 40);
-    this.endGame(1.5);
+  /** Every lethal hit goes through here so the Guardian shield is always honoured. */
+  private hit(ob: Obstacle | null): void {
+    if (this.shield) {
+      this.shield = false;
+      this.graceT = 1.6;
+      this.stumbleT = 0;
+      this.audio.play('pop');
+      this.shake.add(0.4);
+      this.burst('#7cf', 30);
+      if (ob?.kind === 'train') {
+        // Vault onto the roof instead of teleporting there.
+        this.vy = this.kin.vaultV;
+        this.grounded = false;
+        this.rollT = 0;
+      } else if (ob) ob.dead = true;
+      this.texts.add(
+        this.W / 2,
+        this.framing.feetY - 300 * this.framing.unit,
+        'GUARDIAN SAVE!',
+        '#7cf',
+        28 * this.hs,
+      );
+      return;
+    }
+    this.crash(ob);
   }
 
-  private burst(x: number, y: number, color: string, count: number): void {
-    const p = this.project(x, y, 0);
+  private crash(ob: Obstacle | null): void {
+    if (this.crashed) return;
+    this.crashed = true;
+    this.crashOb = ob;
+    this.crashKind = ob?.kind === 'train' ? 1 : 2;
+    this.vy = ob?.kind === 'train' ? 0 : 2.5;
+    this.rollT = 0;
+    this.audio.play('hit');
+    this.shake.add(0.9);
+    this.burst('#fff', 40);
+    this.endGame(1.6);
+  }
+
+  private burst(color: string, count: number): void {
+    this.cam.project(this.px, this.py + 1, 0);
     this.particles.emit({
-      x: p.x,
-      y: p.y,
+      x: this.cam.px,
+      y: this.cam.py,
       count,
-      speed: 380,
+      speed: 380 * this.framing.unit,
       life: 0.7,
-      size: 5,
+      size: 5 * this.framing.unit,
       colors: [color, '#ffd23f', '#ff6b6b'],
       gravity: 600,
     });
+  }
+
+  /** When the jetpack runs out, steer the landing to a roof or a lane without a train front ahead. */
+  private endJetpack(): void {
+    this.graceT = Math.max(this.graceT, 1.4);
+    const v = this.speed;
+    let best = this.lane;
+    let bestScore = -Infinity;
+    for (let lane = 0; lane < 3; lane++) {
+      let roof = false;
+      let front = false;
+      for (const ob of this.obstacles) {
+        if (ob.lane !== lane || ob.kind !== 'train') continue;
+        const rel = ob.z - this.distance;
+        if (rel <= v * 0.35 && rel + ob.len >= v * 0.8) roof = true;
+        else if (rel > -0.5 && rel < (v + Math.abs(ob.vz)) * 1.6) front = true;
+      }
+      const score = (roof ? 2 : front ? -5 : 0) - Math.abs(lane - this.lane) * 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        best = lane;
+      }
+    }
+    this.lane = best;
   }
 
   private collectCoins(dt: number): void {
@@ -401,14 +587,14 @@ export class RunnerGame extends BaseGame {
         this.coins += 1;
         this.score += 10 * this.multiplier();
         this.audio.play('coin', { volume: 0.7 });
-        const p = this.project(c.x, c.y, relz);
+        this.cam.project(c.x, c.y, relz);
         this.particles.emit({
-          x: p.x,
-          y: p.y,
+          x: this.cam.px,
+          y: this.cam.py,
           count: 5,
-          speed: 120,
+          speed: 120 * this.framing.unit,
           life: 0.35,
-          size: 3,
+          size: 3 * this.framing.unit,
           colors: ['#ffe066', '#fff'],
         });
       }
@@ -421,12 +607,19 @@ export class RunnerGame extends BaseGame {
       const rel = pw.z - this.distance;
       if (Math.abs(rel) < 1 && Math.abs(laneX(pw.lane) - this.px) < 1.1 && this.py < 3.6) {
         pw.taken = true;
-        const dur = this.powerTime(POWER_INFO[pw.kind].base);
+        const info = POWER_INFO[pw.kind];
+        const dur = this.powerTime(info.base);
         this.powers[pw.kind] = dur;
         if (pw.kind === 'jetpack') this.spawnJetpackCoins(dur);
         this.addStat('powerups');
         this.audio.play('powerup');
-        this.texts.add(this.W / 2, 560, POWER_INFO[pw.kind].label, POWER_INFO[pw.kind].color, 30);
+        this.texts.add(
+          this.W / 2,
+          this.framing.feetY - 260 * this.framing.unit,
+          info.label,
+          info.color,
+          30 * this.hs,
+        );
       }
     }
   }
@@ -434,753 +627,519 @@ export class RunnerGame extends BaseGame {
   private spawnJetpackCoins(duration: number): void {
     let lane = this.lane;
     const start = this.distance + 12;
-    const end = start + this.targetSpeed() * duration - 10;
+    const end = start + speedAt(this.distance) * duration - 10;
     for (let z = start; z < end; z += 3) {
       if (this.rng.chance(0.08)) lane = clamp(lane + (this.rng.chance(0.5) ? 1 : -1), 0, 2);
-      this.coinList.push({ x: laneX(lane), y: 6.4, z, taken: false, pulled: false });
+      this.coinList.push({ x: laneX(lane), y: JETPACK_Y + 0.9, z, taken: false, pulled: false, over: null });
     }
   }
 
-  // ------------------------------------------------------------------ procedural track
-
-  private gap(): number {
-    return Math.max(16, this.targetSpeed() * 0.95);
+  /** Drop everything behind the camera, compacting the arrays in place. */
+  private cull(): void {
+    const cut = this.distance - 14;
+    let n = 0;
+    for (const o of this.obstacles) if (!o.dead && o.z + o.len > cut) this.obstacles[n++] = o;
+    this.obstacles.length = n;
+    n = 0;
+    for (const c of this.coinList) if (!c.taken && c.z > cut) this.coinList[n++] = c;
+    this.coinList.length = n;
+    n = 0;
+    for (const p of this.powerList) if (!p.taken && p.z > cut) this.powerList[n++] = p;
+    this.powerList.length = n;
   }
 
-  private generate(): void {
-    while (this.nextZ < this.distance + FAR + 30) {
-      const start = this.nextZ;
-      const d = this.difficulty();
-      const pattern = this.rng.weighted([
-        { value: 'coins', weight: 2.2 - d * 1.2 },
-        { value: 'barriers', weight: 3 },
-        { value: 'trains', weight: 2 + d * 2 },
-        { value: 'moving', weight: this.distance > 500 ? 0.8 + d * 1.6 : 0 },
-        { value: 'zigzag', weight: this.distance > 350 ? 1 + d : 0 },
-      ] as const);
-      let len: number;
-      switch (pattern) {
-        case 'coins':
-          len = this.patCoins(start);
-          break;
-        case 'barriers':
-          len = this.patBarriers(start);
-          break;
-        case 'trains':
-          len = this.patTrains(start);
-          break;
-        case 'moving':
-          len = this.patMoving(start);
-          break;
-        default:
-          len = this.patZigzag(start);
-      }
-      this.nextZ = start + len + this.gap();
+  private checkMilestone(): void {
+    const m = Math.floor(this.distance / MILESTONE_M);
+    if (m <= this.milestone) return;
+    this.milestone = m;
+    this.milestoneT = 0;
+    this.audio.play('levelup');
+    this.services.haptic(30);
+  }
+
+  private showHint(id: HintId): void {
+    this.hint = id;
+    this.hintT = 0;
+    this.hintsShown.add(id);
+  }
+
+  private dismissHint(...ids: HintId[]): void {
+    if (this.hint && ids.includes(this.hint) && this.hintT > 0.4) this.hintT = Math.max(this.hintT, 2.9);
+  }
+
+  /** Gentle onboarding: one control hint at a time, the first time each situation comes up. */
+  private updateHints(dt: number): void {
+    if (this.hint) {
+      this.hintT += dt;
+      if (this.hintT > 3.2) this.hint = null;
+      return;
     }
-  }
-
-  private addOb(kind: ObKind, lane: number, z: number, len: number, h: number, vz = 0): void {
-    this.obstacles.push({
-      kind,
-      lane,
-      z,
-      len,
-      h,
-      vz,
-      armed: vz === 0,
-      livery: this.rng.int(0, LIVERIES.length - 1),
-      dead: false,
-    });
-  }
-
-  private coinLine(lane: number, z0: number, n: number, y = 0.9, spacing = 2.2): void {
-    for (let i = 0; i < n; i++)
-      this.coinList.push({ x: laneX(lane), y, z: z0 + i * spacing, taken: false, pulled: false });
-  }
-
-  private maybePower(lane: number, z: number): boolean {
-    if (z - this.lastPowerZ < 320 || !this.rng.chance(0.7)) return false;
-    this.lastPowerZ = z;
-    const kind = this.rng.weighted<PowerKind>([
-      { value: 'magnet', weight: 3 },
-      { value: 'double', weight: 2 },
-      { value: 'sneakers', weight: 2 },
-      { value: 'jetpack', weight: 1.4 },
-    ]);
-    this.powerList.push({ kind, lane, z, taken: false });
-    return true;
-  }
-
-  private patCoins(start: number): number {
-    const lane = this.rng.int(0, 2);
-    const n = this.rng.int(7, 12);
-    const hasPower = this.maybePower(lane, start);
-    this.coinLine(lane, start + (hasPower ? 6 : 0), n);
-    return n * 2.2 + 6;
-  }
-
-  private barrierRow(z: number, lanes: number[]): void {
-    const d = this.difficulty();
-    for (const lane of lanes) {
-      const high = this.rng.chance(0.35 + d * 0.2);
-      this.addOb(high ? 'high' : 'low', lane, z, 0.5, high ? 2.6 : 1.0);
-      if (!high && this.rng.chance(0.4)) {
-        for (let i = -3; i <= 3; i++) {
-          const dz = i * 1.5;
-          this.coinList.push({
-            x: laneX(lane),
-            y: 1 + 1.6 * (1 - (dz / 5) ** 2),
-            z: z + dz,
-            taken: false,
-            pulled: false,
-          });
-        }
+    if (this.distance > HINT_UNTIL_M || this.powers.jetpack > 0) return;
+    if (!this.hintsShown.has('lanes')) {
+      if (this.time > 2.8) this.showHint('lanes');
+      return;
+    }
+    let near: Obstacle | null = null;
+    let nearRel = this.speed * 1.7;
+    for (const ob of this.obstacles) {
+      if (ob.lane !== this.lane || ob.dead) continue;
+      const rel = ob.z - this.distance;
+      if (rel > 0 && rel < nearRel) {
+        near = ob;
+        nearRel = rel;
       }
     }
+    if (!near || this.py > 2) return;
+    const id: HintId =
+      near.kind === 'low'
+        ? 'jump'
+        : near.kind === 'high'
+          ? 'roll'
+          : near.kind === 'ramp'
+            ? 'ramp'
+            : near.vz !== 0
+              ? 'oncoming'
+              : 'dodge';
+    if (!this.hintsShown.has(id)) this.showHint(id);
   }
 
-  private patBarriers(start: number): number {
-    const d = this.difficulty();
-    const rows = d > 0.3 && this.rng.chance(0.5) ? 2 : 1;
-    const spacing = Math.max(15, this.targetSpeed() * 0.95);
-    for (let r = 0; r < rows; r++) {
-      const count = this.rng.int(1, d < 0.2 ? 2 : 3);
-      const lanes = this.rng.shuffle([0, 1, 2]).slice(0, count);
-      this.barrierRow(start + r * spacing, lanes);
-      const free = [0, 1, 2].filter((l) => !lanes.includes(l));
-      const fl = free[0];
-      if (fl !== undefined && this.rng.chance(0.6)) this.coinLine(fl, start + r * spacing - 4, 5);
-    }
-    return (rows - 1) * spacing + 4;
+  private updateChaser(dt: number): void {
+    const chasing = this.stumbleT > 0 || (this.crashed && this.crashOb === null);
+    this.chaserT = clamp(this.chaserT + (chasing ? dt * 2.5 : -dt * 1.2), 0, 1);
   }
 
-  private patTrains(start: number): number {
-    const d = this.difficulty();
-    const withRamp = this.rng.chance(0.35 + d * 0.2);
-    const maxTrains = d < 0.15 ? 1 : withRamp && d > 0.35 && this.rng.chance(0.35) ? 3 : 2;
-    const count = this.rng.int(1, maxTrains);
-    const lanes = this.rng.shuffle([0, 1, 2]).slice(0, count);
-    const rampLane = withRamp ? (lanes[0] as number) : -1;
-    const rampLen = 9;
-    let longest = 0;
-    for (const lane of lanes) {
-      const offset = lane === rampLane ? rampLen : this.rng.range(0, 6);
-      const len = this.rng.pick([16, 22, 28, 34]);
-      if (lane === rampLane) {
-        this.addOb('ramp', lane, start, rampLen, TRAIN_H);
-        // Coins up the ramp then along the roof.
-        for (let i = 0; i < 4; i++) {
-          const z = start + 1 + i * 2.2;
-          this.coinList.push({
-            x: laneX(lane),
-            y: TRAIN_H * ((z - start) / rampLen) + 0.9,
-            z,
-            taken: false,
-            pulled: false,
-          });
-        }
-        this.coinLine(lane, start + rampLen + 1, Math.floor(len / 2.4), TRAIN_H + 0.9, 2.4);
-      }
-      this.addOb('train', lane, start + offset, len, TRAIN_H);
-      longest = Math.max(longest, offset + len);
-    }
-    const free = [0, 1, 2].filter((l) => !lanes.includes(l));
-    for (const lane of free) {
-      if (d > 0.25 && this.rng.chance(0.35)) this.barrierRow(start + this.rng.range(4, longest - 4), [lane]);
-      else if (this.rng.chance(0.6)) {
-        if (!this.maybePower(lane, start + 2)) this.coinLine(lane, start + 2, Math.floor(longest / 2.6));
-      }
-    }
-    return longest;
-  }
-
-  private patMoving(start: number): number {
-    const d = this.difficulty();
-    const lane = this.rng.int(0, 2);
-    const len = this.rng.pick([18, 24]);
-    this.addOb('train', lane, start + 42, len, TRAIN_H, -(9 + 7 * d));
-    const others = [0, 1, 2].filter((l) => l !== lane);
-    const coinLane = this.rng.pick(others);
-    this.coinLine(coinLane, start + 4, 10);
-    const other = others.find((l) => l !== coinLane);
-    if (other !== undefined && d > 0.35 && this.rng.chance(0.6)) this.barrierRow(start + 18, [other]);
-    return 42 + len;
-  }
-
-  private patZigzag(start: number): number {
-    let free = this.rng.int(0, 2);
-    const spacing = Math.max(12, this.targetSpeed() * 0.75);
-    const rows = 3;
-    for (let r = 0; r < rows; r++) {
-      const z = start + r * spacing;
-      for (let lane = 0; lane < 3; lane++) {
-        if (lane === free) continue;
-        const high = this.rng.chance(0.5);
-        this.addOb(high ? 'high' : 'low', lane, z, 0.5, high ? 2.6 : 1.0);
-      }
-      this.coinLine(free, z - 3, 3);
-      free = clamp(free + (this.rng.chance(0.5) ? 1 : -1), 0, 2);
-    }
-    return (rows - 1) * spacing + 3;
+  private updateCamera(dt: number): void {
+    this.camX += (this.px * 0.55 - this.camX) * damp(6, dt);
+    this.camLift += (Math.min(this.py, TRAIN_H) * 0.55 - this.camLift) * damp(4, dt);
   }
 
   // ------------------------------------------------------------------ rendering
 
-  private project(x: number, y: number, z: number): { x: number; y: number; s: number } {
-    const depth = Math.max(0.5, z + CAM_D);
-    const s = FOCAL / depth;
-    return { x: this.W / 2 + (x - this.camX) * s, y: HORIZON + (CAM_H + this.camLift - y) * s, s };
-  }
-
-  private quad(
-    a: [number, number, number],
-    b: [number, number, number],
-    c: [number, number, number],
-    d: [number, number, number],
-    fill: string | CanvasGradient,
-  ): void {
-    const ctx = this.ctx;
-    const pa = this.project(...a);
-    const pb = this.project(...b);
-    const pc = this.project(...c);
-    const pd = this.project(...d);
-    ctx.beginPath();
-    ctx.moveTo(pa.x, pa.y);
-    ctx.lineTo(pb.x, pb.y);
-    ctx.lineTo(pc.x, pc.y);
-    ctx.lineTo(pd.x, pd.y);
-    ctx.closePath();
-    ctx.fillStyle = fill;
-    ctx.fill();
+  private setupCamera(): void {
+    const rm = this.services.reducedMotion;
+    const f = this.framing.update(this.W, this.H, this.insets);
+    let zoom = 1;
+    if (!rm) {
+      // Slightly wider view at top speed, a short pulse on milestones, a dolly-in on a crash.
+      zoom -= 0.04 * clamp((this.viewSpeed - 20) / 13, 0, 1);
+      if (this.milestoneT < 0.7) zoom -= 0.035 * Math.sin((this.milestoneT / 0.7) * Math.PI);
+    }
+    if (this.crashed) zoom += 0.05 * Math.min(1, this.crashT / 0.35);
+    const cam = this.cam;
+    cam.f = f.focal * zoom;
+    cam.hz = f.horizonFor(cam.f);
+    cam.cx = this.W / 2;
+    cam.x = this.camX;
+    cam.h = 8.4 + this.camLift;
   }
 
   render(): void {
     const ctx = this.ctx;
+    this.setupCamera();
+    this.look.update(this.distance);
+    const v = this.view;
+    v.dist = this.distance;
+    v.far = viewDistance(this.viewSpeed);
+    v.time = this.time;
+    v.speed = this.speed;
+    this.scenery.begin(v);
     ctx.save();
     ctx.translate(this.shake.x, this.shake.y);
-    this.drawBackground();
-    this.drawTrack();
+    this.scenery.drawSky(v);
+    this.scenery.drawGround(v);
+    this.scenery.drawHaze(v);
+    this.scenery.drawSides(v);
     this.drawWorld();
+    this.drawStreaks();
     this.particles.render(ctx);
     this.texts.render(ctx);
     ctx.restore();
-    this.drawHud();
+    this.drawVignette();
+    if (!this.preview) this.drawHud();
   }
 
-  private drawBackground(): void {
-    const ctx = this.ctx;
-    const g = ctx.createLinearGradient(0, 0, 0, HORIZON + 20);
-    g.addColorStop(0, '#1a1446');
-    g.addColorStop(0.55, '#7a2f7d');
-    g.addColorStop(1, '#ff8a5b');
-    ctx.fillStyle = g;
-    ctx.fillRect(-20, -20, this.W + 40, HORIZON + 40);
-    // Sun
-    const sg = ctx.createRadialGradient(this.W * 0.7, HORIZON - 40, 10, this.W * 0.7, HORIZON - 40, 120);
-    sg.addColorStop(0, 'rgba(255,230,160,1)');
-    sg.addColorStop(0.3, 'rgba(255,170,100,0.6)');
-    sg.addColorStop(1, 'rgba(255,120,80,0)');
-    ctx.fillStyle = sg;
-    ctx.fillRect(0, 0, this.W, HORIZON + 20);
-    // Skyline (two parallax layers)
-    for (const b of this.skyline) {
-      const par = b.layer === 0 ? 8 : 4;
-      const x = b.x - this.camX * par;
-      ctx.fillStyle = b.layer === 0 ? '#2a1a4a' : '#3b2463';
-      ctx.fillRect(x, HORIZON - b.h, b.w, b.h + 2);
-      if (b.layer === 0) {
-        ctx.fillStyle = 'rgba(255,214,120,0.55)';
-        for (let wy = HORIZON - b.h + 8; wy < HORIZON - 6; wy += 12) {
-          for (let wx = 5; wx < b.w - 6; wx += 10) {
-            if (hash1(b.seed + wx * 3.1 + wy * 7.7) > 0.62) ctx.fillRect(x + wx, wy, 4, 5);
-          }
-        }
-      }
+  private pushItem(
+    key: number,
+    kind: number,
+    rel: number,
+    ob: Obstacle | null,
+    coin: Coin | null,
+    power: Power | null,
+  ): void {
+    let it = this.items[this.itemCount];
+    if (!it) {
+      it = { key: 0, kind: 0, rel: 0, ob: null, coin: null, power: null };
+      this.items.push(it);
     }
+    it.key = key;
+    it.kind = kind;
+    it.rel = rel;
+    it.ob = ob;
+    it.coin = coin;
+    it.power = power;
+    this.itemCount++;
   }
 
-  private drawTrack(): void {
-    const ctx = this.ctx;
-    // Ground
-    const gg = ctx.createLinearGradient(0, HORIZON, 0, this.H);
-    gg.addColorStop(0, '#4a3b5c');
-    gg.addColorStop(1, '#2b2233');
-    ctx.fillStyle = gg;
-    ctx.fillRect(-20, HORIZON, this.W + 40, this.H - HORIZON + 20);
-    const zNear = NEAR;
-    const half = LANE_W * 1.5 + 0.4;
-    this.quad([-half, 0, zNear], [half, 0, zNear], [half, 0, FAR], [-half, 0, FAR], '#5a4a52');
-    // Sleepers
-    const off = this.distance % 1.6;
-    for (let lane = 0; lane < 3; lane++) {
-      const cx = laneX(lane);
-      for (let z = -off + NEAR; z < 70; z += 1.6) {
-        if (z < NEAR) continue;
-        this.quad(
-          [cx - 1.0, 0, z],
-          [cx + 1.0, 0, z],
-          [cx + 1.0, 0, z + 0.45],
-          [cx - 1.0, 0, z + 0.45],
-          '#7b5a43',
-        );
-      }
-    }
-    // Rails
-    ctx.strokeStyle = '#c9c9d6';
-    for (let lane = 0; lane < 3; lane++) {
-      for (const rx of [-0.6, 0.6]) {
-        const x = laneX(lane) + rx;
-        const a = this.project(x, 0.05, NEAR);
-        const b = this.project(x, 0.05, FAR);
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-      }
-    }
-    // Side walls, segmented so they visibly stream past.
-    const segLen = 10;
-    const first = Math.floor((this.distance + NEAR) / segLen);
-    for (let k = first + Math.ceil(FAR / segLen); k >= first; k--) {
-      const z0 = Math.max(NEAR, k * segLen - this.distance);
-      const z1 = k * segLen + segLen - this.distance;
-      if (z1 <= NEAR) continue;
-      const shadeAmt = hash1(k) > 0.5 ? 0 : -0.12;
-      for (const side of [-1, 1]) {
-        const x = side * WALL_X;
-        this.quad([x, 0, z0], [x, 0, z1], [x, 4.2, z1], [x, 4.2, z0], shade('#5b4b8a', shadeAmt));
-        if (hash1(k * 7 + side) > 0.55) {
-          const gz0 = z0 + 2;
-          const gz1 = Math.min(z1 - 2, gz0 + 5);
-          if (gz1 > gz0) {
-            const hue = Math.floor(hash1(k * 13 + side) * 360);
-            this.quad([x, 0.8, gz0], [x, 0.8, gz1], [x, 2.6, gz1], [x, 2.6, gz0], `hsla(${hue},85%,60%,0.8)`);
-          }
-        }
-        // Catenary poles every other segment
-        if (k % 2 === 0) {
-          const pz = k * segLen - this.distance;
-          if (pz > NEAR) {
-            const a = this.project(x - side * 0.3, 0, pz);
-            const b = this.project(x - side * 0.3, 6.5, pz);
-            ctx.strokeStyle = '#2d2445';
-            ctx.lineWidth = Math.max(1, 0.25 * a.s);
-            ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.stroke();
-          }
-        }
-      }
-    }
-  }
-
-  private fogAlpha(rel: number): number {
-    return clamp((FAR - rel) / 35, 0, 1);
-  }
-
+  /** Depth-sorted world pass over a preallocated item list (no closures, no per-frame allocation). */
   private drawWorld(): void {
-    type Item = { z: number; draw: () => void };
-    const items: Item[] = [];
+    const v = this.view;
+    const far = v.far;
+    this.itemCount = 0;
     for (const ob of this.obstacles) {
       const rel = ob.z - this.distance;
-      if (rel > FAR || rel + ob.len < NEAR) continue;
-      items.push({ z: rel, draw: () => this.drawObstacle(ob, rel) });
+      if (rel > far || rel + ob.len < NEAR) continue;
+      this.pushItem(depthKey(rel, ob.len), ITEM_OBSTACLE, rel, ob, null, null);
     }
+    const coinFar = far * 0.8;
     for (const c of this.coinList) {
       const rel = c.z - this.distance;
-      if (rel > FAR * 0.8 || rel < NEAR + 0.5) continue;
-      items.push({ z: rel, draw: () => this.drawCoin3d(c, rel) });
+      if (rel > coinFar || rel < NEAR + 0.5) continue;
+      let key = rel;
+      if (c.over && !c.pulled && rel >= 0) key = depthKey(c.over.z - this.distance, c.over.len) - 1e-4;
+      this.pushItem(key, ITEM_COIN, rel, null, c, null);
     }
     for (const p of this.powerList) {
       const rel = p.z - this.distance;
-      if (rel > FAR * 0.8 || rel < NEAR + 0.5) continue;
-      items.push({ z: rel, draw: () => this.drawPower(p, rel) });
+      if (rel > coinFar || rel < NEAR + 0.5) continue;
+      this.pushItem(rel, ITEM_POWER, rel, null, null, p);
     }
-    items.push({ z: 0.01, draw: () => this.drawPlayer() });
-    items.sort((a, b) => b.z - a.z);
-    for (const it of items) it.draw();
-    this.ctx.globalAlpha = 1;
-  }
-
-  private drawObstacle(ob: Obstacle, rel: number): void {
-    const ctx = this.ctx;
-    ctx.globalAlpha = this.fogAlpha(rel);
-    const cx = laneX(ob.lane);
-    const z0 = Math.max(rel, NEAR);
-    const z1 = rel + ob.len;
-    if (ob.kind === 'train') {
-      const lv = LIVERIES[ob.livery] ?? LIVERIES[0]!;
-      const hw = 1.05;
-      const h = ob.h;
-      const x0 = cx - hw;
-      const x1 = cx + hw;
-      // Visible side face
-      if (x0 > this.camX) {
-        this.quad([x0, 0, z0], [x0, 0, z1], [x0, h, z1], [x0, h, z0], shade(lv.body, -0.3));
-        this.quad(
-          [x0, h * 0.55, z0],
-          [x0, h * 0.55, z1],
-          [x0, h * 0.75, z1],
-          [x0, h * 0.75, z0],
-          shade(lv.stripe, -0.25),
-        );
-      } else if (x1 < this.camX) {
-        this.quad([x1, 0, z0], [x1, 0, z1], [x1, h, z1], [x1, h, z0], shade(lv.body, -0.3));
-        this.quad(
-          [x1, h * 0.55, z0],
-          [x1, h * 0.55, z1],
-          [x1, h * 0.75, z1],
-          [x1, h * 0.75, z0],
-          shade(lv.stripe, -0.25),
-        );
+    const firstGantry = Math.ceil((this.distance - 3) / GANTRY_EVERY);
+    const lastGantry = Math.floor((this.distance + far) / GANTRY_EVERY);
+    for (let k = firstGantry; k <= lastGantry; k++) {
+      if (!gantryAt(k * GANTRY_EVERY)) continue;
+      const rel = k * GANTRY_EVERY - this.distance;
+      this.pushItem(rel, ITEM_GANTRY, rel, null, null, null);
+    }
+    this.pushItem(PLAYER_KEY, ITEM_PLAYER, 0, null, null, null);
+    if (this.chaserT > 0.01) {
+      const z = this.chaserZ();
+      this.pushItem(z, ITEM_CHASER, z, null, null, null);
+    }
+    // Insertion sort, far to near: the order barely changes between frames.
+    const items = this.items;
+    for (let i = 1; i < this.itemCount; i++) {
+      const it = items[i]!;
+      let j = i - 1;
+      while (j >= 0 && items[j]!.key < it.key) {
+        items[j + 1] = items[j]!;
+        j--;
       }
-      // Roof
-      this.quad([x0, h, z0], [x1, h, z0], [x1, h, z1], [x0, h, z1], lv.roof);
-      for (let cz = rel + 11; cz < z1 - 1; cz += 11) {
-        if (cz > z0)
-          this.quad(
-            [x0, h + 0.01, cz],
-            [x1, h + 0.01, cz],
-            [x1, h + 0.01, cz + 0.4],
-            [x0, h + 0.01, cz + 0.4],
-            '#2b2b36',
-          );
-      }
-      // Front face (only if the train front is ahead of the near plane)
-      if (rel >= NEAR) {
-        const a = this.project(x0, h, rel);
-        const b = this.project(x1, 0, rel);
-        const w = b.x - a.x;
-        const hh = b.y - a.y;
-        fillRoundRect(ctx, a.x, a.y, w, hh, w * 0.08, lv.body);
-        fillRoundRect(ctx, a.x + w * 0.12, a.y + hh * 0.1, w * 0.76, hh * 0.32, w * 0.05, '#203050');
-        ctx.fillStyle = 'rgba(160,220,255,0.35)';
-        ctx.fillRect(a.x + w * 0.16, a.y + hh * 0.13, w * 0.25, hh * 0.08);
-        ctx.fillStyle = lv.stripe;
-        ctx.fillRect(a.x, a.y + hh * 0.55, w, hh * 0.1);
-        const lightOn = ob.vz !== 0;
-        ctx.fillStyle = lightOn ? '#fff8c0' : '#ffd27a';
-        const lr = Math.max(1.5, w * 0.07);
-        ctx.beginPath();
-        ctx.arc(a.x + w * 0.2, a.y + hh * 0.8, lr, 0, TAU);
-        ctx.arc(a.x + w * 0.8, a.y + hh * 0.8, lr, 0, TAU);
-        ctx.fill();
-        if (lightOn) {
-          ctx.globalAlpha *= 0.35 + 0.25 * Math.sin(this.time * 12);
-          const glow = ctx.createRadialGradient(
-            a.x + w / 2,
-            a.y + hh * 0.8,
-            0,
-            a.x + w / 2,
-            a.y + hh * 0.8,
-            w,
-          );
-          glow.addColorStop(0, 'rgba(255,250,200,0.9)');
-          glow.addColorStop(1, 'rgba(255,250,200,0)');
-          ctx.fillStyle = glow;
-          ctx.fillRect(a.x - w / 2, a.y, w * 2, hh * 1.4);
+      items[j + 1] = it;
+    }
+    for (let i = 0; i < this.itemCount; i++) {
+      const it = items[i]!;
+      switch (it.kind) {
+        case ITEM_OBSTACLE: {
+          const ob = it.ob!;
+          const a = fogAt(it.rel, far);
+          if (ob.kind === 'train') drawTrain(v, ob, it.rel, a);
+          else if (ob.kind === 'ramp') drawRamp(v, ob, it.rel, a);
+          else drawBarrier(v, ob, it.rel, a);
+          break;
         }
+        case ITEM_COIN:
+          this.drawCoin(it.coin!, it.rel, coinFar);
+          break;
+        case ITEM_POWER:
+          drawPower(v, it.power!, it.rel, clamp((coinFar - it.rel) / 20, 0, 1));
+          break;
+        case ITEM_GANTRY:
+          this.scenery.drawGantry(v, it.rel, clamp((it.rel + 3) / 3, 0, 1) * fogAt(it.rel, far));
+          break;
+        case ITEM_PLAYER:
+          this.drawPlayer();
+          break;
+        default:
+          this.drawChaser();
       }
-    } else if (ob.kind === 'ramp') {
-      const hw = 1.0;
-      const x0 = cx - hw;
-      const x1 = cx + hw;
-      const y0 = ob.h * clamp((z0 - rel) / ob.len, 0, 1);
-      this.quad([x0, y0, z0], [x1, y0, z0], [x1, ob.h, z1], [x0, ob.h, z1], '#c08a3e');
-      for (let i = 1; i < 6; i++) {
-        const t = i / 6;
-        const z = rel + ob.len * t;
-        if (z > z0)
-          this.quad(
-            [x0, ob.h * t, z],
-            [x1, ob.h * t, z],
-            [x1, ob.h * t + 0.05, z + 0.25],
-            [x0, ob.h * t + 0.05, z + 0.25],
-            '#8a5f28',
-          );
-      }
-      if (x0 > this.camX) this.quad([x0, 0, z0], [x0, 0, z1], [x0, ob.h, z1], [x0, y0, z0], '#7a5424');
-      else if (x1 < this.camX) this.quad([x1, 0, z0], [x1, 0, z1], [x1, ob.h, z1], [x1, y0, z0], '#7a5424');
-    } else {
-      if (rel < NEAR) return;
-      const low = ob.kind === 'low';
-      const y0 = low ? 0.35 : 1.25;
-      const y1 = low ? 1.0 : 2.6;
-      const a = this.project(cx - 1.05, y1, rel);
-      const b = this.project(cx + 1.05, y0, rel);
-      const postW = Math.max(2, 0.14 * a.s);
-      const ground = this.project(cx, 0, rel);
-      ctx.fillStyle = '#d9d9e3';
-      ctx.fillRect(a.x + postW * 0.5, a.y, postW, ground.y - a.y);
-      ctx.fillRect(b.x - postW * 1.5, a.y, postW, ground.y - a.y);
-      const w = b.x - a.x;
-      const hh = b.y - a.y;
-      ctx.fillStyle = low ? '#f4f4f4' : '#ffd23f';
-      ctx.fillRect(a.x, a.y, w, hh);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(a.x, a.y, w, hh);
-      ctx.clip();
-      ctx.fillStyle = low ? '#e63946' : '#1d1d1d';
-      const stripe = Math.max(4, w / 7);
-      for (let sx = a.x - hh; sx < a.x + w + hh; sx += stripe * 2) {
-        ctx.beginPath();
-        ctx.moveTo(sx, a.y + hh);
-        ctx.lineTo(sx + stripe, a.y + hh);
-        ctx.lineTo(sx + stripe + hh, a.y);
-        ctx.lineTo(sx + hh, a.y);
-        ctx.fill();
-      }
-      ctx.restore();
     }
-    ctx.globalAlpha = 1;
-  }
-
-  private drawCoin3d(c: Coin, rel: number): void {
-    const p = this.project(c.x, c.y, rel);
-    this.ctx.globalAlpha = this.fogAlpha(rel);
-    drawCoin(this.ctx, p.x, p.y, Math.max(1.5, 0.34 * p.s), Math.cos(this.time * 5 + c.z * 0.3));
     this.ctx.globalAlpha = 1;
   }
 
-  private drawPower(pw: Power, rel: number): void {
-    const ctx = this.ctx;
-    const bob = Math.sin(this.time * 4 + pw.z) * 0.15;
-    const p = this.project(laneX(pw.lane), 1.2 + bob, rel);
-    const r = Math.max(3, 0.55 * p.s);
-    const info = POWER_INFO[pw.kind];
-    ctx.globalAlpha = this.fogAlpha(rel);
-    const g = ctx.createRadialGradient(p.x, p.y, r * 0.2, p.x, p.y, r * 1.6);
-    g.addColorStop(0, info.color);
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r * 1.6, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(20,20,40,0.85)';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = info.color;
-    ctx.lineWidth = Math.max(1, r * 0.15);
-    ctx.stroke();
-    this.drawPowerIcon(pw.kind, p.x, p.y, r * 0.6);
-    ctx.globalAlpha = 1;
+  private drawCoin(c: Coin, rel: number, coinFar: number): void {
+    const cam = this.cam.project(c.x, c.y, rel);
+    // Fade in over the last 20 m of coin visibility instead of popping in.
+    this.ctx.globalAlpha = clamp((coinFar - rel) / 20, 0, 1);
+    this.coinSprites.draw(
+      this.ctx,
+      cam.px,
+      cam.py,
+      Math.max(1.5, 0.36 * cam.ps),
+      Math.cos(this.time * 5 + c.z * 0.3),
+    );
+    this.ctx.globalAlpha = 1;
   }
 
-  private drawPowerIcon(kind: PowerKind, x: number, y: number, r: number): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.lineCap = 'round';
-    switch (kind) {
-      case 'magnet':
-        ctx.strokeStyle = '#ff4d6d';
-        ctx.lineWidth = r * 0.45;
-        ctx.beginPath();
-        ctx.arc(0, -r * 0.1, r * 0.6, Math.PI, 0, true);
-        ctx.stroke();
-        ctx.strokeStyle = '#eee';
-        ctx.beginPath();
-        ctx.moveTo(-r * 0.6, -r * 0.1);
-        ctx.lineTo(-r * 0.6, -r * 0.6);
-        ctx.moveTo(r * 0.6, -r * 0.1);
-        ctx.lineTo(r * 0.6, -r * 0.6);
-        ctx.stroke();
-        break;
-      case 'double':
-        text(ctx, '2X', 0, 0, { size: r * 1.3, align: 'center', color: '#ffd23f', stroke: null });
-        break;
-      case 'sneakers':
-        ctx.fillStyle = '#4dd9ff';
-        ctx.beginPath();
-        ctx.moveTo(-r, r * 0.4);
-        ctx.lineTo(-r * 0.7, -r * 0.6);
-        ctx.lineTo(-r * 0.1, -r * 0.6);
-        ctx.lineTo(0, -r * 0.1);
-        ctx.lineTo(r, r * 0.1);
-        ctx.lineTo(r, r * 0.4);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(-r, r * 0.3, r * 2, r * 0.22);
-        break;
-      case 'jetpack':
-        ctx.fillStyle = '#b06bff';
-        fillRoundRect(ctx, -r * 0.6, -r * 0.8, r * 0.5, r * 1.3, r * 0.2, '#b06bff');
-        fillRoundRect(ctx, r * 0.1, -r * 0.8, r * 0.5, r * 1.3, r * 0.2, '#b06bff');
-        ctx.fillStyle = '#ffb703';
-        ctx.beginPath();
-        ctx.moveTo(-r * 0.55, r * 0.5);
-        ctx.lineTo(-r * 0.35, r);
-        ctx.lineTo(-r * 0.15, r * 0.5);
-        ctx.moveTo(r * 0.15, r * 0.5);
-        ctx.lineTo(r * 0.35, r);
-        ctx.lineTo(r * 0.55, r * 0.5);
-        ctx.fill();
-        break;
-    }
-    ctx.restore();
+  private chaserZ(): number {
+    const caught = this.crashed && this.crashOb === null ? Math.min(1, this.crashT * 2) : 0;
+    return -9 + 6.6 * this.chaserT + 1.2 * caught;
   }
 
   private drawPlayer(): void {
     const ctx = this.ctx;
-    const ground = this.groundAt(this.px).h;
-    // Shadow
-    const sh = this.project(this.px, ground, 0);
-    const shadowScale = clamp(1 - (this.py - ground) / 8, 0.3, 1);
+    const cam = this.cam;
+    const ground = this.crashed ? this.probeGround(this.px, this.crashOb) : this.probeGround(this.px);
+    const surface = Math.min(ground, this.py);
+    // Shadow on whatever surface is under the runner.
+    cam.project(this.px, surface + 0.01, 0);
+    const shadow = clamp(1 - (this.py - surface) / 8, 0.3, 1);
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath();
-    ctx.ellipse(sh.x, sh.y, 0.55 * sh.s * shadowScale, 0.2 * sh.s * shadowScale, 0, 0, TAU);
+    ctx.ellipse(cam.px, cam.py, 0.55 * cam.ps * shadow, 0.2 * cam.ps * shadow, 0, 0, TAU);
     ctx.fill();
 
-    const base = this.project(this.px, this.py, 0);
-    const s = base.s;
-    const blink = this.graceT > 0 && Math.floor(this.time * 14) % 2 === 0;
-    if (blink) ctx.globalAlpha = 0.45;
-    const body = this.skinColor('body', '#e63946');
-    const accent = this.skinColor('accent', '#1d3557');
-    const skin = this.skinColor('skin', '#f1c27d');
-    const hair = this.skinColor('hair', '#2b2118');
-    const shoes = this.skinColor('shoes', '#f8f9fa');
-    ctx.save();
-    ctx.translate(base.x, base.y);
-    if (this.crashed) ctx.rotate(-0.9 * Math.min(1, this.crashT * 3));
-
-    if (this.rollT > 0) {
-      const r = 0.55 * s;
-      ctx.rotate(this.runPhase * 2);
-      ctx.fillStyle = body;
-      ctx.beginPath();
-      ctx.arc(0, -r, r, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = r * 0.25;
-      ctx.beginPath();
-      ctx.arc(0, -r, r * 0.65, 0, Math.PI);
-      ctx.stroke();
-      ctx.fillStyle = hair;
-      ctx.beginPath();
-      ctx.arc(0, -r * 1.55, r * 0.4, 0, TAU);
-      ctx.fill();
-    } else {
-      const airborne = !this.grounded;
-      const ph = airborne ? 0.6 : Math.sin(this.runPhase);
-      const legLen = 0.8 * s;
-      const legW = 0.2 * s;
-      // Legs (seen from behind)
-      for (const side of [-1, 1]) {
-        const swing = ph * side;
-        fillRoundRect(
-          ctx,
-          side * 0.13 * s - legW / 2,
-          -legLen - swing * 0.1 * s,
-          legW,
-          legLen * (0.85 + 0.15 * swing),
-          legW * 0.4,
-          accent,
-        );
-        const shoe = this.powers.sneakers > 0 ? '#4dd9ff' : shoes;
-        fillRoundRect(
-          ctx,
-          side * 0.13 * s - legW * 0.6,
-          -0.12 * s - swing * 0.12 * s,
-          legW * 1.2,
-          0.14 * s,
-          0.05 * s,
-          shoe,
-        );
-      }
-      // Torso
-      const torsoY = -legLen - 0.65 * s;
-      fillRoundRect(ctx, -0.32 * s, torsoY, 0.64 * s, 0.72 * s, 0.14 * s, body);
-      // Backpack / jetpack
-      if (this.powers.jetpack > 0) {
-        fillRoundRect(ctx, -0.3 * s, torsoY + 0.05 * s, 0.24 * s, 0.55 * s, 0.08 * s, '#8d5cf6');
-        fillRoundRect(ctx, 0.06 * s, torsoY + 0.05 * s, 0.24 * s, 0.55 * s, 0.08 * s, '#8d5cf6');
+    const p = this.pose;
+    const speedK = clamp((this.speed - 13) / 20, 0, 1);
+    p.phase = this.runPhase;
+    p.stride = 0.8 + 0.3 * speedK;
+    p.air = this.grounded || this.powers.jetpack > 0 ? 0 : clamp((this.py - surface) / 0.5, 0, 1);
+    p.rising = this.vy > 0;
+    p.rolling = this.rollT > 0 && !this.crashed;
+    p.rollAngle = this.rollAngle;
+    p.lean = this.crashed ? 0 : clamp((laneX(this.lane) - this.px) * 0.12, -0.25, 0.25);
+    p.jetpack = this.powers.jetpack > 0;
+    p.sneakers = this.powers.sneakers > 0;
+    p.time = this.time;
+    p.crash = this.crashKind;
+    p.sqX = 1;
+    p.sqY = 1;
+    if (this.crashed) {
+      const t = Math.min(1, this.crashT / 0.35);
+      if (this.crashKind === 1) {
+        p.sqX = 1.12;
+        p.sqY = 0.88;
       } else {
-        fillRoundRect(ctx, -0.22 * s, torsoY + 0.1 * s, 0.44 * s, 0.4 * s, 0.1 * s, shade(accent, 0.15));
+        // Tripped: topple forward, away from the camera.
+        p.sqY = 1 - 0.5 * t;
+        p.sqX = 1 + 0.08 * t;
       }
-      // Arms
-      for (const side of [-1, 1]) {
-        const swing = -ph * side;
-        ctx.save();
-        ctx.translate(side * 0.36 * s, torsoY + 0.1 * s);
-        ctx.rotate(swing * 0.5 + side * (airborne ? 0.6 : 0.1));
-        fillRoundRect(ctx, -0.08 * s, 0, 0.16 * s, 0.55 * s, 0.07 * s, body);
-        ctx.fillStyle = skin;
-        ctx.beginPath();
-        ctx.arc(0, 0.58 * s, 0.08 * s, 0, TAU);
-        ctx.fill();
-        ctx.restore();
-      }
-      // Head from behind
-      ctx.fillStyle = skin;
-      ctx.beginPath();
-      ctx.arc(0, torsoY - 0.2 * s, 0.24 * s, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = hair;
-      ctx.beginPath();
-      ctx.arc(0, torsoY - 0.22 * s, 0.24 * s, Math.PI * 1.05, Math.PI * 1.95, true);
-      ctx.fill();
-      ctx.fillStyle = accent;
-      ctx.beginPath();
-      ctx.arc(0, torsoY - 0.3 * s, 0.25 * s, Math.PI, 0);
-      ctx.fill();
+      p.air = 0;
+    } else if (this.landT < 0.1) {
+      const k = 1 - this.landT / 0.1;
+      p.sqY = 1 - 0.15 * k;
+      p.sqX = 1 + 0.1 * k;
+    } else if (this.takeoffT < 0.12) {
+      const k = 1 - this.takeoffT / 0.12;
+      p.sqY = 1 + 0.1 * k;
+      p.sqX = 1 - 0.06 * k;
     }
-    ctx.restore();
+    cam.project(this.px, this.py, 0);
+    const bx = cam.px;
+    const by = cam.py;
+    const s = cam.ps;
+    const blink = this.graceT > 0 && (this.services.reducedMotion || Math.floor(this.time * 14) % 2 === 0);
+    if (blink) ctx.globalAlpha = 0.55;
+    drawRig(ctx, bx, by, s, p, this.colors);
+    ctx.globalAlpha = 1;
     if (this.shield || this.graceT > 0) {
       ctx.globalAlpha = this.shield ? 0.35 + 0.1 * Math.sin(this.time * 6) : 0.2;
       ctx.strokeStyle = '#7cf';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = Math.max(2, 0.05 * s);
       ctx.beginPath();
-      ctx.arc(base.x, base.y - 0.9 * s, 1.15 * s, 0, TAU);
+      ctx.arc(bx, by - 0.9 * s, 1.15 * s, 0, TAU);
       ctx.stroke();
       ctx.fillStyle = 'rgba(120,200,255,0.15)';
       ctx.fill();
+      ctx.globalAlpha = 1;
     }
+  }
+
+  /** The guard who chases the runner after a stumble (Subway Surfers' inspector, in spirit). */
+  private drawChaser(): void {
+    const z = this.chaserZ();
+    const cam = this.cam.project(this.px + 0.75, 0, z);
+    const p = this.chaserPose;
+    p.phase = this.runPhase + 1.1;
+    p.stride = 1;
+    p.lean = 0;
+    this.ctx.globalAlpha = Math.min(1, this.chaserT * 1.5);
+    drawRig(this.ctx, cam.px, cam.py, cam.ps, p, this.chaserColors);
+    this.ctx.globalAlpha = 1;
+  }
+
+  /** Speed streaks from the vanishing point above 20 m/s (never with reduced motion). */
+  private drawStreaks(): void {
+    const k = (this.speed - 20) / 13;
+    if (k <= 0 || this.services.reducedMotion || this.crashed) return;
+    const ctx = this.ctx;
+    const cam = this.cam;
+    const R = Math.hypot(this.W, this.H) * 0.62;
+    ctx.globalAlpha = Math.min(0.35, k * 0.35);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.6 * this.framing.unit;
+    ctx.beginPath();
+    for (let i = 0; i < STREAKS; i++) {
+      const a = this.streakAngle[i]!;
+      const t = (this.streakSeed[i]! + this.distance * (0.012 + 0.01 * this.streakSeed[i]!)) % 1;
+      const r0 = R * (0.22 + 0.78 * t * t);
+      const r1 = r0 + R * 0.1 * (0.4 + t);
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      ctx.moveTo(cam.cx + c * r0, cam.hz + s * r0);
+      ctx.lineTo(cam.cx + c * r1, cam.hz + s * r1);
+    }
+    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
+  /** Red edge vignette while the chaser is close. */
+  private drawVignette(): void {
+    if (this.chaserT <= 0.01 || this.preview) return;
+    const ctx = this.ctx;
+    if (!this.vignette) {
+      const r = Math.hypot(this.W, this.H) / 2;
+      const g = ctx.createRadialGradient(this.W / 2, this.H / 2, r * 0.55, this.W / 2, this.H / 2, r);
+      g.addColorStop(0, 'rgba(255,40,60,0)');
+      g.addColorStop(1, 'rgba(255,40,60,0.45)');
+      this.vignette = g;
+    }
+    const pulse = this.services.reducedMotion ? 1 : 0.8 + 0.2 * Math.sin(this.time * 8);
+    ctx.globalAlpha = this.chaserT * pulse;
+    ctx.fillStyle = this.vignette;
+    ctx.fillRect(0, 0, this.W, this.H);
+    ctx.globalAlpha = 1;
+  }
+
+  // ------------------------------------------------------------------ HUD
+
   private drawHud(): void {
     const ctx = this.ctx;
-    hudPill(ctx, 14, 14, 150, 44);
-    drawCoin(ctx, 38, 36, 13);
-    text(ctx, `${this.coins}`, 60, 37, { size: 24 });
-    hudPill(ctx, this.W - 214, 14, 200, 44);
-    text(ctx, `${Math.floor(this.score).toLocaleString('en-US')}`, this.W - 28, 37, {
-      size: 26,
+    const s = this.hs;
+    const ins = this.insets;
+    const top = ins.top + 14 * s;
+    const left = ins.left + 14 * s;
+    const right = this.W - ins.right - 14 * s;
+
+    hudPill(ctx, left, top, 150 * s, 44 * s);
+    this.coinSprites.draw(ctx, left + 24 * s, top + 22 * s, 13 * s, 1);
+    text(ctx, `${this.coins}`, left + 46 * s, top + 23 * s, { size: 24 * s });
+
+    const sw = 206 * s;
+    hudPill(ctx, right - sw, top, sw, 44 * s);
+    text(ctx, Math.floor(this.score).toLocaleString('en-US'), right - 16 * s, top + 23 * s, {
+      size: 26 * s,
       align: 'right',
     });
     const mult = this.multiplier();
-    text(ctx, `x${mult}`, this.W - 200, 37, {
-      size: 20,
-      color: mult > 1 ? '#ffd23f' : '#aab',
-      align: 'left',
+    text(ctx, `x${mult}`, right - sw + 16 * s, top + 23 * s, {
+      size: 20 * s,
+      color: this.powers.double > 0 ? '#ffc21a' : mult > 1 ? '#ffd23f' : '#aab',
     });
-    text(ctx, `${Math.floor(this.distance)} m`, this.W - 28, 76, { size: 18, align: 'right', color: '#dde' });
+    // Distance and progress to the next milestone.
+    text(ctx, `${Math.floor(this.distance)} m`, right - 6 * s, top + 62 * s, {
+      size: 18 * s,
+      align: 'right',
+      color: '#e6e6f2',
+    });
+    progressBar(
+      ctx,
+      right - 112 * s,
+      top + 77 * s,
+      106 * s,
+      6 * s,
+      (this.distance % MILESTONE_M) / MILESTONE_M,
+      '#ffd23f',
+    );
 
-    let y = 76;
+    let y = top + 54 * s;
     for (const k of Object.keys(this.powers) as PowerKind[]) {
       const t = this.powers[k];
       if (t <= 0) continue;
       const info = POWER_INFO[k];
-      hudPill(ctx, 14, y, 170, 34);
-      this.drawPowerIcon(k, 34, y + 17, 9);
-      progressBar(ctx, 52, y + 12, 118, 10, t / this.powerTime(info.base), info.color);
-      y += 40;
+      hudPill(ctx, left, y, 170 * s, 34 * s);
+      drawPowerIcon(ctx, k, left + 20 * s, y + 17 * s, 9 * s, info.color);
+      progressBar(ctx, left + 38 * s, y + 12 * s, 118 * s, 10 * s, t / this.powerTime(info.base), info.color);
+      y += 40 * s;
     }
     if (this.shield) {
-      hudPill(ctx, 14, y, 120, 34);
-      text(ctx, 'GUARDIAN', 74, y + 17, { size: 14, align: 'center', color: '#7cf' });
+      hudPill(ctx, left, y, 124 * s, 34 * s);
+      text(ctx, 'GUARDIAN', left + 62 * s, y + 17 * s, { size: 15 * s, align: 'center', color: '#7cf' });
     }
-    if (this.stumbleT > 0 && !this.crashed) {
-      text(ctx, 'CAREFUL!', this.W / 2, 120, { size: 26, align: 'center', color: '#ff6b6b' });
+
+    // Announcements live in the sky between the HUD and the horizon, never over the track ahead.
+    const bandTop = top + 92 * s;
+    const bandY = (bandTop + this.cam.hz - 40 * this.framing.unit) / 2;
+    if (this.stumbleT > 0 && !this.crashed)
+      text(ctx, 'CAREFUL!', this.W / 2, bandTop + 6 * s, { size: 26 * s, align: 'center', color: '#ff6b6b' });
+    if (this.bannerT < 1.8 && this.milestone === 0) {
+      this.drawBanner('RUN!', 'Grab coins · dodge trains', this.bannerT / 1.8, bandY, '#ffd23f');
+    } else if (this.milestoneT < 2.8) {
+      const zone = zoneDef(this.milestone);
+      this.drawBanner(
+        `${(this.milestone * MILESTONE_M).toLocaleString('en-US')} m`,
+        `${zone.name} · SPEED UP · x${Math.min(MAX_MULTIPLIER, 1 + this.milestone)}`,
+        this.milestoneT / 2.8,
+        bandY,
+        '#7cf6ff',
+      );
     }
-    if (this.bannerT < 2.2) {
-      banner(ctx, this.W, this.H, 'RUN!', 'Swipe or use arrow keys', this.bannerT / 2.2, '#ffd23f');
+    if (this.hint && !this.crashed) this.drawHint(this.hint, this.hintT);
+  }
+
+  private drawBanner(title: string, sub: string, t: number, y: number, color: string): void {
+    const ctx = this.ctx;
+    const s = this.hs;
+    const a = t < 0.12 ? t / 0.12 : t > 0.78 ? (1 - t) / 0.22 : 1;
+    const pop = this.services.reducedMotion || t >= 0.12 ? 1 : 0.7 + 0.3 * (t / 0.12);
+    ctx.save();
+    ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.translate(this.W / 2, y);
+    ctx.scale(pop, pop);
+    const size = Math.min(54 * s, this.W / 8);
+    text(ctx, title, 0, -size * 0.2, { size, align: 'center', color, strokeWidth: 8 * s, weight: 900 });
+    text(ctx, sub, 0, size * 0.62, { size: Math.min(19 * s, this.W / 26), align: 'center', weight: 800 });
+    ctx.restore();
+  }
+
+  /** Bottom-centre pill with a gesture icon, clear of the runner and of any bottom inset. */
+  private drawHint(id: HintId, t: number): void {
+    const ctx = this.ctx;
+    const s = this.hs;
+    const info = HINTS[id];
+    const label = this.touchUi ? info.touch : info.keys;
+    const a = clamp(Math.min(t / 0.25, (3.2 - t) / 0.3), 0, 1);
+    if (a <= 0) return;
+    let size = 19 * s;
+    ctx.font = `800 ${size}px ${FONT}`;
+    let tw = ctx.measureText(label).width;
+    const maxText = this.W - 24 * s - 76 * s;
+    if (tw > maxText) {
+      size *= maxText / tw;
+      tw = maxText;
     }
+    const h = 46 * s;
+    const w = tw + 76 * s;
+    const y = Math.min(this.framing.feetY + 0.09 * this.H, this.H - this.insets.bottom - h - 10 * s);
+    const x = this.W / 2 - w / 2;
+    ctx.globalAlpha = a;
+    hudPill(ctx, x, y, w, h);
+    const ix = x + 32 * s;
+    const iy = y + h / 2;
+    const nudge = this.services.reducedMotion ? 0 : Math.sin(t * 7) * 3 * s;
+    ctx.strokeStyle = '#ffd23f';
+    ctx.lineWidth = 4 * s;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    if (info.icon === 'lr') {
+      for (let d = -1; d <= 1; d += 2) {
+        const tip = ix + d * (15 * s + Math.abs(nudge));
+        ctx.moveTo(tip - d * 7 * s, iy - 7 * s);
+        ctx.lineTo(tip, iy);
+        ctx.lineTo(tip - d * 7 * s, iy + 7 * s);
+      }
+    } else {
+      const d = info.icon === 'up' ? -1 : 1;
+      const tip = iy + d * (10 * s + Math.abs(nudge));
+      ctx.moveTo(ix - 8 * s, tip - d * 8 * s);
+      ctx.lineTo(ix, tip);
+      ctx.lineTo(ix + 8 * s, tip - d * 8 * s);
+      ctx.moveTo(ix, tip);
+      ctx.lineTo(ix, tip - d * 20 * s);
+    }
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    text(ctx, label, x + 58 * s, iy + 1, { size, color: '#ffffff', stroke: null });
+    ctx.globalAlpha = 1;
   }
 }

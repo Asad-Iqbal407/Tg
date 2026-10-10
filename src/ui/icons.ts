@@ -87,6 +87,15 @@ const ICONS = {
   },
   mute: { fill: false, d: ['M4 9.5h3.5L12 5.5v13l-4.5-4H4v-5Z', 'M16 9.5l5 5M21 9.5l-5 5'] },
   expand: { fill: false, d: ['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5'] },
+  collapse: { fill: false, d: ['M9 4v5H4', 'M15 4v5h5', 'M9 20v-5H4', 'M15 20v-5h5'] },
+  rotate: {
+    fill: false,
+    d: [
+      'M7 3.5h6a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z',
+      'M17 6.5a5 5 0 0 1 3 4.5',
+      'M18.5 11.5 20 11l.5-1.5',
+    ],
+  },
   back: { fill: false, d: ['M15 5l-7 7 7 7'] },
   restart: { fill: false, d: ['M4.5 12a7.5 7.5 0 1 0 2.2-5.3', 'M4 4.5v4h4'] },
   flag: { fill: false, d: ['M5 21V4', 'M5 4h11l-2 4 2 4H5'] },
