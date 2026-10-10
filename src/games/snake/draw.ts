@@ -54,7 +54,8 @@ export function bodyShades(body: string): readonly string[] {
   const cached = fadeCache.get(body);
   if (cached) return cached;
   const shades: string[] = [];
-  for (let k = 0; k < FADE_STEPS; k++) shades.push(mixHex(body, '#000000', (TAIL_DIM * k) / (FADE_STEPS - 1)));
+  for (let k = 0; k < FADE_STEPS; k++)
+    shades.push(mixHex(body, '#000000', (TAIL_DIM * k) / (FADE_STEPS - 1)));
   fadeCache.set(body, shades);
   return shades;
 }

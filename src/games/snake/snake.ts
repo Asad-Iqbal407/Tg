@@ -340,13 +340,19 @@ export class SnakeGame extends BaseGame {
     });
   }
 
-  /** Floating text above a cell, or below it when the cell sits in the upper half so it stays on the board. */
+  /**
+   * Floating text above a cell, or below it when the cell sits in the upper half so it stays on the board. The
+   * label is also kept inside the playfield sideways, so an apple on an edge never pushes it over the frame.
+   */
   private popup(rect: BoardRect, c: Cell, text: string, colour: string, size: number, life?: number): void {
     const at = cellCentre(rect, c);
     const midY = rect.y + (this.grid.rows * rect.cell) / 2;
     const lift = rect.cell * 1.1;
     const y = at.y < midY ? at.y + lift : at.y - lift;
-    this.texts.add(at.x, y, text, colour, size, life);
+    // Roughly half the label's width, from its character count and font size.
+    const half = (text.length * size * 0.6) / 2;
+    const x = Math.min(rect.x + this.grid.cols * rect.cell - half, Math.max(rect.x + half, at.x));
+    this.texts.add(x, y, text, colour, size, life);
   }
 
   /** Every 7th apple is golden. An apple goes on a random open cell, never on the snake or a wall. */
