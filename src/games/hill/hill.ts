@@ -1,26 +1,14 @@
-import { clamp, damp, lerp, TAU, wrapAngle } from '../../core/math';
 import type { EngineSound } from '../../core/audio';
+import { FloatingTexts } from '../../core/fx';
+import { clamp, damp, lerp, TAU, wrapAngle } from '../../core/math';
 import { BaseGame } from '../base';
-import { banner, drawCoin, fillRoundRect, hash1, hudPill, progressBar, shade, text } from '../draw';
+import { drawCoin, fillRoundRect, hudPill, progressBar, text } from '../draw';
 import type { GameServices } from '../types';
-import { PX_PER_M, STEP, Terrain } from './terrain';
-
-interface VPoint {
-  x: number;
-  y: number;
-  px: number;
-  py: number;
-  r: number;
-  invMass: number;
-  grounded: boolean;
-}
-
-interface Stick {
-  a: number;
-  b: number;
-  len: number;
-  k: number;
-}
+import { carStyle, type CarPaint, type CarPose, type CarStyle, drawCar, drawJerrycan } from './art';
+import { BIOME_M, biomeAt, biomeIndexAt, biomeSerial, lapAt, physicsAt } from './biomes';
+import { Scenery, type View } from './scenery';
+import { type Kicker, PX_PER_M, Terrain } from './terrain';
+import { FRONT, HEAD, REAR, Vehicle, type VehicleSpec } from './vehicle';
 
 interface Pickup {
   kind: 'coin' | 'fuel';
@@ -30,466 +18,364 @@ interface Pickup {
   taken: boolean;
 }
 
-interface Biome {
-  name: string;
-  from: number;
-  sky: [string, string];
-  far: string;
-  near: string;
-  ground: [string, string];
-  grass: string;
-  gravity: number;
-  grip: number;
+/** Collected coin flying to the HUD counter (screen space). */
+interface Flyer {
+  x: number;
+  y: number;
+  t: number;
 }
 
-const BIOMES: readonly Biome[] = [
-  {
-    name: 'Countryside',
-    from: 0,
-    sky: ['#5fb6f5', '#cdeeff'],
-    far: '#9cc7a0',
-    near: '#5fa55f',
-    ground: ['#8a5a2b', '#5b3a1e'],
-    grass: '#57c84d',
-    gravity: 1,
-    grip: 1,
-  },
-  {
-    name: 'Desert Dunes',
-    from: 800,
-    sky: ['#f6a356', '#ffe3a8'],
-    far: '#e9b97a',
-    near: '#d39a55',
-    ground: ['#e0b46c', '#b5823e'],
-    grass: '#f2cf7a',
-    gravity: 1,
-    grip: 0.9,
-  },
-  {
-    name: 'Frozen Peaks',
-    from: 1600,
-    sky: ['#7aa7d9', '#e8f3ff'],
-    far: '#c9d9ec',
-    near: '#9fb7d1',
-    ground: ['#a8bfd6', '#6f88a6'],
-    grass: '#f4fbff',
-    gravity: 1,
-    grip: 0.7,
-  },
-  {
-    name: 'Lunar Base',
-    from: 2400,
-    sky: ['#05060f', '#1a1d3a'],
-    far: '#2a2d48',
-    near: '#3c3f5c',
-    ground: ['#8b8d99', '#55576a'],
-    grass: '#c9cbd6',
-    gravity: 0.45,
-    grip: 0.95,
-  },
-];
-
-const SUBSTEPS = 6;
-const ITERATIONS = 6;
-const GRAVITY = 980;
-
-function mixHex(a: string, b: string, t: number): string {
-  const pa = parseInt(a.slice(1), 16);
-  const pb = parseInt(b.slice(1), 16);
-  const ch = (s: number) => Math.round(lerp((pa >> s) & 255, (pb >> s) & 255, t));
-  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+/** Read-only telemetry, for tests and tooling. */
+export interface HillProbe {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  speed: number;
+  angle: number;
+  angularVelocity: number;
+  rearDown: boolean;
+  frontDown: boolean;
+  /** Seconds with no point touching the ground. */
+  airT: number;
+  fuel: number;
+  fuelCap: number;
+  meters: number;
+  crashed: boolean;
+  crashReason: string;
+  kickers: readonly Kicker[];
+  /** Ground angle (radians, positive = downhill) at world x. */
+  groundAngle(x: number): number;
 }
+
+const FUEL_IDLE = 1.2;
+const FUEL_BURN = 2.2;
+/** Out of fuel: the run ends once the car is this slow for SLOW_END s, or stops gaining ground. */
+const SLOW_SPEED = 25;
+const SLOW_END = 1;
+const NO_PROGRESS_END = 3.5;
+/** Tail stand / roof / side: tilted beyond TIP_ANGLE while resting for TIP_END seconds. */
+const TIP_ANGLE = 1.35;
+const TIP_END = 1.6;
+/** A flip needs ~305° of rotation in the air and a landing on both wheels within this angle. */
+const FLIP_SLACK = 0.95;
+const LAND_TOLERANCE = 0.6;
+const BANNER_TIME = 2.6;
+
+const FLIP_NAMES = ['', '', 'DOUBLE ', 'TRIPLE ', 'QUAD '];
 
 export class HillGame extends BaseGame {
   private readonly terrain: Terrain;
-  private pts: VPoint[] = [];
-  private sticks: Stick[] = [];
-  private readonly wheelSpin = [0, 0];
-  private readonly wheelAngle = [0, 0];
+  private readonly car: Vehicle;
+  private readonly scenery: Scenery;
+  private readonly style: CarStyle;
+  private readonly paint: CarPaint;
   private readonly startX = 200;
+  private readonly env = { gravity: 1, grip: 1 };
+  private readonly envTarget = { gravity: 1, grip: 1 };
+  private readonly worldTexts = new FloatingTexts();
   private camX = 0;
   private camY = 0;
+  private zoom = 1;
   private maxX = 0;
+  private progressT = 0;
   private fuel: number;
   private readonly fuelCap: number;
+  /** Fuel can spacing scales with the vehicle's tank (not the boosted one). */
+  private readonly fuelRange: number;
   private pickups: Pickup[] = [];
   private spawnedTo = 0;
-  private nextFuelM = 260;
+  private arcsSpawned = 0;
+  private nextFuelM = 240;
   private fuelCount = 0;
+  private nextFuelX = Infinity;
+  private flyers: Flyer[] = [];
+
   private airTime = 0;
   private airAngle = 0;
   private lastAngle = 0;
-  private upsideT = 0;
-  private stallT = 0;
+  private pendingFlips = 0;
+  private pendingDir = 0;
+  private pendingAir = 0;
+  private landT = 0;
+
+  private tipT = 0;
+  private fuelOutT = 0;
+  private slowT = 0;
   private crashed = false;
   private crashReason = '';
   private shield: boolean;
   private graceT = 0;
+
   private bannerT = 0;
-  private biomeIndex = 0;
+  private bannerTitle = '';
+  private bannerSub = '';
+  private biomeNo = 0;
+  private hintT = 0;
+  private hint = '';
+  private airHintShown = false;
   private nextMilestone = 500;
   private engine: EngineSound | null = null;
+  private destroyed = false;
   private throttle = 0;
   private brake = 0;
 
-  // Vehicle parameters (from the selected vehicle skin)
-  private readonly power: number;
-  private readonly maxSpeed: number;
-  private readonly grip: number;
-  private readonly wheelR: number;
-  private readonly suspension: number;
-  private readonly airControl: number;
-
   constructor(s: GameServices) {
     super(s);
-    this.terrain = new Terrain(this.rng.int(1, 100000));
-    this.power = this.skinParam('power', 1);
-    this.maxSpeed = this.skinParam('maxSpeed', 540);
-    this.grip = this.skinParam('grip', 0.32);
-    this.wheelR = this.skinParam('wheelRadius', 20);
-    this.suspension = this.skinParam('suspension', 0.35);
-    this.airControl = this.skinParam('airControl', 1);
-    this.fuelCap = this.skinParam('fuel', 100) * (this.hasBoost('head-start') ? 1.5 : 1);
+    const spec: VehicleSpec = {
+      power: this.skinParam('power', 1),
+      maxSpeed: this.skinParam('maxSpeed', 540),
+      grip: this.skinParam('grip', 0.32),
+      wheelR: this.skinParam('wheelRadius', 20),
+      suspension: this.skinParam('suspension', 0.35),
+      airControl: this.skinParam('airControl', 1),
+    };
+    this.terrain = new Terrain(this.rng.int(1, 100000), 330, {
+      origin: this.startX,
+      designSpeed: Math.min(620, spec.maxSpeed * 0.95),
+    });
+    this.car = new Vehicle(this.terrain, spec);
+    this.scenery = new Scenery(this.ctx, this.W, this.H, this.startX);
+    this.style = carStyle(s.loadout.skin.id, this.skinParam('style', 0));
+    this.paint = {
+      body: this.skinColor('body', '#e63946'),
+      trim: this.skinColor('trim', '#1d3557'),
+      helmet: this.skinColor('helmet', '#ffd23f'),
+    };
+    const tank = this.skinParam('fuel', 100);
+    this.fuelRange = tank / 100;
+    this.fuelCap = tank * (this.hasBoost('head-start') ? 1.5 : 1);
     this.fuel = this.fuelCap;
     this.shield = this.hasBoost('shield');
-    this.buildVehicle(this.startX, 0);
-    this.maxX = this.startX;
-    const c = this.center();
-    this.camX = c.x - this.W * 0.35;
-    this.camY = c.y - this.H * 0.55;
+    this.car.reset(this.startX, 0);
+    this.maxX = this.car.center().x;
+    this.lastAngle = this.car.angle();
+    this.snapCamera();
     this.spawnPickups(this.startX + 3000);
+    this.showBanner(biomeAt(0).name.toUpperCase(), '');
   }
 
   override destroy(): void {
+    this.destroyed = true;
     this.engine?.stop();
     this.engine = null;
-  }
-
-  // ------------------------------------------------------------------ vehicle
-
-  private buildVehicle(x: number, angle: number): void {
-    const r = this.wheelR;
-    const groundY = Math.min(
-      this.terrain.heightAt(x - 40),
-      this.terrain.heightAt(x),
-      this.terrain.heightAt(x + 40),
-    );
-    const cy = groundY - r - 22;
-    const local: [number, number, number, number][] = [
-      // x, y, radius, invMass
-      [-32, 18, r, 0.8], // 0 rear wheel
-      [34, 18, r, 0.8], // 1 front wheel
-      [-46, 0, 4, 1], // 2 rear bottom
-      [46, 0, 4, 1], // 3 front bottom
-      [36, -24, 4, 1], // 4 front top
-      [-44, -26, 4, 1], // 5 rear top
-      [-6, -50, 11, 1.6], // 6 head
-    ];
-    const ca = Math.cos(angle);
-    const sa = Math.sin(angle);
-    this.pts = local.map(([lx, ly, pr, im]) => {
-      const wx = x + lx * ca - ly * sa;
-      const wy = cy + lx * sa + ly * ca;
-      return { x: wx, y: wy, px: wx, py: wy, r: pr, invMass: im, grounded: false };
-    });
-    const stick = (a: number, b: number, k: number): Stick => {
-      const pa = this.pts[a] as VPoint;
-      const pb = this.pts[b] as VPoint;
-      return { a, b, len: Math.hypot(pa.x - pb.x, pa.y - pb.y), k };
-    };
-    this.sticks = [];
-    const body = [2, 3, 4, 5, 6];
-    for (let i = 0; i < body.length; i++)
-      for (let j = i + 1; j < body.length; j++) this.sticks.push(stick(body[i]!, body[j]!, 1));
-    const s = this.suspension;
-    this.sticks.push(stick(0, 2, s), stick(0, 5, s), stick(0, 3, s * 0.6));
-    this.sticks.push(stick(1, 3, s), stick(1, 4, s), stick(1, 2, s * 0.6));
-    this.wheelSpin[0] = this.wheelSpin[1] = 0;
-  }
-
-  private center(): { x: number; y: number } {
-    const p2 = this.pts[2] as VPoint;
-    const p4 = this.pts[4] as VPoint;
-    return { x: (p2.x + p4.x) / 2, y: (p2.y + p4.y) / 2 };
-  }
-
-  private angle(): number {
-    const a = this.pts[2] as VPoint;
-    const b = this.pts[3] as VPoint;
-    return Math.atan2(b.y - a.y, b.x - a.x);
-  }
-
-  private velocity(): { x: number; y: number } {
-    const p = this.pts[2] as VPoint;
-    const q = this.pts[3] as VPoint;
-    const dt = 1 / 60 / SUBSTEPS;
-    return { x: (p.x - p.px + q.x - q.px) / 2 / dt, y: (p.y - p.py + q.y - q.py) / 2 / dt };
-  }
-
-  private biomeAt(m: number): number {
-    let idx = 0;
-    for (let i = 0; i < BIOMES.length; i++) if (m >= (BIOMES[i] as Biome).from) idx = i;
-    return idx;
   }
 
   private get meters(): number {
     return Math.max(0, (this.maxX - this.startX) / PX_PER_M);
   }
 
+  private metersAt(x: number): number {
+    return (x - this.startX) / PX_PER_M;
+  }
+
+  /** Touch UI: on-screen pedals are showing, or the player last used touch. */
+  private get touchUi(): boolean {
+    return this.insets.bottom > 0 || this.input.pointer.touch;
+  }
+
+  probe(): HillProbe {
+    const c = this.car.center();
+    return {
+      x: c.x,
+      y: c.y,
+      vx: this.car.velocityX(),
+      vy: this.car.velocityY(),
+      speed: this.car.speed(),
+      angle: this.car.angle(),
+      angularVelocity: this.car.angularVelocity(),
+      rearDown: this.car.wheelDown(REAR),
+      frontDown: this.car.wheelDown(FRONT),
+      airT: this.car.airT,
+      fuel: this.fuel,
+      fuelCap: this.fuelCap,
+      meters: this.meters,
+      crashed: this.crashed,
+      crashReason: this.crashReason,
+      kickers: this.terrain.kickers,
+      groundAngle: (x: number) => Math.atan(this.terrain.slopeAt(x)),
+    };
+  }
+
   // ------------------------------------------------------------------ simulation
 
   protected tick(dt: number): void {
     this.bannerT += dt;
+    this.hintT = Math.max(0, this.hintT - dt);
     this.graceT = Math.max(0, this.graceT - dt);
-    if (!this.engine && !this.crashed) this.engine = this.audio.engine();
+    this.worldTexts.update(dt);
+    if (!this.engine && !this.crashed && !this.destroyed && !this.services.preview)
+      this.engine = this.audio.engine();
 
-    const gas =
-      !this.crashed &&
-      (this.input.isDown('right') || this.input.isDown('up') || this.input.isDown('primary'));
+    const live = !this.crashed;
+    const gas = live && (this.input.isDown('right') || this.input.isDown('up') || this.input.isDown('primary'));
     const brk =
-      !this.crashed &&
-      (this.input.isDown('left') || this.input.isDown('down') || this.input.isDown('secondary'));
+      live && (this.input.isDown('left') || this.input.isDown('down') || this.input.isDown('secondary'));
     const hasFuel = this.fuel > 0;
     this.throttle = gas && hasFuel ? 1 : 0;
-    this.brake = brk && hasFuel ? 1 : 0;
+    // Braking needs no fuel (only reversing does).
+    this.brake = brk ? 1 : 0;
 
-    const m = this.meters;
-    const bi = this.biomeAt(m);
-    if (bi !== this.biomeIndex) {
-      this.biomeIndex = bi;
-      this.bannerT = 0;
-      this.audio.play('levelup');
+    // Biome physics follow the car's position and only change while it is on the ground.
+    const c0 = this.car.center();
+    physicsAt(this.metersAt(c0.x), this.envTarget);
+    if (this.car.airT === 0) {
+      const k = damp(5, dt);
+      this.env.gravity += (this.envTarget.gravity - this.env.gravity) * k;
+      this.env.grip += (this.envTarget.grip - this.env.grip) * k;
     }
-    const biome = BIOMES[bi] as Biome;
+    this.car.step(dt, { throttle: this.throttle, brake: this.brake, canReverse: hasFuel }, this.env);
 
-    const sdt = dt / SUBSTEPS;
-    for (let i = 0; i < SUBSTEPS; i++) this.substep(sdt, biome);
-
-    // Fuel
-    if (!this.crashed) {
-      this.fuel = Math.max(0, this.fuel - dt * (1.2 + 2.2 * this.throttle));
-      if (this.fuel <= 0 && Math.abs(this.velocity().x) < 12) {
-        this.stallT += dt;
-        if (this.stallT > 1.6) this.crash('Out of fuel!');
-      } else this.stallT = 0;
-    }
-
-    const c = this.center();
+    const c = this.car.center();
     const prevMax = this.maxX;
-    this.maxX = Math.max(this.maxX, c.x);
+    if (c.x > this.maxX + 1) {
+      this.maxX = c.x;
+      this.progressT = 0;
+    } else this.progressT += dt;
     this.score += ((this.maxX - prevMax) / PX_PER_M) * 10;
     this.maxStat('distance', this.meters);
-    if (this.meters >= this.nextMilestone) {
-      const bonus = Math.floor(this.nextMilestone / 100);
-      this.coins += bonus;
-      this.score += this.nextMilestone;
-      this.texts.add(this.W / 2, 150, `${this.nextMilestone} m! +${bonus} coins`, '#ffd23f', 28);
-      this.audio.play('reward');
-      this.nextMilestone += 500;
-    }
+    this.checkProgress();
 
+    if (!this.crashed) {
+      const reversing = this.brake > 0 && hasFuel && this.car.velocityX() < 5 ? 1 : 0;
+      this.fuel = Math.max(0, this.fuel - dt * (FUEL_IDLE + FUEL_BURN * Math.max(this.throttle, reversing)));
+    }
+    this.checkFuel(dt);
     this.trackAir(dt);
     this.checkCrash(dt);
     this.collectPickups();
     this.spawnPickups(this.maxX + 2500);
-    this.pickups = this.pickups.filter((p) => !p.taken && p.x > this.camX - 400);
+    this.prunePickups(c.x - 1500);
+    this.updateFlyers(dt);
+    this.updateCamera(dt);
+    this.effects(dt);
+  }
 
-    // Camera with look-ahead
-    const v = this.velocity();
-    const tx = c.x - this.W * 0.35 + clamp(v.x * 0.25, -120, 160);
-    const ty = c.y - this.H * 0.55;
-    this.camX += (tx - this.camX) * damp(4, dt);
-    this.camY += (ty - this.camY) * damp(3, dt);
-
-    // Effects and audio
-    const speed = Math.hypot(v.x, v.y);
-    const rpm = clamp((Math.abs(this.wheelSpin[0] ?? 0) * this.wheelR) / this.maxSpeed, 0, 1);
-    this.engine?.set(rpm, this.throttle);
-    for (let w = 0; w < 2; w++) {
-      const p = this.pts[w] as VPoint;
-      if (p.grounded && this.throttle > 0 && this.time % 0.06 < dt) {
-        this.particles.emit({
-          x: p.x - this.camX,
-          y: p.y + p.r * 0.7 - this.camY,
-          count: 2,
-          speed: 80 + speed * 0.2,
-          angle: Math.PI + 0.4,
-          spread: 0.8,
-          life: 0.5,
-          size: 5,
-          colors: [shade(biome.ground[0], 0.2), biome.ground[0]],
-          gravity: 200,
-        });
-      }
+  private checkProgress(): void {
+    const serial = biomeSerial(this.meters);
+    if (serial !== this.biomeNo) {
+      this.biomeNo = serial;
+      const b = biomeAt(this.meters);
+      const lap = lapAt(this.meters);
+      this.showBanner(
+        lap > 1 ? `${b.name.toUpperCase()} ${'I'.repeat(Math.min(lap, 3))}` : b.name.toUpperCase(),
+        lap > 1 && biomeIndexAt(this.meters) === 0 ? `Lap ${lap}: tougher hills` : b.hint,
+      );
+      this.audio.play('levelup');
+    }
+    if (this.meters >= this.nextMilestone) {
+      const bonus = Math.floor(this.nextMilestone / 100);
+      this.coins += bonus;
+      this.score += this.nextMilestone;
+      this.texts.add(this.W / 2, this.H * 0.36, `${this.nextMilestone} m! +${bonus} coins`, '#ffd23f', 28, 1.4);
+      this.audio.play('reward');
+      this.nextMilestone += 500;
+    }
+    // One-time air control tip as the first jump comes up.
+    const k = this.terrain.kickers[0];
+    if (!this.airHintShown && k && this.maxX > k.start - 300) {
+      this.airHintShown = true;
+      this.hint = this.touchUi ? 'In the air: GAS tilts back, BRAKE tilts forward' : 'In the air: → tilts back, ← tilts forward';
+      this.hintT = 4;
     }
   }
 
-  private substep(dt: number, biome: Biome): void {
-    const g = GRAVITY * biome.gravity;
-    const pts = this.pts;
-    // Integrate
-    for (const p of pts) {
-      const vx = (p.x - p.px) * 0.9995;
-      const vy = (p.y - p.py) * 0.9995;
-      p.px = p.x;
-      p.py = p.y;
-      p.x += vx;
-      p.y += vy + g * dt * dt;
-    }
-
-    // Engine & wheel spin
-    const maxW = this.maxSpeed / this.wheelR;
-    for (let w = 0; w < 2; w++) {
-      let spin = this.wheelSpin[w] as number;
-      if (this.throttle > 0) spin = Math.min(maxW, spin + maxW * 0.9 * this.power * dt);
-      else if (this.brake > 0) {
-        spin = spin > 0 ? Math.max(0, spin - maxW * 3 * dt) : Math.max(-maxW * 0.45, spin - maxW * 0.8 * dt);
-      } else spin *= 1 - 0.4 * dt;
-      this.wheelSpin[w] = spin;
-    }
-
-    // Engine reaction torque and mid-air control
-    const airborne = !(pts[0] as VPoint).grounded && !(pts[1] as VPoint).grounded;
-    const torque = airborne
-      ? (this.brake - this.throttle) * 9 * this.airControl
-      : (this.brake * 0.6 - this.throttle) * 2.4 * this.power;
-    if (torque !== 0 && !this.crashed) {
-      const c = this.center();
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i] as VPoint;
-        const dx = p.x - c.x;
-        const dy = p.y - c.y;
-        // Positive torque rotates clockwise on screen.
-        p.x += -dy * torque * dt * dt;
-        p.y += dx * torque * dt * dt;
-      }
-    }
-
-    // Constraints
-    for (let it = 0; it < ITERATIONS; it++) {
-      for (const s of this.sticks) {
-        const a = pts[s.a] as VPoint;
-        const b = pts[s.b] as VPoint;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const d = Math.hypot(dx, dy) || 0.0001;
-        const diff = ((d - s.len) / d) * s.k;
-        const wsum = a.invMass + b.invMass;
-        const ka = (a.invMass / wsum) * diff;
-        const kb = (b.invMass / wsum) * diff;
-        a.x += dx * ka;
-        a.y += dy * ka;
-        b.x -= dx * kb;
-        b.y -= dy * kb;
-      }
-      this.collideGround(dt, biome, false);
-    }
-    this.collideGround(dt, biome, true);
-    for (let w = 0; w < 2; w++)
-      this.wheelAngle[w] = (this.wheelAngle[w] as number) + (this.wheelSpin[w] as number) * dt;
+  private showBanner(title: string, sub: string): void {
+    this.bannerTitle = title;
+    this.bannerSub = sub;
+    this.bannerT = 0;
   }
 
-  /**
-   * Position-only pushes during constraint iterations; the final pass (`contact`) also decides
-   * which points touch the ground (with a small tolerance) and applies drive/friction to them.
-   */
-  private collideGround(dt: number, biome: Biome, contact: boolean): void {
-    for (let i = 0; i < this.pts.length; i++) {
-      const p = this.pts[i] as VPoint;
-      if (contact) p.grounded = false;
-      const hit = this.terrain.closest(p.x, p.y, p.r + 2);
-      let nx = hit.nx;
-      let ny = hit.ny;
-      let pen = p.r - hit.d;
-      const surface = this.terrain.heightAt(p.x);
-      if (p.y > surface) {
-        // Centre is underground: push straight out along the surface normal.
-        const sl = this.terrain.slopeAt(p.x);
-        const len = Math.hypot(sl, 1);
-        nx = sl / len;
-        ny = -1 / len;
-        pen = p.r + (p.y - surface) / len;
-      } else if (hit.d > 0.0001) {
-        nx = (p.x - hit.px) / hit.d;
-        ny = (p.y - hit.py) / hit.d;
-      }
-      if (pen <= (contact ? -1.5 : 0)) continue;
-      if (pen > 0) {
-        p.x += nx * pen;
-        p.y += ny * pen;
-      }
-      if (!contact) continue;
-      p.grounded = true;
-      if (i === 6) continue; // head contact is handled as a crash
-      const vx = p.x - p.px;
-      const vy = p.y - p.py;
-      const tx = -ny;
-      const ty = nx;
-      let vn = vx * nx + vy * ny;
-      let vt = vx * tx + vy * ty;
-      if (vn < 0) vn = -vn * 0.12;
-      if (i <= 1) {
-        const spin = this.wheelSpin[i] as number;
-        const surfaceV = spin * p.r * dt;
-        const grip = this.grip * biome.grip;
-        const nvt = vt + (surfaceV - vt) * grip;
-        this.wheelSpin[i] = spin + (nvt / (p.r * dt) - spin) * 0.5;
-        vt = nvt;
-      } else {
-        vt *= 0.92;
-      }
-      p.px = p.x - (nx * vn + tx * vt);
-      p.py = p.y - (ny * vn + ty * vt);
+  /** Out of fuel: end quickly once the car stops making headway. */
+  private checkFuel(dt: number): void {
+    if (this.crashed || this.fuel > 0) {
+      this.fuelOutT = this.slowT = 0;
+      return;
     }
+    if (this.fuelOutT === 0) this.audio.play('empty');
+    this.fuelOutT += dt;
+    this.slowT = this.car.speed() < SLOW_SPEED ? this.slowT + dt : 0;
+    if (this.fuelOutT > 0.5 && (this.slowT > SLOW_END || this.progressT > NO_PROGRESS_END))
+      this.crash('Out of fuel!');
+  }
+
+  /** 0..1 progress towards the out-of-fuel ending (for the HUD ring). */
+  private get fuelEndProgress(): number {
+    if (this.fuel > 0) return 0;
+    return clamp(Math.max(this.slowT / SLOW_END, this.progressT / NO_PROGRESS_END), 0, 1);
   }
 
   private trackAir(dt: number): void {
-    const a = this.angle();
+    const a = this.car.angle();
     const delta = wrapAngle(a - this.lastAngle);
     this.lastAngle = a;
-    const airborne = this.pts.every((p) => !p.grounded);
-    if (airborne && !this.crashed) {
+    if (this.crashed) {
+      this.pendingFlips = 0;
+      this.airTime = 0;
+      return;
+    }
+    if (this.car.airT > 0) {
       this.airTime += dt;
       this.airAngle += delta;
-      if (Math.abs(this.airAngle) > TAU * 0.92) {
-        this.airAngle -= Math.sign(this.airAngle) * TAU;
-        this.addStat('flips');
-        this.score += 250;
-        this.coins += 2;
-        this.audio.play('flip');
-        this.texts.add(
-          this.W / 2,
-          200,
-          Math.sign(delta) < 0 ? 'BACKFLIP! +250' : 'FRONTFLIP! +250',
-          '#ff9cf0',
-          30,
-        );
-      }
-    } else {
-      if (this.airTime > 1.2 && !this.crashed) {
-        const bonus = Math.floor(this.airTime * 100);
-        this.score += bonus;
-        this.maxStat('airtime', this.airTime);
-        this.texts.add(this.W / 2, 240, `AIR TIME ${this.airTime.toFixed(1)}s +${bonus}`, '#4dd9ff', 24);
+    } else if (this.airTime > 0) {
+      // Touchdown: the stunt counts once the car settles on both wheels, the right way up.
+      if (this.airTime > 0.3) {
+        this.pendingFlips = Math.floor((Math.abs(this.airAngle) + FLIP_SLACK) / TAU);
+        this.pendingDir = Math.sign(this.airAngle);
+        this.pendingAir = this.airTime;
+        this.landT = 0.6;
       }
       this.airTime = 0;
       this.airAngle = 0;
     }
+    if (this.landT <= 0) return;
+    this.landT -= dt;
+    const c = this.car.center();
+    const clean =
+      this.car.wheelDown(REAR) &&
+      this.car.wheelDown(FRONT) &&
+      Math.abs(wrapAngle(a - Math.atan(this.terrain.slopeAt(c.x)))) < LAND_TOLERANCE;
+    if (clean) {
+      this.landT = 0;
+      this.awardLanding();
+    } else if (this.landT <= 0) this.pendingFlips = 0;
+  }
+
+  private awardLanding(): void {
+    const n = this.pendingFlips;
+    const y = this.H * 0.42;
+    if (n > 0) {
+      const pts = (250 * n * (n + 1)) / 2;
+      this.addStat('flips', n);
+      this.score += pts;
+      this.coins += 2 * n;
+      this.audio.play('flip', { pitch: 1 + 0.12 * (n - 1) });
+      this.services.haptic(30);
+      const name = `${FLIP_NAMES[Math.min(n, 4)]}${this.pendingDir < 0 ? 'BACKFLIP' : 'FRONTFLIP'}`;
+      this.texts.add(this.W / 2, y, `${name}! +${pts}`, '#ff9cf0', 30, 1.3);
+    }
+    const air = this.pendingAir;
+    if (air > 1) {
+      const bonus = Math.floor(air * 100);
+      this.score += bonus;
+      this.texts.add(this.W / 2, y + 38, `AIR TIME ${air.toFixed(1)}s +${bonus}`, '#4dd9ff', 24, 1.2);
+    }
+    this.maxStat('airtime', air);
+    this.pendingFlips = 0;
   }
 
   private checkCrash(dt: number): void {
     if (this.crashed || this.graceT > 0) return;
-    const head = this.pts[6] as VPoint;
-    if (head.grounded) {
+    if (this.car.headDown()) {
       this.crash('Driver down!');
       return;
     }
-    const a = Math.abs(wrapAngle(this.angle()));
-    const wheelsDown = (this.pts[0] as VPoint).grounded || (this.pts[1] as VPoint).grounded;
-    if (a > 2.2 && !wheelsDown) {
-      this.upsideT += dt;
-      if (this.upsideT > 1.2) this.crash('Flipped over!');
-    } else this.upsideT = 0;
+    const a = Math.abs(wrapAngle(this.car.angle()));
+    // Standing on the tail, lying on the roof or on the side: nothing recovers that.
+    const resting = this.car.bodyDown() || this.car.speed() < 30;
+    if (a > TIP_ANGLE && resting) this.tipT += dt;
+    else this.tipT = Math.max(0, this.tipT - dt * 2);
+    if (this.tipT > TIP_END || (a > 1.2 && this.progressT > 5)) this.crash('Flipped over!');
   }
 
   private crash(reason: string): void {
@@ -497,8 +383,13 @@ export class HillGame extends BaseGame {
       this.shield = false;
       this.graceT = 1.5;
       this.audio.play('pop');
-      this.texts.add(this.W / 2, 220, 'GUARDIAN SAVE!', '#7cf', 30);
-      this.buildVehicle(this.center().x, 0);
+      this.texts.add(this.W / 2, this.H * 0.36, 'GUARDIAN SAVE!', '#7cf', 30, 1.2);
+      const x = this.car.center().x;
+      this.car.reset(x, Math.atan(this.terrain.slopeAt(x)));
+      this.lastAngle = this.car.angle();
+      this.tipT = this.airTime = this.airAngle = this.landT = 0;
+      this.pendingFlips = 0;
+      this.progressT = 0;
       return;
     }
     this.crashed = true;
@@ -506,13 +397,17 @@ export class HillGame extends BaseGame {
     this.throttle = this.brake = 0;
     this.engine?.stop();
     this.engine = null;
+    if (reason === 'Out of fuel!') {
+      this.endGame(1.6);
+      return;
+    }
     this.shake.add(0.6);
-    if (reason !== 'Out of fuel!') {
-      this.audio.play('hit');
-      const h = this.pts[6] as VPoint;
+    this.audio.play('hit');
+    const h = this.car.pts[HEAD];
+    if (h)
       this.particles.emit({
-        x: h.x - this.camX,
-        y: h.y - this.camY,
+        x: h.x,
+        y: h.y,
         count: 26,
         speed: 240,
         life: 0.8,
@@ -520,57 +415,183 @@ export class HillGame extends BaseGame {
         colors: ['#fff', '#ffd23f', '#ff6b6b'],
         gravity: 500,
       });
-    }
     this.endGame(1.8);
   }
 
+  // ------------------------------------------------------------------ pickups
+
   private spawnPickups(toX: number): void {
+    this.terrain.ensureTo(toX + 1500);
+    const kickers = this.terrain.kickers;
+    while (this.arcsSpawned < kickers.length && (kickers[this.arcsSpawned] as Kicker).lip < toX) {
+      this.spawnArc(kickers[this.arcsSpawned] as Kicker);
+      this.arcsSpawned++;
+    }
     while (this.spawnedTo < toX) {
-      const x = Math.max(this.startX + 400, this.spawnedTo) + this.rng.range(350, 750);
-      this.spawnedTo = x;
-      const m = (x - this.startX) / PX_PER_M;
+      let x = Math.max(this.startX + 400, this.spawnedTo) + this.rng.range(450, 900);
+      const k = this.terrain.kickerAt(x);
+      if (k) x = k.end + 60;
+      const m = this.metersAt(x);
       if (m >= this.nextFuelM) {
-        this.pickups.push({ kind: 'fuel', value: 0, x, y: this.terrain.heightAt(x) - 26, taken: false });
-        this.nextFuelM += Math.min(560, 280 + this.fuelCount * 30) + this.rng.range(-30, 30);
+        this.pickups.push({ kind: 'fuel', value: 0, x, y: this.terrain.heightAt(x) - 30, taken: false });
+        this.nextFuelX = Math.min(this.nextFuelX, x);
+        this.nextFuelM = m + this.fuelGap() + this.rng.range(-25, 25);
         this.fuelCount++;
+        this.spawnedTo = x + 60;
         continue;
       }
-      const n = this.rng.int(4, 8);
+      const n = this.rng.int(4, 7);
       const roll = this.rng.next();
-      const value = roll < 0.06 ? 5 : roll < 0.25 ? 2 : 1;
-      for (let i = 0; i < n; i++) {
-        const cx = x + i * 34;
+      const value = roll < 0.05 ? 5 : roll < 0.2 ? 2 : 1;
+      let cx = x;
+      for (let i = 0; i < n; i++, cx += 34) {
+        if (this.terrain.kickerAt(cx)) break;
         this.pickups.push({ kind: 'coin', value, x: cx, y: this.terrain.heightAt(cx) - 34, taken: false });
       }
-      this.spawnedTo = x + n * 34;
+      this.spawnedTo = cx;
     }
+  }
+
+  /** Spacing (m) to the next fuel can: grows with each can, scaled by the tank size. */
+  private fuelGap(): number {
+    return Math.min(430, 250 + 20 * this.fuelCount) * this.fuelRange;
+  }
+
+  /** Bonus coins along the flight path of a well-taken jump. */
+  private spawnArc(k: Kicker): void {
+    const lipY = this.terrain.heightAt(k.lip);
+    const g = 980 * biomeAt(this.metersAt(k.lip)).gravity;
+    const v = this.car.spec.maxSpeed * 0.82;
+    const vx = v * Math.cos(k.lipAngle);
+    const vy = -v * Math.sin(k.lipAngle);
+    for (let i = 1; i <= 5; i++) {
+      const t = 0.12 + i * 0.11;
+      const x = k.lip + vx * t;
+      const y = lipY - 34 + vy * t + 0.5 * g * t * t;
+      if (y > this.terrain.heightAt(x) - 40) break;
+      this.pickups.push({ kind: 'coin', value: 2, x, y, taken: false });
+    }
+  }
+
+  private prunePickups(minX: number): void {
+    let j = 0;
+    for (const p of this.pickups) if (!p.taken && p.x > minX) this.pickups[j++] = p;
+    this.pickups.length = j;
   }
 
   private collectPickups(): void {
     if (this.crashed) return;
+    let nextFuel = Infinity;
     for (const pk of this.pickups) {
       if (pk.taken) continue;
       let hit = false;
-      for (const p of this.pts) {
-        if (Math.hypot(p.x - pk.x, p.y - pk.y) < p.r + 18) {
+      for (const p of this.car.pts) {
+        const dx = p.x - pk.x;
+        const dy = p.y - pk.y;
+        const r = p.r + 18;
+        if (dx * dx + dy * dy < r * r) {
           hit = true;
           break;
         }
       }
-      if (!hit) continue;
+      if (!hit) {
+        if (pk.kind === 'fuel') nextFuel = Math.min(nextFuel, pk.x);
+        continue;
+      }
       pk.taken = true;
       if (pk.kind === 'fuel') {
         this.fuel = this.fuelCap;
         this.addStat('fuelCans');
         this.audio.play('fuel');
-        this.texts.add(pk.x - this.camX, pk.y - this.camY - 20, 'FUEL!', '#ff6b6b', 24);
+        this.worldTexts.add(pk.x, pk.y - 24, 'FUEL!', '#ff6b6b', 26);
       } else {
         this.coins += pk.value;
         this.score += pk.value * 10;
-        this.audio.play('coin', { volume: 0.6, pitch: pk.value > 1 ? 0.8 : 1 });
-        if (pk.value > 1)
-          this.texts.add(pk.x - this.camX, pk.y - this.camY - 16, `+${pk.value}`, '#ffd23f', 20);
+        this.audio.play('coin', { volume: 0.6, pitch: pk.value > 1 ? 0.8 : 1 + 0.02 * (this.flyers.length % 6) });
+        if (pk.value > 1) this.worldTexts.add(pk.x, pk.y - 18, `+${pk.value}`, '#ffd23f', 20);
+        if (this.flyers.length < 12)
+          this.flyers.push({ x: (pk.x - this.camX) * this.zoom, y: (pk.y - this.camY) * this.zoom, t: 0 });
       }
+    }
+    this.nextFuelX = nextFuel;
+  }
+
+  private updateFlyers(dt: number): void {
+    let j = 0;
+    for (const f of this.flyers) {
+      f.t += dt / 0.45;
+      if (f.t < 1) this.flyers[j++] = f;
+    }
+    this.flyers.length = j;
+  }
+
+  // ------------------------------------------------------------------ camera & effects
+
+  private hudTop(): number {
+    return this.insets.top + (this.touchUi ? 92 : 80);
+  }
+
+  private snapCamera(): void {
+    this.updateCamera(0);
+  }
+
+  /** Look ahead in the direction of travel and towards the hills ahead; zoom out with speed. */
+  private updateCamera(dt: number): void {
+    const c = this.car.center();
+    const vx = this.car.velocityX();
+    const speed = this.car.speed();
+    const t = this.terrain;
+    let dh = 0;
+    for (let d = 150; d <= 600; d += 150) dh = Math.max(dh, Math.abs(t.heightAt(c.x + d) - c.y));
+    const zTarget =
+      lerp(1, 0.8, clamp(speed / this.car.spec.maxSpeed, 0, 1)) * (dh > 0.45 * this.H ? 0.9 : 1);
+    this.zoom = dt > 0 ? this.zoom + (zTarget - this.zoom) * damp(2, dt) : zTarget;
+    const z = this.zoom;
+
+    const look = clamp(vx * 0.3, -0.1 * this.W, 0.2 * this.W);
+    const carSx = Math.min(0.38 * this.W, 360) - look;
+    const tx = c.x - Math.max(0.16 * this.W, carSx) / z;
+
+    const top = this.hudTop();
+    const bottom = this.H - this.insets.bottom;
+    const area = Math.max(1, bottom - top);
+    const ahead = t.heightAt(c.x + 200 + Math.max(0, vx) * 0.6) - 40;
+    const focus = lerp(c.y, ahead, 0.4);
+    const ty = focus - (top + area * 0.55) / z;
+    if (dt > 0) {
+      this.camX += (tx - this.camX) * damp(4, dt);
+      this.camY += (ty - this.camY) * damp(3, dt);
+    } else {
+      this.camX = tx;
+      this.camY = ty;
+    }
+    // Keep the car between 30% and 75% of the visible play area.
+    const minY = c.y - (top + area * 0.75) / z;
+    const maxY = c.y - (top + area * 0.3) / z;
+    this.camY = clamp(this.camY, minY, maxY);
+  }
+
+  private effects(dt: number): void {
+    const speed = this.car.speed();
+    const rpm = clamp((Math.abs(this.car.wheelSpin[0] ?? 0) * this.car.spec.wheelR) / this.car.spec.maxSpeed, 0, 1);
+    this.engine?.set(rpm, this.throttle);
+    if (this.crashed || this.time % 0.06 >= dt) return;
+    const biome = biomeAt(this.metersAt(this.car.center().x));
+    for (let w = 0; w < 2; w++) {
+      const p = this.car.pts[w];
+      if (!p || !p.grounded || (this.throttle === 0 && speed < 200)) continue;
+      this.particles.emit({
+        x: p.x - 6,
+        y: p.y + p.r * 0.8,
+        count: 2,
+        speed: 60 + speed * 0.15,
+        angle: Math.PI + 0.5,
+        spread: 0.8,
+        life: 0.5,
+        size: 5,
+        colors: [biome.ground[0], biome.grass],
+        gravity: 260,
+      });
     }
   }
 
@@ -578,385 +599,273 @@ export class HillGame extends BaseGame {
 
   render(): void {
     const ctx = this.ctx;
-    const m = (this.camX + this.W / 2 - this.startX) / PX_PER_M;
-    const bi = this.biomeAt(Math.max(0, m));
-    const biome = BIOMES[bi] as Biome;
-    const next = BIOMES[bi + 1];
-    const blend = next ? clamp((m - (next.from - 60)) / 60, 0, 1) : 0;
+    const z = this.zoom;
+    const view: View = { x: this.camX, y: this.camY, zoom: z };
+    const midM = this.metersAt(this.camX + this.W / 2 / z);
+    const serial = Math.floor(Math.max(0, midM) / BIOME_M);
+    const a = biomeIndexAt(serial * BIOME_M);
+    const b = biomeIndexAt((serial + 1) * BIOME_M);
+    const blend = clamp((midM - ((serial + 1) * BIOME_M - 60)) / 60, 0, 1);
+
     ctx.save();
     ctx.translate(this.shake.x, this.shake.y);
-    this.drawSky(biome, next ?? biome, blend);
-    this.drawParallax(biome, next ?? biome, blend);
-    this.drawTerrain();
-    this.drawPickups();
+    this.scenery.drawSky(a, b, blend);
+    this.scenery.drawParallax(a, b, blend, view);
+
+    const x0 = this.camX - 40;
+    const x1 = this.camX + this.W / z + 40;
+    ctx.save();
+    ctx.scale(z, z);
+    ctx.translate(-this.camX, -this.camY);
+    this.scenery.drawTerrain(this.terrain, view, x0, x1);
+    this.scenery.drawKickers(this.terrain, x0, x1);
+    this.scenery.drawSigns(this.terrain, x0, x1);
+    this.drawPickups(x0, x1);
     this.drawVehicle();
     this.particles.render(ctx);
-    this.texts.render(ctx);
+    this.worldTexts.render(ctx);
     ctx.restore();
-    this.drawHud(biome);
+    if (!this.services.preview) this.texts.render(ctx);
+    ctx.restore();
+    if (!this.services.preview) this.drawHud();
   }
 
-  private drawSky(a: Biome, b: Biome, t: number): void {
-    const ctx = this.ctx;
-    const g = ctx.createLinearGradient(0, 0, 0, this.H);
-    g.addColorStop(0, mixHex(a.sky[0], b.sky[0], t));
-    g.addColorStop(1, mixHex(a.sky[1], b.sky[1], t));
-    ctx.fillStyle = g;
-    ctx.fillRect(-20, -20, this.W + 40, this.H + 40);
-    if (a.gravity < 1 || t > 0.5) {
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < 80; i++) {
-        ctx.globalAlpha = (a.gravity < 1 ? 1 : t) * (0.4 + 0.6 * hash1(i + 3));
-        ctx.fillRect(hash1(i) * this.W, hash1(i + 50) * this.H * 0.6, 2, 2);
-      }
-      ctx.globalAlpha = 1;
-    }
-    if (a.gravity < 1) {
-      ctx.fillStyle = '#3b82f6';
-      ctx.beginPath();
-      ctx.arc(780, 110, 46, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#22c55e';
-      ctx.beginPath();
-      ctx.arc(770, 100, 18, 0, TAU);
-      ctx.arc(796, 124, 12, 0, TAU);
-      ctx.fill();
-    } else {
-      const sg = ctx.createRadialGradient(780, 100, 10, 780, 100, 120);
-      sg.addColorStop(0, 'rgba(255,250,220,1)');
-      sg.addColorStop(0.25, 'rgba(255,240,180,0.7)');
-      sg.addColorStop(1, 'rgba(255,240,180,0)');
-      ctx.fillStyle = sg;
-      ctx.fillRect(640, 0, 300, 260);
-    }
-  }
-
-  private drawParallax(a: Biome, b: Biome, t: number): void {
-    const ctx = this.ctx;
-    const layers = [
-      { par: 0.15, color: mixHex(a.far, b.far, t), base: 320, amp: 120, wl: 260, salt: 1 },
-      { par: 0.35, color: mixHex(a.near, b.near, t), base: 380, amp: 90, wl: 180, salt: 2 },
-    ];
-    for (const l of layers) {
-      ctx.fillStyle = l.color;
-      ctx.beginPath();
-      ctx.moveTo(-10, this.H + 10);
-      const off = this.camX * l.par;
-      const yOff = -this.camY * l.par * 0.3;
-      for (let sx = -10; sx <= this.W + 20; sx += 20) {
-        const wx = (sx + off) / l.wl;
-        const i = Math.floor(wx);
-        const f = wx - i;
-        const h0 = hash1(i * 3.3 + l.salt);
-        const h1 = hash1((i + 1) * 3.3 + l.salt);
-        const h = h0 + (h1 - h0) * (f * f * (3 - 2 * f));
-        ctx.lineTo(sx, l.base - h * l.amp + yOff);
-      }
-      ctx.lineTo(this.W + 20, this.H + 10);
-      ctx.fill();
-    }
-  }
-
-  private drawTerrain(): void {
-    const ctx = this.ctx;
-    const x0 = Math.floor((this.camX - 20) / STEP) * STEP;
-    const x1 = this.camX + this.W + 20;
-    // Group runs of samples by biome so boundaries render cleanly.
-    let runStart = x0;
-    let runBiome = this.biomeAt(Math.max(0, (x0 - this.startX) / PX_PER_M));
-    const flush = (from: number, to: number, bi: number) => {
-      const b = BIOMES[bi] as Biome;
-      const g = ctx.createLinearGradient(0, 300 - this.camY, 0, this.H + 200);
-      g.addColorStop(0, b.ground[0]);
-      g.addColorStop(1, b.ground[1]);
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.moveTo(from - this.camX, this.H + 40);
-      for (let x = from; x <= to; x += STEP) ctx.lineTo(x - this.camX, this.terrain.heightAt(x) - this.camY);
-      ctx.lineTo(to - this.camX, this.H + 40);
-      ctx.fill();
-      ctx.strokeStyle = b.grass;
-      ctx.lineWidth = 9;
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      for (let x = from; x <= to; x += STEP) {
-        const y = this.terrain.heightAt(x) - this.camY;
-        if (x === from) ctx.moveTo(x - this.camX, y);
-        else ctx.lineTo(x - this.camX, y);
-      }
-      ctx.stroke();
-      ctx.strokeStyle = shade(b.grass, -0.25);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let x = from; x <= to; x += STEP) {
-        const y = this.terrain.heightAt(x) - this.camY + 5;
-        if (x === from) ctx.moveTo(x - this.camX, y);
-        else ctx.lineTo(x - this.camX, y);
-      }
-      ctx.stroke();
-    };
-    for (let x = x0; x <= x1; x += STEP) {
-      const bi = this.biomeAt(Math.max(0, (x - this.startX) / PX_PER_M));
-      if (bi !== runBiome) {
-        flush(runStart, x, runBiome);
-        runStart = x;
-        runBiome = bi;
-      }
-    }
-    flush(runStart, x1 + STEP, runBiome);
-    // Distance signs every 100 m
-    const firstSign = Math.ceil((this.camX - this.startX) / (100 * PX_PER_M));
-    for (let k = Math.max(1, firstSign); ; k++) {
-      const wx = this.startX + k * 100 * PX_PER_M;
-      if (wx > x1) break;
-      const gy = this.terrain.heightAt(wx) - this.camY;
-      const sx = wx - this.camX;
-      ctx.fillStyle = '#6b4a2a';
-      ctx.fillRect(sx - 2, gy - 46, 4, 46);
-      fillRoundRect(ctx, sx - 26, gy - 66, 52, 24, 5, '#f4e3c1');
-      text(ctx, `${k * 100}m`, sx, gy - 54, { size: 13, align: 'center', color: '#5b3a1e', stroke: null });
-    }
-  }
-
-  private drawPickups(): void {
+  private drawPickups(x0: number, x1: number): void {
     const ctx = this.ctx;
     for (const pk of this.pickups) {
-      const sx = pk.x - this.camX;
-      const sy = pk.y - this.camY + Math.sin(this.time * 3 + pk.x) * 3;
-      if (sx < -40 || sx > this.W + 40) continue;
+      if (pk.taken || pk.x < x0 - 40 || pk.x > x1 + 40) continue;
+      const sy = pk.y + Math.sin(this.time * 3 + pk.x) * 3;
       if (pk.kind === 'coin') {
         const r = pk.value >= 5 ? 16 : pk.value === 2 ? 13 : 10;
-        drawCoin(ctx, sx, sy, r, Math.cos(this.time * 4 + pk.x * 0.05));
+        drawCoin(ctx, pk.x, sy, r, Math.cos(this.time * 4 + pk.x * 0.05));
         if (pk.value > 1)
-          text(ctx, `${pk.value}`, sx, sy + 1, {
-            size: r * 0.9,
-            align: 'center',
-            color: '#7a4a00',
-            stroke: null,
-          });
+          text(ctx, `${pk.value}`, pk.x, sy + 1, { size: r * 0.9, align: 'center', color: '#7a4a00', stroke: null });
       } else {
-        ctx.save();
-        ctx.translate(sx, sy);
-        const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 40);
-        glow.addColorStop(0, 'rgba(255,80,80,0.5)');
-        glow.addColorStop(1, 'rgba(255,80,80,0)');
-        ctx.fillStyle = glow;
-        ctx.fillRect(-40, -40, 80, 80);
-        fillRoundRect(ctx, -14, -18, 28, 36, 5, '#e63946');
-        fillRoundRect(ctx, -6, -24, 12, 8, 2, '#333');
-        ctx.strokeStyle = '#ffd6d6';
-        ctx.lineWidth = 3;
+        const pulse = 0.5 + 0.5 * Math.sin(this.time * 5);
+        ctx.fillStyle = `rgba(255,80,80,${0.18 + 0.14 * pulse})`;
         ctx.beginPath();
-        ctx.moveTo(-8, -10);
-        ctx.lineTo(8, 10);
-        ctx.moveTo(8, -10);
-        ctx.lineTo(-8, 10);
-        ctx.stroke();
-        ctx.restore();
+        ctx.arc(pk.x, sy, 30 + pulse * 4, 0, TAU);
+        ctx.fill();
+        drawJerrycan(ctx, pk.x, sy, 38);
       }
     }
   }
+
+  private readonly pose = {
+    style: 0 as CarStyle,
+    wheels: [
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+    ],
+    mounts: [
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+    ],
+    wheelR: 20,
+    wheelAngles: [0, 0],
+    head: { x: 0, y: 0 },
+    braking: false,
+    time: 0,
+  } satisfies CarPose;
 
   private drawVehicle(): void {
     const ctx = this.ctx;
-    const P = (i: number) => {
-      const p = this.pts[i] as VPoint;
-      return { x: p.x - this.camX, y: p.y - this.camY };
+    const pts = this.car.pts;
+    const p2 = pts[2];
+    const p3 = pts[3];
+    const head = pts[HEAD];
+    if (!p2 || !p3 || !head) return;
+    const ang = this.car.angle();
+    const ox = (p2.x + p3.x) / 2;
+    const oy = (p2.y + p3.y) / 2;
+    const ca = Math.cos(ang);
+    const sa = Math.sin(ang);
+    const toLocal = (x: number, y: number, out: { x: number; y: number }) => {
+      const dx = x - ox;
+      const dy = y - oy;
+      out.x = dx * ca + dy * sa;
+      out.y = -dx * sa + dy * ca;
     };
-    const body = this.skinColor('body', '#e63946');
-    const trim = this.skinColor('trim', '#1d3557');
-    const style = this.skinParam('style', 0);
-    const ang = this.angle();
-    const rb = P(2);
-    const fb = P(3);
-    const ft = P(4);
-    const rt = P(5);
-    const head = P(6);
-    const blink = this.graceT > 0 && Math.floor(this.time * 14) % 2 === 0;
-    if (blink) ctx.globalAlpha = 0.5;
-    // Suspension struts
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 5;
-    for (const [w, a] of [
-      [0, 2],
-      [1, 3],
-    ] as const) {
-      const pw = P(w);
-      const pa = P(a);
-      ctx.beginPath();
-      ctx.moveTo(pw.x, pw.y);
-      ctx.lineTo(pa.x, pa.y);
-      ctx.stroke();
-    }
-    // Driver and roll cage, oriented with the chassis.
-    const dx = Math.cos(ang);
-    const dy = Math.sin(ang);
-    const ux = dy;
-    const uy = -dx;
-    const seatX = lerp(rt.x, ft.x, 0.42);
-    const seatY = lerp(rt.y, ft.y, 0.42);
-    const neckX = head.x - ux * 10;
-    const neckY = head.y - uy * 10;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#2b2b33';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(rt.x, rt.y);
-    ctx.lineTo(rt.x + ux * 40 + dx * 6, rt.y + uy * 40 + dy * 6);
-    ctx.lineTo(ft.x + ux * 22 - dx * 10, ft.y + uy * 22 - dy * 10);
-    ctx.lineTo(ft.x, ft.y);
-    ctx.stroke();
-    ctx.strokeStyle = trim;
-    ctx.lineWidth = 12;
-    ctx.beginPath();
-    ctx.moveTo(seatX, seatY);
-    ctx.lineTo(neckX, neckY);
-    ctx.stroke();
-    ctx.strokeStyle = '#f6c18f';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(lerp(neckX, seatX, 0.3), lerp(neckY, seatY, 0.3));
-    ctx.lineTo(lerp(rt.x, ft.x, 0.78) + ux * 8, lerp(rt.y, ft.y, 0.78) + uy * 8);
-    ctx.stroke();
-    ctx.lineCap = 'butt';
-    ctx.fillStyle = '#f6c18f';
-    ctx.beginPath();
-    ctx.arc(head.x, head.y, 11, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = this.skinColor('helmet', '#ffd23f');
-    ctx.beginPath();
-    ctx.arc(head.x, head.y - 2, 12, ang + Math.PI, ang + TAU);
-    ctx.fill();
-    // Chassis
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.moveTo(rb.x, rb.y);
-    ctx.lineTo(fb.x, fb.y);
-    ctx.lineTo(ft.x, ft.y);
-    if (style === 1) {
-      // Monster truck cab
-      ctx.lineTo(lerp(rt.x, ft.x, 0.55), lerp(rt.y, ft.y, 0.55) - 2);
-    }
-    ctx.lineTo(rt.x, rt.y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = shade(body.startsWith('#') ? body : '#e63946', -0.35);
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    // Stripe / trim
-    ctx.strokeStyle = trim;
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(lerp(rb.x, rt.x, 0.45), lerp(rb.y, rt.y, 0.45));
-    ctx.lineTo(lerp(fb.x, ft.x, 0.45), lerp(fb.y, ft.y, 0.45));
-    ctx.stroke();
-    // Headlight
-    ctx.fillStyle = '#fff6b0';
-    ctx.beginPath();
-    ctx.arc(lerp(fb.x, ft.x, 0.3), lerp(fb.y, ft.y, 0.3), 4, 0, TAU);
-    ctx.fill();
-    // Wheels
+    const pose = this.pose;
+    pose.style = this.style;
+    pose.wheelR = this.car.spec.wheelR;
     for (let w = 0; w < 2; w++) {
-      const p = P(w);
-      const r = this.wheelR;
-      ctx.fillStyle = '#1b1b1f';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#9aa0ad';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r * 0.55, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = '#2b2b33';
-      ctx.lineWidth = 3;
-      const a0 = this.wheelAngle[w] as number;
-      ctx.beginPath();
-      for (let k = 0; k < 3; k++) {
-        const a = a0 + (k * TAU) / 3;
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(p.x + Math.cos(a) * r * 0.55, p.y + Math.sin(a) * r * 0.55);
-      }
-      ctx.stroke();
-      // Tread marks
-      ctx.strokeStyle = '#333';
-      ctx.lineWidth = 2;
-      for (let k = 0; k < 8; k++) {
-        const a = a0 + (k * TAU) / 8;
-        ctx.beginPath();
-        ctx.moveTo(p.x + Math.cos(a) * r * 0.8, p.y + Math.sin(a) * r * 0.8);
-        ctx.lineTo(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r);
-        ctx.stroke();
-      }
+      const p = pts[w];
+      const lw = pose.wheels[w];
+      const lm = pose.mounts[w];
+      if (!p || !lw || !lm) continue;
+      toLocal(p.x, p.y, lw);
+      lm.x = lw.x;
+      lm.y = -6;
+      pose.wheelAngles[w] = (this.car.wheelAngle[w] ?? 0) - ang;
     }
+    toLocal(head.x, head.y, pose.head);
+    pose.braking = this.brake > 0 && !this.crashed;
+    pose.time = this.time;
+
+    const blink = this.graceT > 0 && Math.floor(this.time * 14) % 2 === 0;
+    ctx.save();
+    if (blink) ctx.globalAlpha = 0.5;
+    ctx.translate(ox, oy);
+    ctx.rotate(ang);
+    drawCar(ctx, pose, this.paint);
+    ctx.restore();
     if (this.shield) {
-      const c = this.center();
+      const c = this.car.center();
       ctx.strokeStyle = 'rgba(120,200,255,0.6)';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(c.x - this.camX, c.y - this.camY - 10, 70, 0, TAU);
+      ctx.arc(c.x, c.y - 6, 72, 0, TAU);
       ctx.stroke();
     }
-    ctx.globalAlpha = 1;
   }
 
-  private drawHud(biome: Biome): void {
+  // ------------------------------------------------------------------ HUD
+
+  private drawHud(): void {
     const ctx = this.ctx;
+    const s = this.touchUi ? 1.15 : 1;
+    const ins = this.insets;
+    const left = 14 + ins.left;
+    const top = 14 + ins.top;
+    const right = this.W - 14 - ins.right;
+    const ph = 44 * s;
+    const cy = top + ph / 2;
+
     // Fuel
-    hudPill(ctx, 14, 14, 250, 44);
-    fillRoundRect(ctx, 28, 24, 18, 24, 3, '#e63946');
+    const fuelW = 230 * s;
     const f = this.fuel / this.fuelCap;
-    const fuelColor = f > 0.5 ? '#57c84d' : f > 0.2 ? '#ffb703' : '#ff4d4d';
-    progressBar(ctx, 56, 29, 194, 14, f, fuelColor);
-    if (f < 0.2 && f > 0 && Math.floor(this.time * 3) % 2 === 0)
-      text(ctx, 'LOW FUEL', 153, 70, { size: 16, align: 'center', color: '#ff6b6b' });
+    hudPill(ctx, left, top, fuelW, ph);
+    drawJerrycan(ctx, left + 24 * s, cy, 28 * s);
+    const barX = left + 46 * s;
+    const barW = fuelW - 62 * s;
+    if (f > 0) {
+      const fuelColor = f > 0.5 ? '#57c84d' : f > 0.2 ? '#ffb703' : '#ff4d4d';
+      progressBar(ctx, barX, cy - 7 * s, barW, 14 * s, f, fuelColor);
+    } else {
+      text(ctx, 'EMPTY', barX + barW / 2, cy, { size: 18 * s, align: 'center', color: '#ff6b6b' });
+    }
+    // Next fuel can distance (and low-fuel warning).
+    const low = f < 0.25;
+    const chipY = top + ph + 6 * s;
+    const chipH = 26 * s;
+    const nextM = Number.isFinite(this.nextFuelX)
+      ? Math.max(0, Math.round((this.nextFuelX - this.car.center().x) / PX_PER_M))
+      : -1;
+    if (nextM >= 0 || low) {
+      const blinkOn = low && f > 0 && Math.floor(this.time * 3) % 2 === 0;
+      fillRoundRect(ctx, left, chipY, 150 * s, chipH, chipH / 2, blinkOn ? 'rgba(200,30,40,0.8)' : 'rgba(8,10,30,0.55)');
+      drawJerrycan(ctx, left + 14 * s, chipY + chipH / 2, 16 * s);
+      const label = nextM >= 0 ? `next ${nextM} m` : 'LOW FUEL';
+      text(ctx, low && f > 0 && blinkOn ? 'LOW FUEL' : label, left + 28 * s, chipY + chipH / 2 + 1, {
+        size: 14 * s,
+        color: low ? '#ffd0d0' : '#eef',
+        weight: 700,
+      });
+    }
+
     // Coins
-    hudPill(ctx, 274, 14, 130, 44);
-    drawCoin(ctx, 298, 36, 12);
-    text(ctx, `${this.coins}`, 318, 37, { size: 22 });
-    // Distance
-    hudPill(ctx, this.W - 214, 14, 200, 44);
-    text(ctx, `${Math.floor(this.meters)} m`, this.W - 28, 37, { size: 24, align: 'right' });
-    text(ctx, `${Math.floor(this.score).toLocaleString('en-US')} pts`, this.W - 28, 72, {
-      size: 15,
+    const coinX = left + fuelW + 10 * s;
+    const coinW = 120 * s;
+    hudPill(ctx, coinX, top, coinW, ph);
+    drawCoin(ctx, coinX + 24 * s, cy, 12 * s);
+    text(ctx, `${this.coins}`, coinX + 44 * s, cy + 1, { size: 22 * s });
+    for (const fl of this.flyers) {
+      const e = fl.t * fl.t;
+      drawCoin(ctx, lerp(fl.x, coinX + 24 * s, e), lerp(fl.y, cy, e), 9 * s * (1 - 0.3 * fl.t));
+    }
+    if (this.shield) {
+      const gx = coinX + coinW + 10 * s;
+      hudPill(ctx, gx, top, ph, ph);
+      this.drawShieldIcon(gx + ph / 2, cy, 14 * s);
+    }
+
+    // Distance + score
+    const distW = 170 * s;
+    hudPill(ctx, right - distW, top, distW, ph);
+    text(ctx, `${Math.floor(this.meters)} m`, right - 16 * s, cy + 1, { size: 24 * s, align: 'right' });
+    text(ctx, `${Math.floor(this.score).toLocaleString('en-US')} pts`, right - 16 * s, top + ph + 16 * s, {
+      size: 15 * s,
       align: 'right',
       color: '#eef',
     });
-    // Speed gauge
-    const v = this.velocity();
-    const kmh = Math.round((Math.hypot(v.x, v.y) / PX_PER_M) * 3.6);
-    hudPill(ctx, this.W - 330, 14, 106, 44);
-    text(ctx, `${kmh}`, this.W - 290, 37, { size: 22, align: 'right' });
-    text(ctx, 'km/h', this.W - 284, 39, { size: 12, color: '#aab', weight: 600 });
-    if (this.shield) {
-      hudPill(ctx, 414, 14, 120, 44);
-      text(ctx, 'GUARDIAN', 474, 37, { size: 14, align: 'center', color: '#7cf' });
-    }
-    if (this.bannerT < 2.6)
-      banner(
-        ctx,
-        this.W,
-        this.H,
-        biome.name.toUpperCase(),
-        biome.gravity < 1
-          ? 'Low gravity!'
-          : biome.grip < 0.8
-            ? 'Slippery ice!'
-            : biome.from === 0
-              ? 'Hold → to drive'
-              : `${biome.from} m reached`,
-        this.bannerT / 2.6,
-        '#ffd23f',
-      );
+    // Speed
+    const kmh = Math.round((this.car.speed() / PX_PER_M) * 3.6);
+    const spW = 104 * s;
+    const spX = right - distW - 10 * s - spW;
+    hudPill(ctx, spX, top, spW, ph);
+    text(ctx, `${kmh}`, spX + 58 * s, cy + 1, { size: 22 * s, align: 'right' });
+    text(ctx, 'km/h', spX + 62 * s, cy + 3 * s, { size: 13 * s, color: '#aab', weight: 600 });
+
+    const bannerY = Math.max(this.hudTop() + 30, this.H * 0.24);
     if (this.crashed && this.crashReason) {
-      banner(
-        ctx,
-        this.W,
-        this.H,
-        this.crashReason.toUpperCase(),
-        `${Math.floor(this.meters)} m`,
-        0.5,
-        '#ff6b6b',
-      );
+      this.drawBanner(this.crashReason.toUpperCase(), `${Math.floor(this.meters)} m`, 0.5, '#ff6b6b', bannerY);
+    } else if (this.fuel <= 0) {
+      this.drawOutOfFuel(bannerY);
+    } else if (this.bannerT < BANNER_TIME) {
+      const sub =
+        this.bannerSub || (this.touchUi ? 'Hold GAS to drive, BRAKE to slow down' : 'Hold → or D to drive, ← to brake');
+      this.drawBanner(this.bannerTitle, sub, this.bannerT / BANNER_TIME, '#ffd23f', bannerY);
+    }
+    if (this.hintT > 0 && !this.crashed) {
+      const a = Math.min(1, this.hintT / 0.4, (4 - this.hintT) / 0.3);
+      ctx.save();
+      ctx.globalAlpha = clamp(a, 0, 1);
+      const y = this.H - ins.bottom - 34 * s;
+      ctx.font = `700 ${16 * s}px system-ui, sans-serif`;
+      const w = Math.min(this.W - 40, 520 * s);
+      fillRoundRect(ctx, this.W / 2 - w / 2, y - 18 * s, w, 36 * s, 18 * s, 'rgba(8,10,30,0.7)');
+      text(ctx, this.hint, this.W / 2, y + 1, { size: 16 * s, align: 'center', weight: 700 });
+      ctx.restore();
     }
   }
+
+  private drawShieldIcon(x: number, y: number, r: number): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = '#7cf';
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r * 0.85, y - r * 0.6);
+    ctx.quadraticCurveTo(x + r * 0.8, y + r * 0.6, x, y + r);
+    ctx.quadraticCurveTo(x - r * 0.8, y + r * 0.6, x - r * 0.85, y - r * 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /** Title + subtitle that scale in and fade out over t in [0, 1]. */
+  private drawBanner(title: string, sub: string, t: number, color: string, y: number): void {
+    const ctx = this.ctx;
+    const a = t < 0.12 ? t / 0.12 : t > 0.8 ? (1 - t) / 0.2 : 1;
+    const sc = t < 0.12 ? 0.7 + 0.3 * (t / 0.12) : 1;
+    const size = Math.min(52, this.W / 14);
+    ctx.save();
+    ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.translate(this.W / 2, y);
+    ctx.scale(sc, sc);
+    text(ctx, title, 0, 0, { size, align: 'center', color, strokeWidth: 7 });
+    if (sub) text(ctx, sub, 0, size * 0.85, { size: Math.min(22, this.W / 34), align: 'center', weight: 700 });
+    ctx.restore();
+  }
+
+  private drawOutOfFuel(y: number): void {
+    const ctx = this.ctx;
+    const p = this.fuelEndProgress;
+    const size = Math.min(44, this.W / 16);
+    text(ctx, 'OUT OF FUEL', this.W / 2, y, { size, align: 'center', color: '#ff6b6b', strokeWidth: 7 });
+    // Ring drains as the run winds down.
+    const r = 18;
+    const cy = y + size * 0.95 + r;
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath();
+    ctx.arc(this.W / 2, cy, r, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = '#ff6b6b';
+    ctx.beginPath();
+    ctx.arc(this.W / 2, cy, r, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - p));
+    ctx.stroke();
+    drawJerrycan(ctx, this.W / 2, cy, 18);
+  }
 }
+
+
