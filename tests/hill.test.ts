@@ -64,8 +64,13 @@ function decide(p: HillProbe, mode: BotMode, flips: number, st: BotState): { gas
   st.lastAngle = p.angle;
   // Only spin on a jump, once clearly airborne (not on a micro-hop). Stop short of the turn and
   // let the controller finish it, so the car lands level with the slope instead of on its head.
-  const onJump = p.kickers.some((k) => p.x >= k.start && p.x <= k.end);
-  if (mode === 'flip' && onJump && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 1.2)
+  // A jump that gives about a second of air (predicted from its angles and the speed).
+  const roomy = p.kickers.some((k) => {
+    if (p.x < k.start || p.x > k.end) return false;
+    const air = (2 * p.speed * (Math.sin(k.lipAngle) + Math.cos(k.lipAngle) * Math.tan(k.landAngle))) / 980;
+    return air >= 1.0;
+  });
+  if (mode === 'flip' && roomy && p.airT > 0.12 && Math.abs(st.airRot) < Math.PI * 2 * flips - 1.2)
     return { gas: false, brake: true };
   // PD on the chassis angle against the ground under the car: brake pitches nose-down, gas nose-up.
   const err = wrap(p.angle - p.groundAngle(p.x));

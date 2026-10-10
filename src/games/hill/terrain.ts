@@ -118,14 +118,14 @@ export class Terrain {
     const k = this.kickers.length;
     const m = this.metres(x);
     const d = this.difficulty(m);
-    // Steeper lips and landings with distance give 0.8 s of air early and about 1.1 s later on,
-    // enough for a full turn with good air control.
-    // A short, steep ramp keeps launch speed (a long climb would bleed it); the landing drops away.
-    const lipDeg = 26 + 6 * Math.min(1, d) + 2 * clamp(d - 1, 0, 1) + (this.rand(k, 1) - 0.5) * 4;
+    // Jumps get steeper faster than the slope cap grows, so a full turn fits in the air by about
+    // 2 km. A short ramp keeps launch speed (a long climb would bleed it); the landing drops away.
+    const j = clamp(m / 1800, 0, 1) + clamp((m - 2 * CYCLE_M) / CYCLE_M, 0, 0.5);
+    const lipDeg = 27 + 7 * j + (this.rand(k, 1) - 0.5) * 4;
     const lipAngle = lipDeg * DEG;
-    const landAngle = (28 + 6 * Math.min(1, d)) * DEG;
+    const landAngle = (30 + 4 * j) * DEG;
     const runIn = 200 + 100 * this.rand(k, 2);
-    const rampLen = 70 + 50 * this.rand(k, 3);
+    const rampLen = 50 + 40 * this.rand(k, 3);
     // Size the landing for the design speed: flight time on a slope falling away at landAngle.
     const g = 980 * Math.max(0.7, biomeAt(m).gravity);
     const v = this.designSpeed;
