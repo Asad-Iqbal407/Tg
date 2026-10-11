@@ -73,6 +73,24 @@ export function stepBot(bot: Bot, env: BotEnv, px: number, py: number, dt: numbe
     }
   }
 
+  // A bot that already shares the player's tile has no path to walk, so it closes in on the player directly.
+  // Both points lie on that one floor tile, so the straight step never crosses a wall.
+  if (
+    bot.goal < 0 &&
+    bot.path.length === 0 &&
+    Math.floor(bot.x) === Math.floor(px) &&
+    Math.floor(bot.y) === Math.floor(py)
+  ) {
+    const dx = px - bot.x;
+    const dy = py - bot.y;
+    const d = Math.hypot(dx, dy);
+    if (d >= BOT_TOUCH_RANGE) {
+      const step = Math.min(d, bot.speed * dt);
+      bot.x += (dx / d) * step;
+      bot.y += (dy / d) * step;
+    }
+  }
+
   if (bot.kind === 'bomber') {
     bot.bombCd -= dt;
     const tileX = Math.floor(bot.x);

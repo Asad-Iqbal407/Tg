@@ -280,21 +280,20 @@ describe('snake rules', () => {
     expect(game.isOver()).toBe(false);
   });
 
-  it('queues at most two turns, applies one per move, and drops a queued reversal', () => {
+  it('queues at most two turns, applies one per move, and drops a reversal of the last queued turn', () => {
     const { game, input } = start(4);
     const s = peek(game);
-    // Up, down, left and right in one step: left reverses the heading and right repeats it.
+    // Up, down, left and right in one step: down reverses the queued up, and right reverses the queued left.
     input.setVirtual('up', true, 'test');
     input.setVirtual('down', true, 'test');
     input.setVirtual('left', true, 'test');
     input.setVirtual('right', true, 'test');
     step(game, input);
-    expect(s.turns).toEqual(['up', 'down']);
+    expect(s.turns).toEqual(['up', 'left']);
     untilMove(game, input);
     expect(s.heading).toBe('up');
-    // The queued down now reverses the heading, so it is dropped on the next move.
     untilMove(game, input);
-    expect(s.heading).toBe('up');
+    expect(s.heading).toBe('left');
     expect(s.turns).toEqual([]);
     expect(game.isOver()).toBe(false);
   });
@@ -571,6 +570,20 @@ describe('snake start and death delay', () => {
     expect(game.isOver()).toBe(false);
   });
 
+  it('keeps a turn that follows a queued turn during READY, so the snake makes both turns', () => {
+    const { game, input } = fresh(4);
+    const s = peek(game);
+    tap(game, input, 'up');
+    tap(game, input, 'left');
+    expect(s.turns).toEqual(['up', 'left']);
+    while (s.readyT > 0) step(game, input);
+    untilMove(game, input);
+    expect(s.heading).toBe('up');
+    untilMove(game, input);
+    expect(s.heading).toBe('left');
+    expect(game.isOver()).toBe(false);
+  });
+
   it('cannot crash during READY, even when the first move would drive into the border', () => {
     const { game, input } = fresh(6);
     const s = peek(game);
@@ -601,6 +614,31 @@ describe('snake start and death delay', () => {
     const card = recordTexts();
     gameOn(card.ctx, 3, true).game.render();
     expect(card.texts).not.toContain('READY');
+  });
+
+  it('starts card art moving at once, since card art has no READY banner', () => {
+    const { game, input } = gameOn(mockCtx(), 4, true);
+    const s = peek(game);
+    expect(s.readyT).toBe(0);
+    const before = headOf(game);
+    // Card art shows 1.6 seconds of play, which is about eleven moves at the base speed.
+    step(game, input, 96);
+    expect(headOf(game).x).toBeGreaterThan(before.x + 6);
+  });
+
+  it('leaves READY out of the run duration, so a run is not credited with it', () => {
+    const { game, input } = fresh(6);
+    let frames = 0;
+    for (; !game.isOver() && frames < 900; frames++) step(game, input);
+    expect(game.isOver()).toBe(true);
+    // Only READY (1.2 seconds) is left out; the 1.4-second death delay counts, as it always has.
+    expect(game.getResult().durationSec).toBeCloseTo(frames * DT - 1.2, 6);
+  });
+
+  it('reports no run time for a run quit during READY', () => {
+    const { game, input } = fresh(6);
+    step(game, input, 30);
+    expect(game.getResult().durationSec).toBeCloseTo(0, 6);
   });
 
   it('ignores turns and swipes pressed during the death delay, so they cannot change the outcome', () => {

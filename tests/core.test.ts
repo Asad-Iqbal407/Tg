@@ -376,6 +376,20 @@ describe('Input pointer', () => {
     expect(input.consumeSwipe()).toBeNull();
   });
 
+  it('hands a cancelled owner over to a remaining finger without a press or a swipe', () => {
+    const { input, stage, win, p } = setup({ pointerArea: 'stage' });
+    stage.dispatchEvent(ptr('pointerdown', 1, 100, 300));
+    stage.dispatchEvent(ptr('pointerdown', 2, 300, 500));
+    input.postUpdate();
+    win.dispatchEvent(ptr('pointercancel', 1, 0, 0));
+    expect([p.down, p.released, p.pressed, p.x, p.y]).toEqual([true, true, false, 300, 300]);
+    expect(input.consumeSwipe()).toBeNull();
+    win.dispatchEvent(ptr('pointermove', 2, 320, 520));
+    expect([p.x, p.y]).toEqual([320, 320]);
+    win.dispatchEvent(ptr('pointerup', 2, 320, 520));
+    expect([p.down, p.released]).toEqual([false, true]);
+  });
+
   it('still reads a normal lift as a swipe', () => {
     const { input, stage, win, p } = setup({ pointerArea: 'stage' });
     stage.dispatchEvent(ptr('pointerdown', 1, 100, 300));

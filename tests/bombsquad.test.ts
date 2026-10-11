@@ -620,6 +620,30 @@ describe('walker contact', () => {
     expect(i.lives).toBe(LIVES);
     expect(walker.contact).toBe(0);
   });
+
+  it('a walker that shares the player tile closes in to touch range, so a corner is no refuge', () => {
+    const { game, input, i, arena } = quietGame(26);
+    clearInterior(arena);
+    i.player.invuln = 0;
+    // The player stands in a tile corner, 0.67 tiles from the walker at the tile centre: out of reach,
+    // and the walker has no path to walk because it already stands on the player's tile.
+    i.player.x = 5.97;
+    i.player.y = 5.97;
+    i.bots = [{ ...makeBot('walker', 5, 5), speed: WALKER_SPEED, wait: 0, repath: 99, touchCd: 0 }];
+    run(game, input, 1);
+    expect(i.lives).toBe(LIVES - 1);
+  });
+
+  it('a walker that stays in reach through invulnerability still holds range for the grace after it ends', () => {
+    const { game, input, i, arena } = quietGame(27);
+    clearInterior(arena);
+    i.player.invuln = 0.5;
+    i.bots = [{ ...makeBot('walker', 1, 1), x: 1.9, y: 1.5, speed: 0, wait: 0, repath: 99, touchCd: 0 }];
+    run(game, input, 0.5 + BOT_TOUCH_GRACE / 2);
+    expect(i.lives).toBe(LIVES);
+    run(game, input, BOT_TOUCH_GRACE);
+    expect(i.lives).toBe(LIVES - 1);
+  });
 });
 
 describe('waves, items and stats', () => {
@@ -732,6 +756,11 @@ describe('robustness', () => {
     for (const seed of [41, 42, 43]) {
       const { game, input } = createGame(gameById('bombsquad'), { seed });
       const i = internals(game);
+      // Lives are not the subject here: keep the run going so it reaches later waves.
+      i.lives = 999;
+      // Three bombs in hand, so several of the player's bombs can be in flight at once.
+      i.player.ammoMax = 3;
+      i.player.ammo = 3;
       let laid = 0;
       const addBomb = i.addBomb.bind(i);
       i.addBomb = (owner, tx, ty, power, fuse) => {
@@ -740,7 +769,7 @@ describe('robustness', () => {
       };
       const rng = new Rng(seed);
       const held = new Set<Action>();
-      for (let f = 0; f < 60 * 60 && !game.isOver(); f++) {
+      for (let f = 0; f < 60 * 90 && !game.isOver(); f++) {
         if (f % 6 === 0) {
           for (const a of ACTIONS) {
             const want = rng.chance(0.25);
@@ -758,6 +787,7 @@ describe('robustness', () => {
         // Ammo comes back exactly when one of the player's own bombs goes off.
         const own = i.bombs.filter((b) => b.owner === 'player').length;
         expect(i.player.ammo + own).toBe(i.player.ammoMax);
+        expect(game.getResult().stats.bombs ?? 0).toBe(laid);
         expect(i.arena.isSolid(Math.floor(i.player.x), Math.floor(i.player.y))).toBe(false);
         for (const bot of i.bots) {
           expect(i.arena.isSolid(Math.floor(bot.x), Math.floor(bot.y))).toBe(false);
@@ -770,7 +800,6 @@ describe('robustness', () => {
           }
         }
       }
-      expect(game.getResult().stats.bombs ?? 0).toBe(laid);
     }
   });
 });

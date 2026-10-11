@@ -1,6 +1,6 @@
 import { BaseGame } from '../base';
 import { banner, shade } from '../draw';
-import type { GameServices } from '../types';
+import type { GameResult, GameServices } from '../types';
 import {
   addWallRuns,
   advance,
@@ -69,8 +69,10 @@ export class SnakeGame extends BaseGame {
   private applesEaten = 0;
   private level = 1;
   private moveT = 0;
+  /** READY length for this run. Card art has no READY banner, so it skips READY and keeps moving. */
+  private readonly readyLength: number;
   /** Seconds of READY left before the first move. */
-  private readyT = READY_SEC;
+  private readyT: number;
   private slowT = 0;
   private invulnT = 0;
   private shieldUsed = false;
@@ -93,6 +95,8 @@ export class SnakeGame extends BaseGame {
     this.addStat('golden', 0);
     this.maxStat('length', length);
     this.maxStat('level', 1);
+    this.readyLength = services.preview ? 0 : READY_SEC;
+    this.readyT = this.readyLength;
     this.spawnApple();
   }
 
@@ -126,6 +130,12 @@ export class SnakeGame extends BaseGame {
       this.moveT -= interval;
       this.move();
     }
+  }
+
+  /** READY is not part of the run: rewards, the clock badge and the totals do not count it. */
+  override getResult(): GameResult {
+    const r = super.getResult();
+    return { ...r, durationSec: Math.max(0, r.durationSec - (this.readyLength - this.readyT)) };
   }
 
   render(): void {
@@ -176,7 +186,7 @@ export class SnakeGame extends BaseGame {
           this.W,
           this.H,
           'READY',
-          'Arrows, WASD or swipe to turn',
+          'Swipe, arrows or WASD to turn',
           1 - this.readyT / READY_SEC,
           pal.gold,
         );
@@ -206,21 +216,25 @@ export class SnakeGame extends BaseGame {
     return this.slowT > 0 ? base * SLOW_FACTOR : base;
   }
 
-  /** Queue arrow and swipe turns. A reversal of the current heading is rejected outright. */
+  /** Queue this step's arrow and swipe presses. */
   private readTurns(): void {
     for (const d of TURN_KEYS) if (this.input.wasPressed(d)) this.queueTurn(d);
     for (let s = this.input.consumeSwipe(); s !== null; s = this.input.consumeSwipe()) this.queueTurn(s);
   }
 
+  /**
+   * Queue a turn. It is checked against the last queued turn, or the heading when none is queued.
+   * A repeat or a reversal of that direction is rejected, so a turn that follows a queued one is kept.
+   */
   private queueTurn(dir: Dir): void {
-    if (dir === opposite(this.heading)) return;
     const last = this.turns[this.turns.length - 1] ?? this.heading;
-    if (dir === last || this.turns.length >= MAX_QUEUED_TURNS) return;
+    if (dir === last || dir === opposite(last) || this.turns.length >= MAX_QUEUED_TURNS) return;
     this.turns.push(dir);
   }
 
   private move(): void {
     const turn = this.turns.shift();
+    // An absorbed crash can turn the snake, so a queued turn may now reverse it and is checked again here.
     if (turn !== undefined && turn !== opposite(this.heading)) this.heading = turn;
     const next = advance(this.head, this.heading);
     const apple = this.apple;

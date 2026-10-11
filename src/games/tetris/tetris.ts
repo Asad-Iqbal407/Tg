@@ -1,3 +1,4 @@
+import { clamp } from '../../core/math';
 import { BaseGame } from '../base';
 import { banner } from '../draw';
 import type { GameServices } from '../types';
@@ -57,6 +58,13 @@ const TOP_OUT_SEC = 1.6;
 const SHIELD_ROWS = 4;
 /** Columns the score popups take in turn, so consecutive clears do not pile up at one point. */
 const POPUP_COLUMNS = [2, 5, 8];
+/** Popup text is this share of a well cell, between POPUP_MIN_PX and the largest size (POPUP_PX, or TETRIS_PX). */
+const POPUP_CELL_SHARE = 0.75;
+const POPUP_MIN_PX = 12;
+const POPUP_PX = 20;
+const TETRIS_PX = 24;
+/** Rough width of a popup label in ems a character (the digits are the widest). It only keeps the text in the well. */
+const POPUP_EM_PER_CHAR = 0.65;
 
 /** The layout for one size, touch inset and preview flag, with the side panel's slots built from it. */
 interface LayoutCache {
@@ -91,6 +99,11 @@ function newPiece(kind: Kind): Piece {
   return { kind, rot: 0, x: Math.floor((COLS - pieceSize(kind)) / 2), y: 0 };
 }
 
+/** Size of a score popup's text in a well of this cell size. Full size in the usual well, smaller in a small one. */
+function popupSize(cell: number, tetris: boolean): number {
+  return clamp(Math.round(cell * POPUP_CELL_SHARE), POPUP_MIN_PX, tetris ? TETRIS_PX : POPUP_PX);
+}
+
 export class TetrisGame extends BaseGame {
   private readonly board = new Board();
   private readonly queue: PieceQueue;
@@ -106,6 +119,8 @@ export class TetrisGame extends BaseGame {
   private tetrises = 0;
   /** Seconds since the active piece last fell a row. */
   private fallT = 0;
+  /** Whether the last falling step was soft drop. Turning soft drop on or off rescales the time banked (see fall). */
+  private wasSoft = false;
   /** Seconds the active piece has rested on something. */
   private lockT = 0;
   /** The part of a soft-drop row this piece has earned but not yet been paid for, in rows. */
@@ -119,6 +134,8 @@ export class TetrisGame extends BaseGame {
   private bannerT = 0;
   private flashT = 0;
   private flashRows: number[] = [];
+  /** The level-up banner's text, set when the level rises so render() does not build it every frame. */
+  private bannerText = '';
   /** Which of POPUP_COLUMNS the next score popup goes in. */
   private popupSlot = 0;
   private readonly touchDrop: TouchDrop;
@@ -188,7 +205,7 @@ export class TetrisGame extends BaseGame {
       drawPanel(ctx, slots, this.look, this.hud);
     }
     if (this.bannerT > 0 && !preview) {
-      banner(ctx, this.W, this.H, `LEVEL ${this.level}`, 'Faster!', 1 - this.bannerT / BANNER_SEC, '#fde047');
+      banner(ctx, this.W, this.H, this.bannerText, 'Faster!', 1 - this.bannerT / BANNER_SEC, '#fde047');
     }
   }
 
@@ -345,15 +362,28 @@ export class TetrisGame extends BaseGame {
     const gravity = secondsPerRow(this.level);
     const soft = this.input.isDown('down') || this.dragSoft;
     const interval = soft ? Math.min(gravity, SOFT_DROP_SEC) : gravity;
-    // A row that takes `interval` seconds where gravity takes `gravity` is worth only the share gravity would not
-    // have moved. Where gravity is already the quicker, the share is zero and soft drop scores nothing.
-    const share = 1 - interval / gravity;
+    if (soft !== this.wasSoft) {
+      // The piece keeps its place in its row: the time banked so far becomes the same fraction of the new row. Left as
+      // seconds, the time banked under gravity would be spent at once as a burst of rows when Down is pressed.
+      const before = this.wasSoft ? Math.min(gravity, SOFT_DROP_SEC) : gravity;
+      this.fallT = (this.fallT / before) * interval;
+      this.wasSoft = soft;
+    }
+    // Soft drop is paid for the time it moves the piece faster than gravity would: 1 / interval - 1 / gravity rows a
+    // second, which is nothing once gravity is the quicker. Paid by time rather than by row, a tap of Down earns only
+    // its own time, whichever part of a row it starts in.
+    const extra = 1 / interval - 1 / gravity;
+    const phase = this.fallT;
     this.fallT += dt;
+    let rows = 0;
     while (this.fallT >= interval && !this.grounded()) {
       this.fallT -= interval;
       this.active.y++;
-      this.softShare += share;
+      rows++;
     }
+    // The time spent falling this step: all of it, or only up to the row that landed the piece.
+    const falling = this.grounded() ? Math.max(0, rows * interval - phase) : dt;
+    this.softShare += falling * extra;
     // Whole rows are paid out; the fraction carries on to the next row this piece falls.
     const whole = Math.floor(this.softShare + 1e-9);
     if (whole > 0) {
@@ -445,20 +475,20 @@ export class TetrisGame extends BaseGame {
     this.audio.play(n === TETRIS_LINES ? 'reward' : 'pop');
     const column = POPUP_COLUMNS[this.popupSlot] ?? Math.floor(COLS / 2);
     this.popupSlot = (this.popupSlot + 1) % POPUP_COLUMNS.length;
+    const tetris = n === TETRIS_LINES;
+    const label = tetris ? 'TETRIS!' : `+${points}`;
+    const size = popupSize(well.cell, tetris);
+    // The text is centred on its column, so it moves in where it would run past either side of the well.
+    const half = (label.length * POPUP_EM_PER_CHAR * size) / 2;
     const at = cellCentre(well, column, rows[0] ?? 0);
-    const label = n === TETRIS_LINES ? 'TETRIS!' : `+${points}`;
-    this.texts.add(
-      at.x,
-      at.y,
-      label,
-      n === TETRIS_LINES ? '#fde047' : '#ffffff',
-      n === TETRIS_LINES ? 24 : 20,
-    );
+    const x = clamp(at.x, well.x + half, well.x + COLS * well.cell - half);
+    this.texts.add(x, at.y, label, tetris ? '#fde047' : '#ffffff', size);
 
     const level = levelFor(this.lines, this.startLevel);
     if (level > this.level) {
       this.level = level;
       this.maxStat('level', level);
+      this.bannerText = `LEVEL ${level}`;
       this.bannerT = BANNER_SEC;
       this.audio.play('levelup');
     }

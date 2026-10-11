@@ -36,8 +36,15 @@ interface Internals {
   level: number;
   shieldUsed: boolean;
   queue: PieceQueue;
-  texts: { items: { x: number; y: number }[] };
+  texts: { items: { x: number; y: number; text: string; size: number }[] };
+  fallT: number;
+  clearRows: (rows: number[]) => void;
   cache: unknown;
+  hud: { next: Kind[]; stats: [string, string][] };
+  dragSoft: boolean;
+  lines: number;
+  bannerT: number;
+  bannerText: string;
 }
 
 function peek(game: GameInstance): Internals {
@@ -652,41 +659,91 @@ describe('soft drop scoring', () => {
     return { rows: peek(game).active.y, score: game.getResult().score };
   }
 
-  it('pays one point for each row Down adds beyond gravity at level 1, and nothing for the gravity row', () => {
-    const { rows, score } = holdDown(1, 0.8);
-    expect(rows).toBeGreaterThanOrEqual(15);
-    expect(score).toBe(softPoints(1, rows));
+  /**
+   * Drags a finger down until the touch reads as a soft drop, then holds it there for `sec` more seconds. Returns the
+   * row the soft drop began on, and the rows and points counted from that step, so the rows gravity moved before
+   * it are left out.
+   */
+  function touchSoft(level: number, sec: number): { from: number; rows: number; score: number } {
+    const { game, input } = start(21);
+    setActive(game, 'T', 0, 3, 0);
+    peek(game).level = level;
+    press(game, input, 100, 300);
+    let fromY = 0;
+    let fromScore = 0;
+    for (let i = 1; !peek(game).dragSoft && i < 120; i++) {
+      fromY = peek(game).active.y;
+      fromScore = game.getResult().score;
+      finger(input, 100, 300 + i * 4, 'move', true);
+      step(game, input);
+    }
+    holdFinger(game, input, sec);
+    return { from: fromY, rows: peek(game).active.y - fromY, score: game.getResult().score - fromScore };
+  }
+
+  // Down is held for 0.8 s (0.2 s at level 15, where gravity alone reaches the floor within about 0.4 s).
+  for (const level of [1, 10, 11, 15]) {
+    const sec = level === 15 ? 0.2 : 0.8;
+    // Soft drop is 20 rows a second, or gravity where gravity is quicker.
+    const rate = 1 / Math.min(secondsPerRow(level), 0.05);
+
+    it(`falls at max(gravity, 20 rows a second) with Down held at level ${level}`, () => {
+      const { rows } = holdDown(level, sec);
+      expect(Math.abs(rows - sec * rate)).toBeLessThanOrEqual(1);
+    });
+
+    it(`pays only the rows Down adds beyond gravity with Down held at level ${level}`, () => {
+      const { rows, score } = holdDown(level, sec);
+      expect(score).toBe(softPoints(level, rows));
+    });
+
+    it(`scores a touch drag soft drop by the same rule at level ${level}`, () => {
+      // The touch only soft drops once its flick window has closed, by which time gravity has moved the piece on.
+      // The floor caps how far it can go.
+      const { from, rows, score } = touchSoft(level, sec);
+      expect(Math.abs(rows - Math.min(sec * rate, 20 - from))).toBeLessThanOrEqual(1);
+      expect(score).toBe(softPoints(level, rows));
+    });
+  }
+
+  it('does not spend the gravity time it has banked as a burst of rows when Down is pressed', () => {
+    const { game, input } = start(6);
+    setActive(game, 'T', 0, 3, 0);
+    // Three quarters of a second of gravity: the piece is nearly a row down, one row short at level 1.
+    step(game, input, 45);
+    expect(peek(game).active.y).toBe(0);
+    input.setVirtual('down', true, 'test');
+    step(game, input);
+    expect(peek(game).active.y).toBeLessThanOrEqual(1);
+    expect(game.getResult().score).toBe(0);
   });
 
-  it('still pays a share of each row at level 10, where gravity is only a little slower', () => {
-    const { rows, score } = holdDown(10, 0.8);
-    expect(rows).toBeGreaterThanOrEqual(14);
-    expect(score).toBe(softPoints(10, rows));
+  it('pays a tap of Down for its own time, not for each row the tap happens to finish', () => {
+    const { game, input } = start(21);
+    setActive(game, 'T', 0, 3, 0);
+    const s = peek(game);
+    const taps = 10;
+    for (let i = 0; i < taps; i++) {
+      // Waits until gravity is nearly due a row, then taps Down for one step, so the tap finishes that row.
+      for (let guard = 0; s.fallT < 0.95 && guard < 2000; guard++) step(game, input);
+      tap(game, input, 'down');
+      step(game, input);
+    }
+    expect(s.active.y).toBeGreaterThanOrEqual(taps);
+    // Ten steps of Down are a sixth of a second, worth 19 extra rows a second at level 1: three points, not nine.
+    expect(game.getResult().score).toBeLessThanOrEqual(Math.floor(taps * DT * 19 + 1e-9));
+  });
+
+  it('pays a share of each row at level 10, where gravity is only a little slower than soft drop', () => {
+    const { score } = holdDown(10, 0.8);
     expect(score).toBeGreaterThan(0);
   });
 
-  it('pays nothing at level 11, where gravity already falls faster than soft drop', () => {
-    const { rows, score } = holdDown(11, 0.8);
-    expect(score).toBe(0);
-    // Down moves the piece no faster than gravity alone would: about 0.8 s over the gravity interval.
-    expect(Math.abs(rows - 0.8 / secondsPerRow(11))).toBeLessThanOrEqual(1);
-  });
-
-  it('pays nothing at level 15, where gravity is at its fastest', () => {
-    const { rows, score } = holdDown(15, 0.2);
-    expect(score).toBe(0);
-    expect(rows).toBeGreaterThanOrEqual(9);
-  });
-
-  it('scores a touch drag soft drop by the same rule, which is nothing at level 11', () => {
-    const { game, input } = start(21);
-    setActive(game, 'T', 0, 3, 0);
-    peek(game).level = 11;
-    press(game, input, 100, 300);
-    dragTo(game, input, 100, 380, 0.4);
-    holdFinger(game, input, 0.4);
-    expect(peek(game).active.y).toBeGreaterThan(8);
-    expect(game.getResult().score).toBe(0);
+  it('pays nothing at levels 11 and 15, where gravity already falls at least as fast as soft drop', () => {
+    expect(holdDown(11, 0.8).score).toBe(0);
+    expect(holdDown(15, 0.2).score).toBe(0);
+    expect(touchSoft(11, 0.5).score).toBe(0);
+    expect(touchSoft(15, 0.2).score).toBe(0);
   });
 });
 
@@ -704,6 +761,49 @@ describe('score popups', () => {
     for (let i = 0; i < xs.length; i++)
       for (let j = i + 1; j < xs.length; j++)
         expect(Math.abs((xs[i] ?? 0) - (xs[j] ?? 0))).toBeGreaterThanOrEqual(2 * well.cell);
+  });
+
+  /** Two singles in columns 2 and 5, then a four-line TETRIS! in column 8, on the bottom rows. */
+  function clearThree(game: GameInstance): void {
+    const s = peek(game);
+    s.level = 15;
+    const fill = (gap: number) => {
+      for (let y = HIDDEN_ROWS + 10; y < ROWS; y++)
+        for (let x = 0; x < COLS; x++) s.board.cells[y * COLS + x] = x === gap ? 0 : 1;
+    };
+    fill(1);
+    s.clearRows([21]);
+    fill(4);
+    s.clearRows([21]);
+    fill(9);
+    s.clearRows([18, 19, 20, 21]);
+  }
+
+  it('keeps every popup inside the well, and sets its text smaller in a small well', () => {
+    const { game } = createGame(tetrisGame, {
+      seed: 3,
+      width: 480,
+      height: 800,
+      insets: { top: 0, right: 0, bottom: 400, left: 0 },
+    });
+    clearThree(game);
+    const { well } = layoutTetris(480, 800, 400, true);
+    const items = peek(game).texts.items;
+    expect(items).toHaveLength(3);
+    expect(items.find((t) => t.text === 'TETRIS!')?.size).toBeLessThanOrEqual(well.cell);
+    for (const t of items) {
+      expect(t.x).toBeGreaterThanOrEqual(well.x);
+      expect(t.x).toBeLessThanOrEqual(well.x + COLS * well.cell);
+      expect(t.size).toBeLessThanOrEqual(well.cell);
+    }
+  });
+
+  it('keeps the popup text at its full size in the usual well', () => {
+    const { game } = start(3);
+    clearThree(game);
+    const items = peek(game).texts.items;
+    expect(items.find((t) => t.text === 'TETRIS!')?.size).toBe(24);
+    expect(items.filter((t) => t.text !== 'TETRIS!').map((t) => t.size)).toEqual([20, 20]);
   });
 });
 
@@ -735,6 +835,16 @@ describe('controls', () => {
     step(game, input);
     expect(statsOf(game).pieces).toBe(0);
     expect(peek(game).active.y).toBeLessThanOrEqual(1);
+  });
+
+  it('lists Q as counter-clockwise on the keyboard, and gives touch no counter-clockwise button', () => {
+    expect(tetrisGame.controls).toContainEqual(['Q', 'Rotate counter-clockwise']);
+    expect((tetrisGame.touchButtons ?? []).map((b) => b.action)).toEqual([
+      'left',
+      'right',
+      'up',
+      'secondary',
+    ]);
   });
 });
 
@@ -862,6 +972,18 @@ describe('touch drop reader', () => {
 });
 
 describe('level and gravity', () => {
+  it('names the new level on the banner when a clear raises it', () => {
+    const { game, input } = start(3);
+    const s = peek(game);
+    s.lines = 9;
+    setStack(game, ['....######']);
+    setActive(game, 'I', 0, 0, 20);
+    tap(game, input, 'primary');
+    expect(s.level).toBe(2);
+    expect(s.bannerText).toBe('LEVEL 2');
+    expect(s.bannerT).toBeGreaterThan(0);
+  });
+
   it('raises the level every ten lines, up to 15', () => {
     expect(levelFor(0)).toBe(1);
     expect(levelFor(9)).toBe(1);
@@ -881,15 +1003,21 @@ describe('level and gravity', () => {
 });
 
 describe('side panel boxes', () => {
-  /** Whether two boxes share any area. */
-  const overlaps = (a: { x: number; y: number; w: number; h: number }, b: typeof a): boolean =>
-    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  type Box = { x: number; y: number; w: number; h: number };
 
-  it('keeps every box apart, inside the panel and with the stats tall, at every size and touch inset', () => {
+  /**
+   * The clear space between two boxes, along the axis that separates them. Negative when they overlap. The panel's
+   * boxes share a column, so this is the vertical gap between them.
+   */
+  const gapOf = (a: Box, b: Box): number =>
+    Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h));
+
+  it('keeps every box apart by a visible gap, inside the panel and with the stats tall, at every size and inset', () => {
     const problems: string[] = [];
-    for (let width = 480; width <= 900; width += 20) {
-      for (let height = 800; height <= 1100; height += 20) {
-        for (let bottom = 0; bottom <= height / 2; bottom += 10) {
+    for (let width = 480; width <= 900; width += 10) {
+      for (let height = 800; height <= 1100; height += 10) {
+        // updateInsets caps the bottom inset at half the canvas height, rounded up to a whole logical px.
+        for (let bottom = 0; bottom <= Math.ceil(height / 2); bottom += 5) {
           const { panel } = layoutTetris(width, height, bottom, true);
           const where = `${width}x${height} inset ${bottom}`;
           if (!panel) {
@@ -908,16 +1036,29 @@ describe('side panel boxes', () => {
               problems.push(`${where}: box ${i} leaves the panel`);
           });
           for (let i = 0; i < boxes.length; i++)
-            for (let j = i + 1; j < boxes.length; j++)
-              if (overlaps(boxes[i] ?? s.hold, boxes[j] ?? s.hold))
-                problems.push(`${where}: boxes ${i} and ${j} meet`);
+            for (let j = i + 1; j < boxes.length; j++) {
+              const a = boxes[i] ?? s.hold;
+              const b = boxes[j] ?? s.hold;
+              if (gapOf(a, b) < 6) problems.push(`${where}: boxes ${i} and ${j} are ${gapOf(a, b)} px apart`);
+            }
           for (const r of s.stats) if (r.h < 36) problems.push(`${where}: a stat box is short`);
           // The NEXT label sits between the hold box and the first next box.
           if (s.nextLabel.y - 6 < s.hold.y + s.hold.h) problems.push(`${where}: NEXT label meets HOLD`);
         }
       }
     }
-    expect(problems).toEqual([]);
+    expect(problems.slice(0, 20)).toEqual([]);
+  });
+
+  it('keeps the third NEXT box clear of the SCORE box at 900 by 800 with a 400 px bottom inset', () => {
+    const { panel } = layoutTetris(900, 800, 400, true);
+    if (!panel) throw new Error('no panel');
+    const s = panelSlots(panel);
+    expect(s.stats.every((r) => r.h >= 36)).toBe(true);
+    const lastNext = s.next[2];
+    const firstStat = s.stats[0];
+    if (!lastNext || !firstStat) throw new Error('missing boxes');
+    expect(gapOf(lastNext, firstStat)).toBeGreaterThanOrEqual(6);
   });
 
   it('keeps the NEXT boxes clear of the stats at the design size, with the stats tall', () => {
@@ -929,6 +1070,27 @@ describe('side panel boxes', () => {
     const firstStat = s.stats[0];
     if (!lastNext || !firstStat) throw new Error('missing boxes');
     expect(lastNext.y + lastNext.h).toBeLessThan(firstStat.y);
+  });
+
+  it('puts the panel above the well when a side panel would be too short for its boxes', () => {
+    // A 240 px canvas leaves a 9 px well cell: the side panel would have no room for its NEXT boxes.
+    const short = layoutTetris(540, 240, 0, true);
+    expect(short.panel?.side).toBe(false);
+    expect(short.panel ? short.panel.y + short.panel.h : Infinity).toBeLessThanOrEqual(short.well.y);
+    // From a 10 px cell up, the side panel is used and its boxes keep their gaps.
+    for (let height = 252; height <= 800; height += 2) {
+      const { panel } = layoutTetris(540, height, 0, true);
+      if (!panel) throw new Error('no panel');
+      expect(panel.side).toBe(true);
+      const s = panelSlots(panel);
+      const boxes = [s.hold, ...s.next, ...s.stats];
+      for (let i = 0; i < boxes.length; i++)
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i] ?? s.hold;
+          const b = boxes[j] ?? s.hold;
+          expect(gapOf(a, b), `${height} px`).toBeGreaterThanOrEqual(6);
+        }
+    }
   });
 });
 
@@ -967,6 +1129,23 @@ describe('layout and rendering', () => {
     insets.bottom = 200;
     game.render();
     expect(peek(game).cache).not.toBe(first);
+  });
+
+  it('reuses the panel lists between frames, and rebuilds the stat lines only when a number moves', () => {
+    const { game, input } = start(4);
+    const s = peek(game);
+    game.render();
+    const { next, stats } = s.hud;
+    game.render();
+    step(game, input, 30);
+    game.render();
+    expect(s.hud.next).toBe(next);
+    expect(s.hud.stats).toBe(stats);
+    tap(game, input, 'primary');
+    game.render();
+    expect(s.hud.next).toBe(next);
+    expect(s.hud.stats).not.toBe(stats);
+    expect(s.hud.stats[0]).toEqual(['SCORE', game.getResult().score.toLocaleString('en-US')]);
   });
 
   it('renders the card preview without a panel and without throwing', () => {

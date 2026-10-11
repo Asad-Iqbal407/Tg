@@ -1,4 +1,4 @@
-import { fillRoundRect, roundRectPath, shade, text } from '../draw';
+import { fillRoundRect, roundRectPath, shade, text, type TextOpts } from '../draw';
 import { type Board, COLS, HIDDEN_ROWS, ROWS, VISIBLE_ROWS } from './board';
 import { cellsOf, type Kind, KINDS, type Piece, pieceBounds } from './pieces';
 
@@ -13,6 +13,11 @@ const LABEL_PX = 18;
 const STAT_TALL_PX = 36;
 /** Narrowest logical width that leaves a side panel room beside a well of usable size. */
 const SIDE_MIN_W = COLS * 24 + GAP + 112 + 2 * MARGIN;
+/**
+ * Smallest well cell whose side panel fits its labels, gaps and three stat boxes (about 200 px of a 22-row panel).
+ * Below it the NEXT boxes would have no room, so the panel goes above the well instead.
+ */
+const SIDE_MIN_CELL = 10;
 
 /** Top-left corner of the well (row 0, the top buffer row) and the size of a cell, in logical px. */
 export interface Well {
@@ -56,14 +61,16 @@ export function layoutTetris(W: number, H: number, bottom: number, withPanel: bo
   }
   if (W >= SIDE_MIN_W) {
     const cell = Math.max(1, Math.floor(Math.min(availH / ROWS, (availW - GAP) / (COLS + PANEL_CELLS))));
-    const panelW = Math.floor(PANEL_CELLS * cell);
-    const groupW = COLS * cell + GAP + panelW;
-    const x = centred(availW, groupW);
-    const y = centred(availH, ROWS * cell);
-    return {
-      well: { x, y, cell },
-      panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true },
-    };
+    if (cell >= SIDE_MIN_CELL) {
+      const panelW = Math.floor(PANEL_CELLS * cell);
+      const groupW = COLS * cell + GAP + panelW;
+      const x = centred(availW, groupW);
+      const y = centred(availH, ROWS * cell);
+      return {
+        well: { x, y, cell },
+        panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true },
+      };
+    }
   }
   const cell = Math.max(1, Math.floor(Math.min(availW / COLS, (availH - STRIP_PX - GAP) / ROWS)));
   const boardW = COLS * cell;
@@ -304,8 +311,16 @@ function box(ctx: CanvasRenderingContext2D, r: Rect): void {
   ctx.stroke();
 }
 
+/** Panel text options, built once so drawing the panel allocates nothing. */
+const LABEL_TEXT: TextOpts = { size: 11, weight: 800, color: '#d8b4fe', stroke: null };
+const NAME_TEXT: TextOpts = { size: 10, weight: 800, color: '#d8b4fe', stroke: null };
+const NAME_SHORT_TEXT: TextOpts = { size: 9, weight: 800, color: '#d8b4fe', stroke: null };
+const VALUE_SHORT_TEXT: TextOpts = { size: 13, align: 'right', stroke: null };
+/** The tall stat value. Its size is set just before each value is drawn, so one object serves every stat. */
+const VALUE_TEXT: TextOpts = { stroke: null };
+
 function label(ctx: CanvasRenderingContext2D, value: string, at: { x: number; y: number }): void {
-  text(ctx, value, at.x, at.y, { size: 11, weight: 800, color: '#d8b4fe', stroke: null });
+  text(ctx, value, at.x, at.y, LABEL_TEXT);
 }
 
 /** A piece centred in a box, at the largest size that fits it. */
@@ -328,14 +343,14 @@ function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rec
   const pad = Math.min(10, Math.round(r.w * 0.12));
   if (r.h >= STAT_TALL_PX) {
     // The value shrinks in a narrow box rather than spilling out of it (a digit is about 0.62 em wide).
-    const size = Math.min(18, Math.floor((r.w - 2 * pad) / (0.62 * value.length)));
-    text(ctx, name, r.x + pad, r.y + 11, { size: 10, weight: 800, color: '#d8b4fe', stroke: null });
-    text(ctx, value, r.x + pad, r.y + r.h - 12, { size, stroke: null });
+    VALUE_TEXT.size = Math.min(18, Math.floor((r.w - 2 * pad) / (0.62 * value.length)));
+    text(ctx, name, r.x + pad, r.y + 11, NAME_TEXT);
+    text(ctx, value, r.x + pad, r.y + r.h - 12, VALUE_TEXT);
     return;
   }
   const mid = r.y + r.h / 2;
-  text(ctx, name, r.x + 6, mid, { size: 9, weight: 800, color: '#d8b4fe', stroke: null });
-  text(ctx, value, r.x + r.w - 6, mid, { size: 13, align: 'right', stroke: null });
+  text(ctx, name, r.x + 6, mid, NAME_SHORT_TEXT);
+  text(ctx, value, r.x + r.w - 6, mid, VALUE_SHORT_TEXT);
 }
 
 /** Hold box, the next three pieces, and the stat lines. Works from slots built once, so it allocates nothing. */

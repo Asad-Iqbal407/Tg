@@ -672,8 +672,12 @@ export class BombSquadGame extends BaseGame {
       if (!b.dead) this.occupied[this.arena.index(b.tx, b.ty)] = 1;
     }
     const p = this.player;
+    // While the player cannot be hurt (respawning or invulnerable) no contact time builds up, so a walker
+    // still has to hold range for the full grace once the window ends.
+    const hurtable = !this.isEnding && p.respawn <= 0 && p.invuln <= 0;
     for (const bot of this.bots) {
-      if (stepBot(bot, this.botEnv, p.x, p.y, dt)) this.hurtPlayer();
+      if (stepBot(bot, this.botEnv, p.x, p.y, dt) && hurtable) this.hurtPlayer();
+      if (!hurtable) bot.contact = 0;
     }
   }
 
