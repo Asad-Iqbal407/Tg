@@ -43,7 +43,9 @@ export type ArcadeEvent =
   | { type: 'level-up'; reward: LevelReward }
   | { type: 'mission-complete'; mission: MissionState }
   | { type: 'purchase'; itemId: string }
-  | { type: 'daily-claimed'; reward: DailyReward; streak: number };
+  | { type: 'daily-claimed'; reward: DailyReward; streak: number }
+  /** Emitted once per settled run, after its rewards and stats have been stored. */
+  | { type: 'run-finished'; summary: RunSummary; startedAt: number };
 
 export type PurchaseResult = { ok: true } | { ok: false; reason: string };
 
@@ -287,7 +289,7 @@ export class ArcadeService {
     for (const m of missionsCompleted) this.emit({ type: 'mission-complete', mission: m });
     for (const a of achievements) this.emit({ type: 'achievement', def: a });
 
-    return {
+    const summary: RunSummary = {
       gameId,
       result,
       rewards,
@@ -301,6 +303,8 @@ export class ArcadeService {
       missionsCompleted,
       boosts: ticket.boosts,
     };
+    this.emit({ type: 'run-finished', summary, startedAt: ticket.startedAt });
+    return summary;
   }
 
   // ---------------------------------------------------------------- shop

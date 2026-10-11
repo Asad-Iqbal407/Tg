@@ -8,20 +8,24 @@ import type { App, Screen } from '../app';
 import { compact, fmt, h } from '../dom';
 import { icon } from '../icons';
 import { drawGamePreview, schedulePreview } from '../previews';
+import { openAccountDialog, syncPhaseText } from './account';
 import { missionList } from './missions';
 
 export function homeScreen(app: App): Screen {
   const el = h('section', { class: 'screen home' });
+  const account = accountCard(app);
   const render = () => {
     el.replaceChildren(
       hero(app, render),
       h('h2', { class: 'section-title', text: 'Games' }),
       gameGrid(app),
-      sidePanels(app, render),
+      sidePanels(app, render, account.el),
     );
   };
   render();
-  return { el };
+  account.refresh();
+  const unsubscribe = app.cloud.subscribe(() => account.refresh());
+  return { el, destroy: unsubscribe };
 }
 
 function hero(app: App, rerender: () => void): HTMLElement {
@@ -151,7 +155,56 @@ function gameCard(app: App, def: GameDefinition): HTMLElement {
   return card;
 }
 
-function sidePanels(app: App, rerender: () => void): HTMLElement {
+interface AccountCard {
+  el: HTMLElement;
+  refresh(): void;
+}
+
+/** The account panel. Built once per screen and updated in place as the sync state changes. */
+function accountCard(app: App): AccountCard {
+  const body = h('p', { class: 'muted small' });
+  const button = h('button', {
+    class: 'btn btn--ghost btn--sm',
+    attrs: { type: 'button' },
+    on: {
+      click: () => {
+        app.sfx('click');
+        openAccountDialog(app);
+      },
+    },
+  });
+  const el = h(
+    'div',
+    { class: 'panel account-card' },
+    h('div', { class: 'panel__head' }, h('h3', null, icon('user'), 'Account')),
+    body,
+    h('div', { class: 'panel__foot' }, button),
+  );
+  const refresh = () => {
+    const s = app.cloud.current;
+    switch (s.kind) {
+      case 'checking':
+        body.textContent = 'Checking your account…';
+        button.textContent = 'Account';
+        break;
+      case 'unavailable':
+        body.textContent = 'Your progress is saved on this device. Accounts are unavailable right now.';
+        button.textContent = 'Accounts unavailable';
+        break;
+      case 'guest':
+        body.textContent = 'Playing as a guest. Create an account to back up your progress across devices.';
+        button.textContent = 'Sign in or create account';
+        break;
+      case 'account':
+        body.textContent = `Signed in as ${s.user.username}. ${syncPhaseText(s.phase)}`;
+        button.textContent = 'Manage account';
+        break;
+    }
+  };
+  return { el, refresh };
+}
+
+function sidePanels(app: App, rerender: () => void, accountEl: HTMLElement): HTMLElement {
   const p = app.arcade.profile;
   const info = levelInfo(p.xp);
   const next = levelUpReward(info.level + 1);
@@ -203,7 +256,7 @@ function sidePanels(app: App, rerender: () => void): HTMLElement {
     ),
     missionList(app, rerender),
   );
-  return h('div', { class: 'home-panels' }, missions, progress);
+  return h('div', { class: 'home-panels' }, missions, progress, accountEl);
 }
 
 function withWidth(el: HTMLElement, t: number): HTMLElement {

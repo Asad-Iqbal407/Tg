@@ -2,6 +2,7 @@ import type { AudioEngine, MusicTheme, SfxName } from '../core/audio';
 import { getGame } from '../games/registry';
 import type { BoostId, GameId } from '../games/types';
 import type { ArcadeService } from '../meta/arcade';
+import { type CloudNotice, CloudSync } from '../meta/cloud/sync';
 import { levelInfo } from '../meta/progression';
 import type { Profile, Settings } from '../meta/profile';
 import { clear, compact, fmt, h, prefersReducedMotion } from './dom';
@@ -9,6 +10,7 @@ import { icon, type IconName } from './icons';
 import { openLobby } from './lobby';
 import { Toaster } from './overlay';
 import { PlayScreen } from './play';
+import { askProgressChoice } from './screens/account';
 import { achievementsScreen } from './screens/achievements';
 import { homeScreen } from './screens/home';
 import { leaderboardScreen } from './screens/leaderboard';
@@ -55,6 +57,8 @@ const MENU_MUSIC: MusicTheme = {
 export class App {
   readonly toaster: Toaster;
   readonly overlayHost: HTMLElement;
+  /** Account sync. Idle for guests; see src/meta/cloud/sync.ts. */
+  readonly cloud: CloudSync;
   private readonly header: HTMLElement;
   private readonly main: HTMLElement;
   private readonly nav: HTMLElement;
@@ -112,11 +116,18 @@ export class App {
       this.overlayHost,
     );
     this.toaster = new Toaster(root);
+    this.cloud = new CloudSync({
+      store: arcade.store,
+      events: arcade,
+      ask: (choice) => askProgressChoice(this.overlayHost, choice),
+      notify: (notice) => this.cloudNotice(notice),
+    });
   }
 
   start(): void {
     this.applySettings(this.settings);
     this.arcade.store.subscribe(() => this.refreshHud());
+    this.cloud.start();
     this.arcade.on((e) => {
       switch (e.type) {
         case 'achievement':
@@ -225,6 +236,26 @@ export class App {
     const p = this.pendingBoosts;
     this.pendingBoosts = null;
     return p && p.gameId === gameId ? p.boosts : [];
+  }
+
+  private cloudNotice(notice: CloudNotice): void {
+    if (notice.kind === 'refreshed') {
+      this.toaster.show({
+        title: 'Progress updated',
+        body: 'Your account has newer progress from another device, so this device now matches it.',
+        icon: 'sparkle',
+        tone: 'info',
+        ms: 5000,
+      });
+    } else {
+      this.toaster.show({
+        title: 'Signed out',
+        body: 'Your session ended. Sign in again to keep syncing.',
+        icon: 'user',
+        tone: 'error',
+        ms: 5000,
+      });
+    }
   }
 
   private startMenuMusic(): void {

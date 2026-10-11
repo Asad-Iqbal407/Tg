@@ -30,6 +30,8 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // API responses are live data (sessions, profiles, leaderboards). Leave them to the network, uncached.
+  if (url.pathname.includes('/api/')) return;
 
   // Pages: network first so deploys show up immediately, cached shell when offline.
   if (req.mode === 'navigate') {

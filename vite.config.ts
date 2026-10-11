@@ -50,6 +50,11 @@ function serviceWorker(): Plugin {
   };
 }
 
+// The API (npm run server:dev) listens on 8787. The browser talks to it through the same origin, as nginx does.
+const apiProxy = {
+  '/api': { target: 'http://localhost:8787' },
+};
+
 export default defineConfig({
   // Relative base so the build can be hosted from any sub-path (GitHub Pages, CDN folders, …).
   base: './',
@@ -66,6 +71,10 @@ export default defineConfig({
   },
   server: {
     host: true,
+    proxy: apiProxy,
+  },
+  preview: {
+    proxy: apiProxy,
   },
   test: {
     environment: 'node',

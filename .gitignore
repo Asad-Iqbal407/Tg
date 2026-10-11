@@ -1,6 +1,10 @@
 node_modules
 dist
+dist-server
 coverage
 *.log
 .DS_Store
 .vite
+.env
+.env.*
+!.env.example
