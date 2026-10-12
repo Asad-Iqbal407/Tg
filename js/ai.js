@@ -153,7 +153,7 @@
             default: break;
           }
         }
-        if (df.t <= 0) { this.defending = null; if (df.fired || df.type === 'block' || df.type === 'duck') this.onDefendedCheck = true; }
+        if (df.t <= 0) this.defending = null;
         if (this.defending) return intent;
       }
 

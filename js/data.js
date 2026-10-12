@@ -25,8 +25,8 @@
   BX.DIFFICULTY = [
     { id: 'rookie',   name: 'Rookie',   react: 0.55, aggression: 0.32, defense: 0.18, skill: 0.25, think: 0.34, dmg: 0.80 },
     { id: 'amateur',  name: 'Amateur',  react: 0.38, aggression: 0.48, defense: 0.38, skill: 0.45, think: 0.26, dmg: 0.95 },
-    { id: 'pro',      name: 'Pro',      react: 0.27, aggression: 0.62, defense: 0.60, skill: 0.70, think: 0.18, dmg: 1.05 },
-    { id: 'champion', name: 'Champion', react: 0.18, aggression: 0.76, defense: 0.80, skill: 0.90, think: 0.12, dmg: 1.15 },
+    { id: 'pro',      name: 'Pro',      react: 0.28, aggression: 0.60, defense: 0.55, skill: 0.66, think: 0.19, dmg: 1.00 },
+    { id: 'champion', name: 'Champion', react: 0.21, aggression: 0.72, defense: 0.74, skill: 0.88, think: 0.14, dmg: 1.08 },
   ];
 
   BX.SKINS = ['#f6d5b8', '#e8b98d', '#d39b6a', '#b57a4a', '#8d5a36', '#5e3a22', '#3b2418'];

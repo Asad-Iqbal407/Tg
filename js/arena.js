@@ -153,10 +153,7 @@
         const rope = new T.Mesh(ropeG, mat);
         const horizontal = s < 2;
         rope.position.set(horizontal ? 0 : (s === 2 ? -P : P), y, horizontal ? (s === 0 ? -P : P) : 0);
-        rope.rotation.z = horizontal ? Math.PI / 2 : 0;
-        rope.rotation.x = horizontal ? 0 : Math.PI / 2;
-        if (!horizontal) rope.rotation.set(Math.PI / 2, 0, 0);
-        if (horizontal) rope.rotation.set(0, 0, Math.PI / 2);
+        if (horizontal) rope.rotation.set(0, 0, Math.PI / 2); else rope.rotation.set(Math.PI / 2, 0, 0);
         rope.castShadow = quality === 'high';
         rope.userData = { baseY: y, side: s, kick: 0 };
         G.add(rope);

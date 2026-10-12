@@ -502,10 +502,6 @@
       return out;
     }
 
-    _chestToBody(arr, out) {
-      return out.set(arr[0] * (arr === GUARD.lead || arr === BLOCKP.lead || arr === RELAX.lead ? 1 : 1), arr[1], arr[2]).applyMatrix4(this.mChest);
-    }
-
     animate(dt, opp, game) {
       if (this.role === 'ref') { this._animateRef(dt, game); return; }
       const R = this.rig, P = this.pose, act = this.act, mx = this.mx, w = R.dims.w;
@@ -521,7 +517,7 @@
       let tHipY = D.hipY - cr * 0.27 + bob;
       let tPx = Math.sin(this.t * 2.7) * 0.01, tPz = cr * 0.06;
       let tTwist = STANCE_TWIST, tLean = 0.1 + cr * 0.42 + P.block * 0.12, tRoll = 0;
-      let tHeadPitch = 0.05 - cr * 0.12, tHeadYaw = 0, tHeadRoll = 0;
+      let tHeadPitch = 0.05 - cr * 0.12, tHeadRoll = 0;
       let rate = 16;
       const ext = { lead: 0, rear: 0 };
       const poleLead = v1.set(0.3, -1, -0.3), poleRear = v2.set(-0.3, -1, -0.3);
@@ -558,7 +554,6 @@
             else tTwist += 0.9 * k - 0.2 * (1 - k);
             if (d.kind === 'hook') { tRoll += -sgn * 0.1 * k; tPx += -sgn * 0.04 * k; }
             if (d.kind === 'special') { tHipY -= 0.12 * Math.max(0, -k) * 3; tLean += -0.4 * Math.max(0, -k) * 1.2; rate = 22; }
-            tHeadYaw -= tTwist - STANCE_TWIST > 0 ? 0 : 0; // head stays on target (handled below)
             if (d.hand === 'lead') poleLead.set(d.kind === 'hook' ? 1 : 0.4, d.kind === 'hook' ? 0.05 : -0.9, -0.2);
             else poleRear.set(d.kind === 'hook' ? -1 : -0.4, d.kind === 'hook' ? 0.05 : -0.9, -0.2);
             rate = Math.max(rate, 26);
@@ -611,7 +606,6 @@
       }
       if (act && act.type === 'down') fallRoll = this._lastFallRoll || 0;
       if (act && act.type === 'getup') { fallBack = this._lastFallBack || 1; fallRoll = (this._lastFallRoll || 0) * (1 - BX.ease.inOutCubic(act.t / act.dur)); }
-      if (!act || act.type !== 'punch') { /* ext stays 0 */ }
       if (!act && P.block > 0.5) mode = 'block';
 
       // ---------------- smoothing into pose ----------------
@@ -634,15 +628,11 @@
       // knockdown pitch (rigid body rotation about the feet)
       body.rotation.set(-P.fall * fallBack * (Math.PI / 2 - 0.04), 0, P.fall * fallRoll * 0.4, 'YXZ');
       body.position.set(0, P.fall * 0.17, P.fall * -0.1 * fallBack);
-      if (act && (act.type === 'fall' || act.type === 'down' || act.type === 'getup')) {
-        // keep the lying direction stable
-        this.root.rotation.y += 0; // yaw is frozen elsewhere
-      }
 
       const sway = sp.sway.p * mx;
-      R.pelvis.position.set(P.px * mx + sway * 0.1, P.hipY - cr * 0.0, P.pz);
+      R.pelvis.position.set(P.px * mx + sway * 0.1, P.hipY, P.pz);
       const pelvisYaw = (P.twist + sp.twist.p * mx) * 0.5;
-      R.pelvis.rotation.set(0, pelvisYaw, P.roll * 0.4 * mx * 0 + P.roll * 0.5, 'YXZ');
+      R.pelvis.rotation.set(0, pelvisYaw, P.roll * 0.5, 'YXZ');
       R.chest.rotation.set(P.lean + sp.lean.p, (P.twist + sp.twist.p * mx) - pelvisYaw, P.roll * 0.5, 'YXZ');
       // head looks at the opponent: cancel the chest twist, plus reaction springs
       const headYawBase = -(P.twist + sp.twist.p * mx) * 0.85 + 0.05;
@@ -660,7 +650,7 @@
         const sx = hand === 'lead' ? 1 : -1;
         const arm = R.arms[hand];
         const base = mode === 'block' ? BLOCKP[hand] : mode === 'relax' || mode === 'down' ? RELAX[hand] : GUARD[hand];
-        let tgt = v3.set(base[0] * (hand === 'lead' ? w * 0.9 + 0.1 : w * 0.9 + 0.1), base[1], base[2]);
+        let tgt = v3.set(base[0] * (w * 0.9 + 0.1), base[1], base[2]);
         let k = 14;
         const pole = hand === 'lead' ? poleLead : poleRear;
         if (mode === 'up') {
@@ -732,7 +722,7 @@
       const stop = 0.2 + (act.low ? 0.1 : 0.12);
       let want = Math.max(0.15, dist - stop);
       v2.multiplyScalar(1 / (dist || 1));
-      want = Math.min(want + (act.deficit > 0 ? 0 : 0), reach);
+      want = Math.min(want, reach);
       const aim = v4.copy(vShoulder).addScaledVector(v2, want);
       aim.z = Math.max(aim.z, vShoulder.z + 0.12);
       const aimC = new T.Vector3().copy(aim);
