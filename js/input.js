@@ -125,7 +125,7 @@
       if (g && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const tag = (e.target && e.target.tagName) || '';
         if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
-          if (I.onGlobal && I.onGlobal(g, e) !== false) { e.preventDefault(); return; }
+          if (I.onGlobal && I.onGlobal(g, e) !== false) { e._handled = true; e.preventDefault(); return; }
         }
       }
       const targets = I.keymap.get(e.code);

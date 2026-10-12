@@ -133,6 +133,7 @@
     const padCols = [0xc1121f, 0x1e5fd6, 0xf2f2f2, 0xf2f2f2];
     const P = 3.02;
     const corners = [[-P, -P], [P, -P], [-P, P], [P, P]];
+    arena.posts = [];
     corners.forEach((c, i) => {
       const post = new T.Mesh(own(new T.CylinderGeometry(0.07, 0.07, 1.62, 14)), chrome);
       post.position.set(c[0], 0.81, c[1]); post.castShadow = true; G.add(post);
@@ -140,6 +141,7 @@
       pad.position.set(c[0] * 0.985, 0.78, c[1] * 0.985); pad.castShadow = true; G.add(pad);
       const cap = new T.Mesh(own(new T.SphereGeometry(0.085, 12, 8)), chrome);
       cap.position.set(c[0], 1.64, c[1]); G.add(cap);
+      arena.posts.push({ x: c[0], z: c[1], meshes: [post, pad, cap] });
     });
     const ropeCols = [0xf2f2f2, 0xc1121f, 0x1e5fd6];
     const ropeY = [0.55, 0.95, 1.35];
@@ -367,6 +369,11 @@
       for (const r of arena.ropes) {
         const s = r.userData.side;
         r.visible = !((s === 0 && cam.z < -lim) || (s === 1 && cam.z > lim) || (s === 2 && cam.x < -lim) || (s === 3 && cam.x > lim));
+      }
+      // never let a corner post fill the screen
+      for (const p of arena.posts) {
+        const show = Math.hypot(cam.x - p.x, cam.z - p.z) > 1.5;
+        for (const m of p.meshes) m.visible = show;
       }
     };
     arena.excite = 0.2;

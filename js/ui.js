@@ -344,7 +344,7 @@
     ov.innerHTML = screens[name]();
     ov.classList.remove('hidden', 'clear', 'dim');
     if (name === 'avatar') ov.classList.add('clear');
-    if (name === 'pause' || name === 'rest' || name === 'result') ov.classList.add('dim');
+    if (name !== 'menu' && name !== 'avatar') ov.classList.add('dim');
     const sc = $('.screen', ov);
     if (sc && keepScroll) sc.scrollTop = keepScroll;
     UI._lastRendered = name;
@@ -483,7 +483,7 @@
     pauseTo(el) { opts.from = 'pause'; UI.show(el.dataset.v); },
     quit() { UI.hideOverlay(); G().quitToMenu(); UI.show('menu'); },
     quit2() { UI.hideOverlay(); G().quitToMenu(); UI.show('menu'); },
-    nextRound() { UI.hideOverlay(); G().continueFromRest(); },
+    nextRound() { UI.hideOverlay(); els.hud.classList.remove('hidden'); G().continueFromRest(); },
     rematch() { UI.hideOverlay(); G().startFight(G().cfg); },
   };
 
@@ -640,8 +640,9 @@
     if (on) UI.show('pause');
     else UI.hideOverlay();
   };
-  UI.showRest = function () { UI.show('rest'); };
+  UI.showRest = function () { els.hud.classList.add('hidden'); UI.show('rest'); };
   UI.showResult = function (res) {
+    els.hud.classList.add('hidden');
     const reward = P.record(res);
     UI.show('result', { res, reward });
     G().setViewShift(0);
@@ -678,7 +679,7 @@
   function overlayVisible() { return !els.overlay.classList.contains('hidden'); }
 
   UI.onKey = function (e) {
-    if (I.capture || e._captured) return;
+    if (I.capture || e._captured || e._handled) return;
     if (G().mode === 'fight' && G().phase === 'intro' && !overlayVisible()) { G().skipIntro = true; }
     if (!overlayVisible()) return;
     const tag = (e.target && e.target.tagName) || '';
@@ -720,7 +721,8 @@
     const touchy = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
     const show = g.mode === 'fight' && g.cfg && g.cfg.mode !== 'versus' && (pref === 'on' || (pref === 'auto' && touchy));
     els.touch.classList.toggle('hidden', !show);
-    els.hints.classList.toggle('hidden', !g.settings.hints || (show && touchy));
+    els.hud.classList.toggle('touch', show);
+    els.hints.classList.toggle('hidden', !g.settings.hints || show);
   };
 
   function setupTouch() {

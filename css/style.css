@@ -136,7 +136,8 @@ button { font-family: inherit; color: inherit; }
 #overlay.clear { background: linear-gradient(90deg, rgba(5, 7, 13, 0.82) 0%, rgba(5, 7, 13, 0.5) 38%, rgba(5, 7, 13, 0) 62%); align-items: stretch; justify-content: flex-start; }
 #overlay.dim { background: rgba(5, 7, 13, 0.72); }
 .screen { width: 100%; height: 100%; max-width: 1180px; padding: max(18px, env(safe-area-inset-top)) 22px 18px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; overflow-x: hidden; animation: fadeIn 0.3s both; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
-.screen.center { justify-content: center; align-items: center; text-align: center; }
+.screen.center { align-items: center; text-align: center; }
+.screen.center::before, .screen.center::after { content: ''; flex: 1 0 0; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .title { font-family: var(--head); font-size: clamp(34px, 6vw, 62px); letter-spacing: 4px; line-height: 1; margin: 0; }
 .title small { display: block; font-size: 0.32em; color: var(--gold); letter-spacing: 6px; margin-top: 4px; }
@@ -254,6 +255,15 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 .tb.fury.ready { background: rgba(242, 183, 5, 0.85); color: #000; animation: furyPulse 0.4s infinite alternate; }
 #tpunch .tb:nth-child(1), #tpunch .tb:nth-child(3), #tpunch .tb:nth-child(5) { }
 
+#hud.touch .hud-btns { top: calc(max(10px, env(safe-area-inset-top)) + 64px); right: 50%; transform: translateX(50%); flex-direction: row; }
+#hud.touch .hud-btn { width: 34px; height: 34px; font-size: 13px; }
+@media (max-width: 560px) {
+  .tb { width: 50px; height: 46px; font-size: 11px; }
+  #tdef .tb { width: 64px; height: 46px; }
+  #tpunch .tb { width: 56px; height: 56px; }
+  #tmove { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 126px); gap: 4px; }
+  #tdef { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 150px); }
+}
 @media (max-width: 760px) {
   .menu { grid-template-columns: 1fr; gap: 14px; }
   .split { grid-template-columns: 1fr; }

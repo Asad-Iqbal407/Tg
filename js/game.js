@@ -68,6 +68,7 @@
       Game.ref.snapFeet();
       window.addEventListener('resize', Game.resize);
       Game.resize();
+      Game.initTrainingEvents();
       Game.showMenuScene();
       let last = performance.now(), fpsT = 0, fpsN = 0;
       const loop = (now) => {
@@ -171,10 +172,10 @@
       Game.stage = opts.solo ? 'solo' : 'menu';
       if (opts.solo) {
         fs[0].reset(0, 0, 0); fs[1].reset(0, 3.2, Math.PI);
-        Game.menuCam = { angle: 2.9, radius: 3.0, height: 1.45, spin: !opts.still, lookY: 1.05, fov: 40, userCtl: true };
+        Game.menuCam = { angle: 2.9, radius: 3.9, height: 1.5, spin: !opts.still, lookY: 1.0, fov: 40, userCtl: true };
       } else {
         fs[0].reset(START[0].x, START[0].z, 0); fs[1].reset(START[1].x, START[1].z, Math.PI);
-        Game.menuCam = { angle: 0.8, radius: 5.6, height: 1.9, spin: true, lookY: 1.25, fov: 46 };
+        Game.menuCam = { angle: 0.0, radius: 5.4, height: 1.9, spin: true, lookY: 1.25, fov: 46 };
       }
       for (const f of fs) { f.locked = true; f.snapFeet(); }
       fs[0].forcedPose = opts.solo ? 'intro' : null;
@@ -183,13 +184,14 @@
       Game.rig.setOverride((t, dt, P, L) => {
         const m = Game.menuCam;
         if (m.spin && !Game._dragging) m.angle += dt * 0.22;
-        const a = m.angle + Game.userAngle;
-        const rr = m.userCtl ? m.radius : Math.min(6.2, m.radius / Math.max(Math.abs(Math.sin(a)), Math.abs(Math.cos(a)), 0.7));   // square-ish orbit keeps the camera away from the corner posts
+        // the avatar creator orbits freely; the menu backdrop sweeps gently so the camera never passes a corner post
+        const a = m.userCtl ? m.angle + Game.userAngle : Math.PI + Math.sin(m.angle * 0.9) * 0.55 + Game.userAngle;
+        const rr = m.radius;
         P.set(Math.sin(a) * rr, m.height, Math.cos(a) * rr);
         L.set(0, m.lookY, 0);
         return m.fov;
       }, Infinity, 5);
-      Game.rig.snap(new T.Vector3(Math.sin(0.8) * 5.6, 1.9, Math.cos(0.8) * 5.6), new T.Vector3(0, 1.25, 0));
+      Game.rig.snap(new T.Vector3(0, 1.9, -5.4), new T.Vector3(0, 1.25, 0));
     },
 
     /** Re-skin the showcased fighter (avatar creator). */
@@ -509,6 +511,22 @@
       A.dodge();
       if (!f.isAI) Game.emit(kind, f);
     },
+    initTrainingEvents() {
+      const done = (id) => { if (Game.training) Game.completeTask(id); };
+      Game.on('land', (f, i) => {
+        if (!Game.training) return;
+        if (i.id === 'jab') done('jab');
+        if (i.id === 'cross') done('cross');
+        if (i.kind === 'hook') done('hook');
+        if (i.kind === 'upper') done('upper');
+        if (i.body) done('body');
+        if (i.combo >= 3) done('combo');
+      });
+      Game.on('blocked', () => done('block'));
+      Game.on('dodged', (f, how) => { if (how === 'slip') done('slip'); });
+      Game.on('dash', () => done('dash'));
+      Game.on('special', () => done('fury'));
+    },
     onTaunt(f) {
       f.fury = Math.min(100, f.fury + 12);
       A.cheer(0.5);
@@ -578,7 +596,7 @@
           def.counterT = 1.1;
           A.dodge();
           BX.UI.float(result === 'ducked' ? 'DUCKED!' : 'DODGED!', Game.project(def, 2.05), 'dodge');
-          if (def.isAI) def.ai.onDefended('dodge'); else Game.emit('dodged', def);
+          if (def.isAI) def.ai.onDefended('dodge'); else Game.emit('dodged', def, da ? da.type : 'duck');
           Game.rig.addShake(0.08);
         }
         return;
@@ -918,7 +936,7 @@
     tasksDone() { for (const id of arguments) if (!Game.taskDone(id)) return false; return true; },
     completeTask(id) {
       const t = Game.training && Game.training.tasks.find((x) => x.id === id);
-      if (t && !t.done) { t.done = true; A.ui('select'); BX.UI.toast('✔ ' + t.text.replace(/\{.*?\}/g, '').replace(/\(\s*[/]*\s*\)/g, '').trim()); }
+      if (t && !t.done) { t.done = true; A.ui('select'); BX.UI.toast('✔ ' + t.text.split('(')[0].split('—')[0].replace(/\{.*?\}/g, '').trim()); }
     },
 
     /* =================================================================== pause / quit */
