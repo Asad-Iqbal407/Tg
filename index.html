@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#05070d">
+  <title>Knockout Arena — 3D Boxing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="shade"></div>
+  <div id="hitflash"></div>
+
+  <!-- ===================== in-fight HUD ===================== -->
+  <div id="hud" class="hidden">
+    <div class="hud-top">
+      <div class="fbox left" id="hud0">
+        <div class="fname"><span class="n">YOU</span><span class="kds"></span></div>
+        <div class="bar hp"><i class="ghost"></i><i class="fill"></i></div>
+        <div class="row">
+          <div class="bar st"><i class="fill"></i></div>
+          <div class="bar fy"><i class="fill"></i><b>FURY</b></div>
+        </div>
+      </div>
+      <div class="hud-center">
+        <div class="round" id="hudRound">ROUND 1 / 3</div>
+        <div class="timer" id="hudTimer">1:00</div>
+      </div>
+      <div class="fbox right" id="hud1">
+        <div class="fname"><span class="n">CPU</span><span class="kds"></span></div>
+        <div class="bar hp"><i class="ghost"></i><i class="fill"></i></div>
+        <div class="row">
+          <div class="bar st"><i class="fill"></i></div>
+          <div class="bar fy"><i class="fill"></i><b>FURY</b></div>
+        </div>
+      </div>
+    </div>
+    <div class="combo" id="combo0"></div>
+    <div class="combo r" id="combo1"></div>
+    <div class="mash hidden" id="mash"><div class="mt">GET UP! MASH THE PUNCH KEYS</div><div class="mb"><i></i></div></div>
+    <div class="train hidden" id="train"><h4>TRAINING</h4><ul></ul></div>
+    <div class="hints" id="hints"></div>
+    <div class="hud-btns">
+      <button class="hud-btn" id="bPause" title="Pause (Esc / P)">❚❚</button>
+      <button class="hud-btn" id="bCam" title="Camera (Tab)">🎥</button>
+      <button class="hud-btn" id="bMute" title="Sound (O)">🔊</button>
+      <button class="hud-btn" id="bHelp" title="Controls (H)">?</button>
+    </div>
+  </div>
+
+  <div id="floats"></div>
+  <div id="banner" class="hidden"></div>
+  <div id="count" class="hidden"></div>
+  <div id="intro" class="hidden"></div>
+
+  <!-- ===================== touch controls ===================== -->
+  <div id="touch" class="hidden">
+    <div id="joy"><div id="joyKnob"></div></div>
+    <div id="tdef">
+      <button class="tb hold" data-a="block">BLOCK</button>
+      <button class="tb hold" data-a="crouch">DUCK</button>
+    </div>
+    <div id="tmove">
+      <button class="tb" data-a="slipL">◀ SLIP</button>
+      <button class="tb" data-a="slipR">SLIP ▶</button>
+      <button class="tb" data-a="dodge">DASH</button>
+      <button class="tb fury" data-a="special">FURY</button>
+    </div>
+    <div id="tpunch">
+      <button class="tb" data-a="jab">JAB</button>
+      <button class="tb" data-a="cross">CROSS</button>
+      <button class="tb" data-a="leadHook">L HOOK</button>
+      <button class="tb" data-a="rearHook">R HOOK</button>
+      <button class="tb" data-a="leadUpper">L UPPER</button>
+      <button class="tb" data-a="rearUpper">R UPPER</button>
+    </div>
+  </div>
+
+  <div id="overlay" class="hidden"></div>
+  <div id="toast"></div>
+  <div id="fps" class="hidden"></div>
+  <div id="loading"><div class="ld-logo">KNOCKOUT<br>ARENA</div><div class="ld-sub">Loading the ring…</div></div>
+  <div id="nogl" class="hidden"><h2>WebGL is not available</h2><p>Knockout Arena needs a browser with WebGL enabled. Try a recent Chrome, Edge, Firefox or Safari and make sure hardware acceleration is on.</p></div>
+
+  <script src="vendor/three.min.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/profile.js"></script>
+  <script src="js/model.js"></script>
+  <script src="js/fighter.js"></script>
+  <script src="js/arena.js"></script>
+  <script src="js/fx.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
