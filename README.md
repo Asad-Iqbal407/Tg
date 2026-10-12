@@ -14,7 +14,7 @@ open index.html            # works from file:// — all scripts are classic <scr
 npx serve .                # or: python3 -m http.server
 
 # option 3: one self-contained file (e.g. to share / host anywhere)
-node tools/build-single.js # -> dist/knockout-arena.html
+node tools/build-single.js # -> dist/knockout-arena.html  (add --fragment for a body-only variant)
 ```
 
 ## Game modes
@@ -95,7 +95,7 @@ js/ai.js              AI controller (same intent interface as a human)
 js/game.js            fight flow, combat resolution, knockdowns, scoring, training
 js/ui.js              HUD, menus, avatar creator, controls screen, settings, results, touch
 js/main.js            boot
-tools/build-single.js bundle everything into dist/knockout-arena.html
+tools/build-single.js bundle everything into dist/knockout-arena.html (a prebuilt copy is committed)
 ```
 
 Saved data (boxer, upgrades, career, settings, key bindings) lives in the browser's `localStorage`.
