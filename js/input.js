@@ -180,6 +180,10 @@
           if (!down && ps[key]) I.release(slot, BTN[bi], src + ':' + bi);
           ps[key] = down;
         }
+        // Start = pause (edge)
+        const st = !!(p.buttons[9] && p.buttons[9].pressed);
+        if (st && !ps.start && I.active && I.onGlobal) I.onGlobal('pause');
+        ps.start = st;
         // d-pad also moves
         const dp = (n) => !!(p.buttons[n] && p.buttons[n].pressed);
         let ax = p.axes[0] || 0, ay = -(p.axes[1] || 0);

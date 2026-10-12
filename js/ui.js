@@ -53,6 +53,7 @@
     menu() {
       const p = P.get();
       return `<div class="screen menu">
+        <div class="mleft">
         <div class="logo"><span class="l1">KNOCKOUT</span><span class="l2">ARENA</span><small>3D BOXING</small></div>
         <nav class="mainnav">
           <button class="btn primary big wide" data-act="go" data-v="career">Career<span class="sub">Stage ${Math.min(p.career.stage + 1, BX.ROSTER.length)} of ${BX.ROSTER.length}${p.career.champion ? ' · CHAMPION' : ''}${p.points ? ' · ' + p.points + ' upgrade pts' : ''}</span></button>
@@ -63,6 +64,7 @@
           <button class="btn" data-act="go" data-v="controls">Controls</button>
           <button class="btn" data-act="go" data-v="settings">Settings</button>
         </nav>
+        </div>
         <div class="card">
           <h3>${esc(p.look.name)} <span class="muted tiny">· Record ${p.record.wins}W – ${p.record.losses}L – ${p.record.draws}D · ${p.record.kos} KOs</span></h3>
           <p><b class="gold">Move</b> <span class="kbd">${kn('solo', 'up')}</span><span class="kbd">${kn('solo', 'left')}</span><span class="kbd">${kn('solo', 'down')}</span><span class="kbd">${kn('solo', 'right')}</span>
@@ -231,6 +233,7 @@
             <span class="lbl">QUALITY</span><div class="row-wrap">${chips([['low', 'Low'], ['med', 'Medium'], ['high', 'High']], s.quality, 'setting', 'quality')}</div>
             <p class="tiny">Low: no shadows, small crowd. Pick Low on slow phones.</p>
             ${toggle('Camera shake', 'shake', s.shake)}${toggle('Show FPS', 'fps', s.fps)}
+            <div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>
           </div>
           <div class="card"><h3>Gameplay</h3>
             <span class="lbl">CAMERA (TAB TO CYCLE)</span><div class="row-wrap">${chips([['behind', 'Over shoulder'], ['side', 'Side'], ['high', 'High'], ['broadcast', 'Broadcast']], s.camera, 'setting', 'camera')}</div>
@@ -349,7 +352,7 @@
     if (sc && keepScroll) sc.scrollTop = keepScroll;
     UI._lastRendered = name;
     if (name === 'avatar') { if (first) G().showMenuScene({ solo: true }); G().setViewShift(0.2); }
-    else if (G().mode === 'menu') { G().setViewShift(0); if (G().stage === 'solo') G().showMenuScene(); }
+    else if (G().mode === 'menu') { if (G().stage === 'solo') G().showMenuScene(); G().setViewShift(name === 'menu' ? 0.2 : 0, name === 'menu' ? 0.06 : 0); }
     // focus the first interactive element for keyboard / gamepad users
     if (!UI._noFocus) { const f = $('.btn.primary, .btn, .opp, .chip', ov); f && f !== document.activeElement && !['avatar'].includes(name) && f.focus({ preventScroll: true }); }
     UI._noFocus = false;
@@ -478,6 +481,7 @@
     },
     resetCareer() { if (confirm('Reset your career progress? (Your boxer and upgrades are kept.)')) { P.resetCareer(); UI.refresh(); } },
     resetAll() { if (confirm('Erase your boxer, career, settings and key bindings?')) { BX.store.remove('profile'); BX.store.remove('settings'); BX.store.remove('bindings'); location.reload(); } },
+    fullscreen() { UI.toggleFullscreen(); },
     resume() { G().resume(); },
     restart() { UI.hideOverlay(); G().restartFight(); },
     pauseTo(el) { opts.from = 'pause'; UI.show(el.dataset.v); },
@@ -545,12 +549,13 @@
       const key = g.training.tasks.map((t) => (t.done ? 1 : 0)).join('');
       if (UI.cache.train !== key) {
         UI.cache.train = key;
-        let cur = true;
-        els.train.querySelector('ul').innerHTML = g.training.tasks.map((t) => {
-          const cls = t.done ? 'done' : cur ? 'cur' : '';
-          if (!t.done) cur = false;
-          return `<li class="${cls}">${taskText(t.text)}</li>`;
-        }).join('');
+        const tasks = g.training.tasks;
+        const done = tasks.filter((t) => t.done).length;
+        const first = tasks.findIndex((t) => !t.done);
+        els.train.querySelector('h4').textContent = 'TRAINING ' + done + '/' + tasks.length;
+        els.train.querySelector('ul').innerHTML = first < 0
+          ? '<li class="done">All drills complete — keep sparring!</li>'
+          : tasks.slice(first, first + 3).map((t, i) => `<li class="${i === 0 ? 'cur' : ''}">${taskText(t.text)}</li>`).join('');
       }
     }
     els.fury0.classList.toggle('ready', g.fighters[0].fury >= 99.9);
@@ -793,10 +798,16 @@
     canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
 
     window.addEventListener('keydown', UI.onKey);
+    // never leave a fight running in a background tab
+    document.addEventListener('visibilitychange', () => {
+      const g = G();
+      if (document.hidden && g.mode === 'fight' && !g.paused && ['fight', 'knockdown', 'ready'].includes(g.phase)) g.pause();
+    });
     $('#bPause').addEventListener('click', () => G().togglePause());
     $('#bCam').addEventListener('click', () => G().cycleCamera());
     $('#bMute').addEventListener('click', () => UI.toggleMute());
     $('#bHelp').addEventListener('click', () => UI.openHelp());
+    $('#bFull').addEventListener('click', () => UI.toggleFullscreen());
     setupTouch();
     els.fps.classList.toggle('hidden', !G().settings.fps);
 
@@ -825,6 +836,13 @@
     opts.from = 'pause';
     opts.ctlTab = g.cfg.mode === 'versus' ? 'p1' : 'solo';
     UI.show('controls');
+  };
+  UI.toggleFullscreen = function () {
+    try {
+      const d = document, el = d.documentElement;
+      if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      else (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    } catch (e) { UI.toast('Fullscreen is not available here'); }
   };
   UI.toggleMute = function () {
     const s = G().settings;

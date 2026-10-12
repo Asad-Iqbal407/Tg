@@ -52,7 +52,13 @@
     /* =================================================================== setup */
     init(canvas) {
       Game.canvas = canvas;
-      Game.settings = BX.deepMerge(BX.DEFAULT_SETTINGS, BX.store.get('settings', {}));
+      const saved = BX.store.get('settings', null);
+      Game.settings = BX.deepMerge(BX.DEFAULT_SETTINGS, saved || {});
+      // first run: pick a sensible default quality (phones / weak CPUs get Medium)
+      if (!saved) {
+        const touchy = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+        if (touchy || (navigator.hardwareConcurrency || 8) <= 4) Game.settings.quality = 'med';
+      }
       const r = new T.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
       r.shadowMap.enabled = true;
       r.shadowMap.type = T.PCFSoftShadowMap;
@@ -132,12 +138,12 @@
     },
 
     /** Shift the rendered scene sideways (used by the avatar creator so the boxer sits beside the panel). */
-    setViewShift(f) { Game.viewShift = f; Game.applyView(); },
+    setViewShift(f, fy) { Game.viewShift = f; Game.viewShiftY = fy || 0; Game.applyView(); },
     applyView() {
       const c = Game.canvas, cam = Game.camera;
       const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
       const narrow = w < 760;
-      if (Game.viewShift && !narrow) cam.setViewOffset(w, h, -Game.viewShift * w, 0, w, h);
+      if (Game.viewShift && !narrow) cam.setViewOffset(w, h, -Game.viewShift * w, (Game.viewShiftY || 0) * h, w, h);
       else cam.clearViewOffset();
       cam.updateProjectionMatrix();
     },

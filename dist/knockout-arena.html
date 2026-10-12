@@ -75,7 +75,7 @@ button { font-family: inherit; color: inherit; }
 .hud-center .timer { font-family: var(--head); font-size: clamp(34px, 5.5vw, 62px); line-height: 0.9; }
 .hud-center .timer.warn { color: #ff5a5a; animation: furyPulse 0.5s infinite alternate; }
 
-.combo { position: absolute; left: 3vw; top: 24%; font-family: var(--head); font-size: clamp(30px, 6vw, 64px); color: var(--gold); text-shadow: 0 3px 10px #000, 0 0 20px rgba(242, 183, 5, 0.6); opacity: 0; transform: scale(0.8); transition: opacity 0.2s, transform 0.2s; }
+.combo { position: absolute; left: 3vw; top: 30%; font-family: var(--head); font-size: clamp(30px, 6vw, 64px); color: var(--gold); text-shadow: 0 3px 10px #000, 0 0 20px rgba(242, 183, 5, 0.6); opacity: 0; transform: scale(0.8); transition: opacity 0.2s, transform 0.2s; }
 .combo.r { left: auto; right: 3vw; text-align: right; }
 .combo.on { opacity: 1; transform: scale(1); }
 .combo small { display: block; font-size: 0.4em; color: #fff; letter-spacing: 3px; }
@@ -86,7 +86,7 @@ button { font-family: inherit; color: inherit; }
 .mash .mb { margin-top: 6px; height: 16px; border: 2px solid #fff; background: rgba(0, 0, 0, 0.6); border-radius: 8px; overflow: hidden; }
 .mash .mb i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--gold), #ff7a00); }
 
-.train { position: absolute; left: 12px; top: 22%; width: min(330px, 40vw); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.train { position: absolute; left: 12px; top: 22%; width: min(300px, 40vw); opacity: 0.92; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
 .train h4 { margin: 0 0 4px; font-family: var(--head); letter-spacing: 3px; color: var(--gold); font-size: 20px; }
 .train ul { list-style: none; padding: 0; margin: 0; font-size: 13px; line-height: 1.25; }
 .train li { padding: 2px 0 2px 22px; position: relative; color: var(--dim); }
@@ -167,8 +167,9 @@ button { font-family: inherit; color: inherit; }
 .btn.gold .sub, .btn.primary .sub { color: rgba(0, 0, 0, 0.6); }
 .btn.primary .sub { color: rgba(255, 255, 255, 0.75); }
 
-.menu { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 26px; align-content: center; align-items: center; }
-.menu .logo { grid-column: 1 / -1; }
+.menu { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: 26px; align-content: stretch; align-items: stretch; }
+.menu .mleft { display: flex; flex-direction: column; gap: 22px; justify-content: center; }
+.menu .card { align-self: end; margin-bottom: 4vh; }
 .logo .l1 { display: block; font-family: var(--head); font-size: clamp(44px, min(11vw, 17vh), 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#fff 20%, #bcc7ff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
 .logo .l2 { display: block; font-family: var(--head); font-size: clamp(44px, min(11vw, 17vh), 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#ffd24d, #e11d2e); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
 .logo small { display: block; margin-top: 8px; letter-spacing: 8px; color: var(--dim); font-size: 14px; }
@@ -277,6 +278,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 }
 @media (max-width: 760px) {
   .menu { grid-template-columns: 1fr; gap: 14px; }
+  .menu .card { align-self: stretch; margin-bottom: 0; }
   .split { grid-template-columns: 1fr; }
   .grid2, .grid3 { grid-template-columns: 1fr; }
   .mainnav .btn { font-size: 20px; padding: 10px; }
@@ -333,6 +335,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       <button class="hud-btn" id="bCam" title="Camera (Tab)">🎥</button>
       <button class="hud-btn" id="bMute" title="Sound (O)">🔊</button>
       <button class="hud-btn" id="bHelp" title="Controls (H)">?</button>
+      <button class="hud-btn" id="bFull" title="Fullscreen">⛶</button>
     </div>
   </div>
 
@@ -1024,6 +1027,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
           if (!down && ps[key]) I.release(slot, BTN[bi], src + ':' + bi);
           ps[key] = down;
         }
+        // Start = pause (edge)
+        const st = !!(p.buttons[9] && p.buttons[9].pressed);
+        if (st && !ps.start && I.active && I.onGlobal) I.onGlobal('pause');
+        ps.start = st;
         // d-pad also moves
         const dp = (n) => !!(p.buttons[n] && p.buttons[n].pressed);
         let ax = p.axes[0] || 0, ay = -(p.axes[1] || 0);
@@ -3292,7 +3299,13 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     /* =================================================================== setup */
     init(canvas) {
       Game.canvas = canvas;
-      Game.settings = BX.deepMerge(BX.DEFAULT_SETTINGS, BX.store.get('settings', {}));
+      const saved = BX.store.get('settings', null);
+      Game.settings = BX.deepMerge(BX.DEFAULT_SETTINGS, saved || {});
+      // first run: pick a sensible default quality (phones / weak CPUs get Medium)
+      if (!saved) {
+        const touchy = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+        if (touchy || (navigator.hardwareConcurrency || 8) <= 4) Game.settings.quality = 'med';
+      }
       const r = new T.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
       r.shadowMap.enabled = true;
       r.shadowMap.type = T.PCFSoftShadowMap;
@@ -3372,12 +3385,12 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     },
 
     /** Shift the rendered scene sideways (used by the avatar creator so the boxer sits beside the panel). */
-    setViewShift(f) { Game.viewShift = f; Game.applyView(); },
+    setViewShift(f, fy) { Game.viewShift = f; Game.viewShiftY = fy || 0; Game.applyView(); },
     applyView() {
       const c = Game.canvas, cam = Game.camera;
       const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
       const narrow = w < 760;
-      if (Game.viewShift && !narrow) cam.setViewOffset(w, h, -Game.viewShift * w, 0, w, h);
+      if (Game.viewShift && !narrow) cam.setViewOffset(w, h, -Game.viewShift * w, (Game.viewShiftY || 0) * h, w, h);
       else cam.clearViewOffset();
       cam.updateProjectionMatrix();
     },
@@ -4288,6 +4301,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     menu() {
       const p = P.get();
       return `<div class="screen menu">
+        <div class="mleft">
         <div class="logo"><span class="l1">KNOCKOUT</span><span class="l2">ARENA</span><small>3D BOXING</small></div>
         <nav class="mainnav">
           <button class="btn primary big wide" data-act="go" data-v="career">Career<span class="sub">Stage ${Math.min(p.career.stage + 1, BX.ROSTER.length)} of ${BX.ROSTER.length}${p.career.champion ? ' · CHAMPION' : ''}${p.points ? ' · ' + p.points + ' upgrade pts' : ''}</span></button>
@@ -4298,6 +4312,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
           <button class="btn" data-act="go" data-v="controls">Controls</button>
           <button class="btn" data-act="go" data-v="settings">Settings</button>
         </nav>
+        </div>
         <div class="card">
           <h3>${esc(p.look.name)} <span class="muted tiny">· Record ${p.record.wins}W – ${p.record.losses}L – ${p.record.draws}D · ${p.record.kos} KOs</span></h3>
           <p><b class="gold">Move</b> <span class="kbd">${kn('solo', 'up')}</span><span class="kbd">${kn('solo', 'left')}</span><span class="kbd">${kn('solo', 'down')}</span><span class="kbd">${kn('solo', 'right')}</span>
@@ -4466,6 +4481,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
             <span class="lbl">QUALITY</span><div class="row-wrap">${chips([['low', 'Low'], ['med', 'Medium'], ['high', 'High']], s.quality, 'setting', 'quality')}</div>
             <p class="tiny">Low: no shadows, small crowd. Pick Low on slow phones.</p>
             ${toggle('Camera shake', 'shake', s.shake)}${toggle('Show FPS', 'fps', s.fps)}
+            <div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>
           </div>
           <div class="card"><h3>Gameplay</h3>
             <span class="lbl">CAMERA (TAB TO CYCLE)</span><div class="row-wrap">${chips([['behind', 'Over shoulder'], ['side', 'Side'], ['high', 'High'], ['broadcast', 'Broadcast']], s.camera, 'setting', 'camera')}</div>
@@ -4584,7 +4600,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     if (sc && keepScroll) sc.scrollTop = keepScroll;
     UI._lastRendered = name;
     if (name === 'avatar') { if (first) G().showMenuScene({ solo: true }); G().setViewShift(0.2); }
-    else if (G().mode === 'menu') { G().setViewShift(0); if (G().stage === 'solo') G().showMenuScene(); }
+    else if (G().mode === 'menu') { if (G().stage === 'solo') G().showMenuScene(); G().setViewShift(name === 'menu' ? 0.2 : 0, name === 'menu' ? 0.06 : 0); }
     // focus the first interactive element for keyboard / gamepad users
     if (!UI._noFocus) { const f = $('.btn.primary, .btn, .opp, .chip', ov); f && f !== document.activeElement && !['avatar'].includes(name) && f.focus({ preventScroll: true }); }
     UI._noFocus = false;
@@ -4713,6 +4729,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     },
     resetCareer() { if (confirm('Reset your career progress? (Your boxer and upgrades are kept.)')) { P.resetCareer(); UI.refresh(); } },
     resetAll() { if (confirm('Erase your boxer, career, settings and key bindings?')) { BX.store.remove('profile'); BX.store.remove('settings'); BX.store.remove('bindings'); location.reload(); } },
+    fullscreen() { UI.toggleFullscreen(); },
     resume() { G().resume(); },
     restart() { UI.hideOverlay(); G().restartFight(); },
     pauseTo(el) { opts.from = 'pause'; UI.show(el.dataset.v); },
@@ -4780,12 +4797,13 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       const key = g.training.tasks.map((t) => (t.done ? 1 : 0)).join('');
       if (UI.cache.train !== key) {
         UI.cache.train = key;
-        let cur = true;
-        els.train.querySelector('ul').innerHTML = g.training.tasks.map((t) => {
-          const cls = t.done ? 'done' : cur ? 'cur' : '';
-          if (!t.done) cur = false;
-          return `<li class="${cls}">${taskText(t.text)}</li>`;
-        }).join('');
+        const tasks = g.training.tasks;
+        const done = tasks.filter((t) => t.done).length;
+        const first = tasks.findIndex((t) => !t.done);
+        els.train.querySelector('h4').textContent = 'TRAINING ' + done + '/' + tasks.length;
+        els.train.querySelector('ul').innerHTML = first < 0
+          ? '<li class="done">All drills complete — keep sparring!</li>'
+          : tasks.slice(first, first + 3).map((t, i) => `<li class="${i === 0 ? 'cur' : ''}">${taskText(t.text)}</li>`).join('');
       }
     }
     els.fury0.classList.toggle('ready', g.fighters[0].fury >= 99.9);
@@ -5028,10 +5046,16 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
 
     window.addEventListener('keydown', UI.onKey);
+    // never leave a fight running in a background tab
+    document.addEventListener('visibilitychange', () => {
+      const g = G();
+      if (document.hidden && g.mode === 'fight' && !g.paused && ['fight', 'knockdown', 'ready'].includes(g.phase)) g.pause();
+    });
     $('#bPause').addEventListener('click', () => G().togglePause());
     $('#bCam').addEventListener('click', () => G().cycleCamera());
     $('#bMute').addEventListener('click', () => UI.toggleMute());
     $('#bHelp').addEventListener('click', () => UI.openHelp());
+    $('#bFull').addEventListener('click', () => UI.toggleFullscreen());
     setupTouch();
     els.fps.classList.toggle('hidden', !G().settings.fps);
 
@@ -5060,6 +5084,13 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     opts.from = 'pause';
     opts.ctlTab = g.cfg.mode === 'versus' ? 'p1' : 'solo';
     UI.show('controls');
+  };
+  UI.toggleFullscreen = function () {
+    try {
+      const d = document, el = d.documentElement;
+      if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      else (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    } catch (e) { UI.toast('Fullscreen is not available here'); }
   };
   UI.toggleMute = function () {
     const s = G().settings;
