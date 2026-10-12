@@ -37,6 +37,7 @@
     // centre logo
     g.save();
     g.translate(w / 2, h / 2);
+    g.rotate(Math.PI);
     g.fillStyle = 'rgba(255,255,255,0.1)';
     g.beginPath(); g.arc(0, 0, w * 0.2, 0, Math.PI * 2); g.fill();
     g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 8;
@@ -118,7 +119,7 @@
 
     /* ---------------- ring ---------------- */
     const matTex = own(canvasTex(1024, 1024, drawMat));
-    const skirtTex = own(canvasTex(512, 128, (g, w, h) => drawBanner(g, w, h, 'KNOCKOUT ARENA  •  KNOCKOUT ARENA', '#9b111e', '#ffffff')));
+    const skirtTex = own(canvasTex(1480, 200, (g, w, h) => drawBanner(g, w, h, 'KNOCKOUT ARENA', '#9b111e', '#ffffff')));
     const sideMat = own(new T.MeshStandardMaterial({ map: skirtTex, roughness: 0.8 }));
     const topMat = own(new T.MeshStandardMaterial({ map: matTex, roughness: 0.95 }));
     const botMat = own(new T.MeshStandardMaterial({ color: 0x111111 }));
@@ -128,7 +129,7 @@
     G.add(platform);
     arena.floor = platform;
 
-    const chrome = own(new T.MeshStandardMaterial({ color: 0xcfd3da, roughness: 0.28, metalness: 0.85 }));
+    const chrome = own(new T.MeshStandardMaterial({ color: 0xdfe3ea, roughness: 0.4, metalness: 0.25, emissive: 0x20242b }));
     const padCols = [0xc1121f, 0x1e5fd6, 0xf2f2f2, 0xf2f2f2];
     const P = 3.02;
     const corners = [[-P, -P], [P, -P], [-P, P], [P, P]];
@@ -279,7 +280,7 @@
     }
 
     /* ---------------- lighting rig + visible beams ---------------- */
-    const rigMat = own(new T.MeshStandardMaterial({ color: 0x1a1c24, roughness: 0.6, metalness: 0.6 }));
+    const rigMat = own(new T.MeshStandardMaterial({ color: 0x23262f, roughness: 0.6, metalness: 0.3 }));
     const beamMat = own(new T.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.045, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }));
     const lampMat = own(new T.MeshBasicMaterial({ color: 0xfff6e0 }));
     const rigHeight = 8.6;

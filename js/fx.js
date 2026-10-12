@@ -176,8 +176,8 @@
           fov = 52;
           break;
         default: // behind (over-the-shoulder)
-          outPos.set(a.pos.x - d.x * (2.35 + dist * 0.38) * dm + r.x * 0.62, 1.82 + dist * 0.12 + narrow * 0.3, a.pos.z - d.z * (2.35 + dist * 0.38) * dm + r.z * 0.62);
-          outLook.set(mid.x - r.x * 0.15, 1.28, mid.z - r.z * 0.15);
+          outPos.set(a.pos.x - d.x * (2.65 + dist * 0.4) * dm + r.x * 0.9, 2.05 + dist * 0.12 + narrow * 0.3, a.pos.z - d.z * (2.65 + dist * 0.4) * dm + r.z * 0.9);
+          outLook.set(mid.x - r.x * 0.2, 1.2, mid.z - r.z * 0.2);
           fov = 54;
       }
       fov += narrow * 16;

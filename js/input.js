@@ -115,6 +115,7 @@
         e.preventDefault();
         const cb = I.capture;
         I.capture = null;
+        e._captured = true;
         cb(e.code === 'Escape' ? null : e.code, e.code === 'Escape');
         return;
       }

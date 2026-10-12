@@ -5,6 +5,7 @@
   const T = THREE;
   const A = BX.Audio, FX = BX.FX;
 
+  const DAMAGE_SCALE = 0.62;   // global tuning knob: lower = longer fights
   const START = [{ x: 0, z: -1.05 }, { x: 0, z: 1.05 }];
   const CORNERS = [[-2.45, -2.45], [2.45, -2.45], [-2.45, 2.45], [2.45, 2.45]];
   const REF_LOOK = { name: 'REF', skin: '#d39b6a', hair: 'short', hairColor: '#aaaaaa', trunks: '#111', trim: '#fff', gloves: '#fff', boots: '#111', build: 'avg', stance: 'orthodox' };
@@ -74,6 +75,7 @@
         last = now;
         try {
           BX.Input.pollPads();
+          BX.UI.update && BX.UI.update(dt);
           Game.tick(dt);
           Game.render();
         } catch (e) { console.error(e); }
@@ -125,7 +127,18 @@
       Game.renderer.setSize(w, h, false);
       Game.camera.aspect = w / h;
       Game.rig.aspect = w / h;
-      Game.camera.updateProjectionMatrix();
+      Game.applyView();
+    },
+
+    /** Shift the rendered scene sideways (used by the avatar creator so the boxer sits beside the panel). */
+    setViewShift(f) { Game.viewShift = f; Game.applyView(); },
+    applyView() {
+      const c = Game.canvas, cam = Game.camera;
+      const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
+      const narrow = w < 760;
+      if (Game.viewShift && !narrow) cam.setViewOffset(w, h, -Game.viewShift * w, 0, w, h);
+      else cam.clearViewOffset();
+      cam.updateProjectionMatrix();
     },
 
     on(name, fn) { (Game.listeners[name] = Game.listeners[name] || []).push(fn); },
@@ -171,7 +184,8 @@
         const m = Game.menuCam;
         if (m.spin && !Game._dragging) m.angle += dt * 0.22;
         const a = m.angle + Game.userAngle;
-        P.set(Math.sin(a) * m.radius, m.height, Math.cos(a) * m.radius);
+        const rr = m.userCtl ? m.radius : Math.min(6.2, m.radius / Math.max(Math.abs(Math.sin(a)), Math.abs(Math.cos(a)), 0.7));   // square-ish orbit keeps the camera away from the corner posts
+        P.set(Math.sin(a) * rr, m.height, Math.cos(a) * rr);
         L.set(0, m.lookY, 0);
         return m.fov;
       }, Infinity, 5);
@@ -255,7 +269,8 @@
       switch (p) {
         case 'intro': {
           rig.setOverride((t, dt, P, L) => {
-            const ang = 2.6 + t * 0.7, r = 5.6 - t * 0.55;
+            const ang = 2.6 + t * 0.7, r0 = 5.2 - t * 0.5;
+            const r = Math.min(6.2, r0 / Math.max(Math.abs(Math.sin(ang)), Math.abs(Math.cos(ang)), 0.72));
             P.set(Math.sin(ang) * r, 1.55 + 0.25 * Math.sin(t * 0.9), Math.cos(ang) * r);
             L.set(0, 1.25, 0);
             return 46;
@@ -265,6 +280,7 @@
           break;
         }
         case 'ready': {
+          BX.UI.hideIntro();
           Game.placeFighters(false);
           Game.timeLeft = Game.roundTime;
           for (const f of Game.fighters) { f.locked = true; f.forcedPose = null; }
@@ -569,7 +585,7 @@
       }
 
       const stFrac = att.stamina / att.maxStamina;
-      let base = d.dmg * att.powerMul * (0.64 + 0.36 * Math.min(1, stFrac * 1.6));
+      let base = d.dmg * DAMAGE_SCALE * att.powerMul * (0.64 + 0.36 * Math.min(1, stFrac * 1.6));
       if (att.isAI) base *= att.ai.d.dmg;
       const cmb = Game.combo[att.slot];
       base *= Math.max(0.6, 1 - 0.08 * Math.max(0, cmb.n - 2));
@@ -577,7 +593,7 @@
 
       // ----- blocked
       if (result === 'blocked') {
-        const guardDmg = base * (d.kind === 'upper' ? 1.45 : d.kind === 'special' ? 2.2 : 1.0) * 1.0;
+        const guardDmg = base * (d.kind === 'upper' ? 1.45 : d.kind === 'special' ? 2.2 : 1.0) * 1.35;
         def.stamina -= guardDmg;
         const chip = base * 0.1;
         def.health = Math.max(1, def.health - chip);
@@ -797,7 +813,8 @@
       for (const f of Game.fighters) { f.locked = true; f.forcedPose = 'corner'; }
       Game.rig.setOverride((t, dt, P, L) => {
         const ang = 0.7 + t * 0.2;
-        P.set(Math.sin(ang) * 5.4, 2.0, Math.cos(ang) * 5.4); L.set(0, 1.2, 0);
+        const r = Math.min(6.2, 5.0 / Math.max(Math.abs(Math.sin(ang)), Math.abs(Math.cos(ang)), 0.72));
+        P.set(Math.sin(ang) * r, 2.0, Math.cos(ang) * r); L.set(0, 1.2, 0);
         return 46;
       }, Infinity, 3);
       BX.UI.showRest(Game);

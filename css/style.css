@@ -157,8 +157,8 @@ button { font-family: inherit; color: inherit; }
 
 .menu { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 26px; align-content: center; align-items: center; }
 .menu .logo { grid-column: 1 / -1; }
-.logo .l1 { display: block; font-family: var(--head); font-size: clamp(54px, 11vw, 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#fff 20%, #bcc7ff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
-.logo .l2 { display: block; font-family: var(--head); font-size: clamp(54px, 11vw, 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#ffd24d, #e11d2e); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
+.logo .l1 { display: block; font-family: var(--head); font-size: clamp(44px, min(11vw, 17vh), 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#fff 20%, #bcc7ff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
+.logo .l2 { display: block; font-family: var(--head); font-size: clamp(44px, min(11vw, 17vh), 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#ffd24d, #e11d2e); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
 .logo small { display: block; margin-top: 8px; letter-spacing: 8px; color: var(--dim); font-size: 14px; }
 .mainnav { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .mainnav .btn.wide { grid-column: 1 / -1; }
