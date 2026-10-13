@@ -461,6 +461,70 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     return m + ':' + (r < 10 ? '0' : '') + r;
   };
 
+  /** Deferred GPU-resource disposal: dispose a few frames later so the replacement acquires the shared shader program first
+   *  (disposing the last user of a program deletes it and forces a re-link on the next frame). */
+  const _dq = [];
+  let _df = 0;
+  BX.deferDispose = (objs) => { for (const o of objs) if (o && o.dispose) _dq.push({ o, f: _df + 3 }); };
+  BX.flushDispose = () => { _df++; while (_dq.length && _dq[0].f <= _df) _dq.shift().o.dispose(); };
+  /** Dispose a boxer rig (materials + geometries it owns) — deferred. */
+  BX.disposeRig = (rig) => {
+    if (!rig) return;
+    BX.deferDispose(Object.values(rig.mats));
+    rig.body.traverse((o) => { if (o.isMesh && o.geometry && o.geometry.userData && o.geometry.userData.owned) BX.deferDispose([o.geometry]); });
+  };
+
+
+  /** Merge indexed BufferGeometries (position + normal only; fighter/arena materials have no textures on merged parts). */
+  BX.mergeGeos = (list) => {
+    const T = window.THREE;
+    let vc = 0, ic = 0;
+    for (const g of list) { vc += g.attributes.position.count; ic += g.index ? g.index.count : g.attributes.position.count; }
+    const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3);
+    const idx = vc > 65535 ? new Uint32Array(ic) : new Uint16Array(ic);
+    let vo = 0, io = 0;
+    for (const g of list) {
+      const p = g.attributes.position, n = g.attributes.normal, c = p.count;
+      pos.set(p.array.subarray(0, c * 3), vo * 3);
+      nor.set(n.array.subarray(0, c * 3), vo * 3);
+      if (g.index) { const a = g.index.array; for (let i = 0; i < a.length; i++) idx[io++] = a[i] + vo; }
+      else for (let i = 0; i < c; i++) idx[io++] = vo + i;
+      vo += c;
+    }
+    const out = new T.BufferGeometry();
+    out.setAttribute('position', new T.BufferAttribute(pos, 3));
+    out.setAttribute('normal', new T.BufferAttribute(nor, 3));
+    out.setIndex(new T.BufferAttribute(idx, 1));
+    out.computeBoundingSphere();
+    out.userData.owned = true;
+    return out;
+  };
+
+  /** Bake the local transforms of untextured static meshes (children of `parent`) into one mesh per material. Returns the new geometries. */
+  BX.mergeMeshes = (parent, meshes) => {
+    const T = window.THREE;
+    const buckets = new Map();
+    for (const m of meshes) {
+      if (Array.isArray(m.material)) continue;
+      const k = m.material.uuid + (m.castShadow ? 'c' : 'n') + (m.receiveShadow ? 'r' : 'x');
+      let b = buckets.get(k);
+      if (!b) { b = { mat: m.material, cast: m.castShadow, recv: m.receiveShadow, list: [] }; buckets.set(k, b); }
+      b.list.push(m);
+    }
+    const made = [];
+    for (const b of buckets.values()) {
+      const geos = b.list.map((m) => { m.updateMatrix(); const g = m.geometry.clone(); g.applyMatrix4(m.matrix); return g; });
+      const merged = BX.mergeGeos(geos);
+      geos.forEach((g) => g.dispose());
+      for (const m of b.list) parent.remove(m);
+      const mesh = new T.Mesh(merged, b.mat);
+      mesh.castShadow = b.cast; mesh.receiveShadow = b.recv;
+      parent.add(mesh);
+      made.push(merged);
+    }
+    return made;
+  };
+
   BX.hexToInt = (hex) => parseInt(String(hex).replace('#', ''), 16);
 
   /** Darken / lighten a hex colour by an amount (-1..1). */
@@ -564,7 +628,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
   BX.DEFAULT_SETTINGS = {
     volume: 0.8, sfx: true, music: true, shake: true, hints: true,
-    camera: 'behind', quality: 'high', rounds: 3, roundTime: 60, difficulty: 1,
+    camera: 'behind', quality: 'auto', batterySaver: false, rounds: 3, roundTime: 60, difficulty: 1,
     touch: 'auto', fps: false, speech: true,
   };
 
@@ -623,6 +687,185 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
 </script>
   <script>
+/* Knockout Arena — performance: quality tiers, pixel budget, adaptive governor (dynamic resolution + feature ladder)
+ *
+ * Design notes (from the mobile GPU/CPU audit):
+ *  - Tiers differ in CONTENT (lights, materials, crowd size/LOD, shadow map, particles). Content changes can recompile
+ *    shaders (1-2 s on a phone), so they only happen at build time / safe points.
+ *  - The governor only walks a ladder of FREE operations during a fight: resolution scale, hiding beams/flashes,
+ *    switching the shadow pass off (receiveShadow=false + autoUpdate=false), thinning the crowd (InstancedMesh.count) and a 30 fps cap.
+ *    If even that is not enough it asks for a one-off switch to the cheapest content at the next safe point.
+ */
+(function (root) {
+  'use strict';
+  const BX = (root.BX = root.BX || {});
+
+  const nav = root.navigator || {};
+  const isTouch = (() => {
+    try { return !!((root.matchMedia && root.matchMedia('(pointer:coarse)').matches) || nav.maxTouchPoints > 0 || 'ontouchstart' in root); } catch (e) { return false; }
+  })();
+
+  /* Content / budget presets. pxBudget is in megapixels of drawing buffer. */
+  const TIERS = {
+    low: {
+      id: 'low', label: 'Low',
+      pxBudget: 0.40, pxBudgetTouch: 0.40, prCap: 1.0, prFloor: 0.65,
+      shadowMap: 0, shadowFocus: 0.7, shadowEvery: 1,
+      crowd: { tiers: 3, spacing: 0.95, lod: 'B', chunks: 12 },
+      beams: 2, beamK: 10.5, flashes: 0, pointLights: 0, hemi: 0.75,
+      lambertStatics: true, lambertFighters: true, faceDetail: false, fxPool: 24, smallCasterR: 0.075,
+    },
+    med: {
+      id: 'med', label: 'Medium',
+      pxBudget: 0.85, pxBudgetTouch: 0.85, prCap: 1.5, prFloor: 0.65,
+      shadowMap: 512, shadowFocus: 0.7, shadowEvery: 2,
+      crowd: { tiers: 4, spacing: 0.7, lod: 'B', chunks: 16 },
+      beams: 3, beamK: 10.5, flashes: 4, pointLights: 1, hemi: 0.75,
+      lambertStatics: true, lambertFighters: false, faceDetail: false, fxPool: 48, smallCasterR: 0.075,
+    },
+    high: {
+      id: 'high', label: 'High',
+      pxBudget: 5.2, pxBudgetTouch: 1.8, prCap: 2.0, prFloor: 0.65,
+      shadowMap: 2048, shadowMapTouch: 1024, shadowFocus: 0.7, shadowEvery: 1,
+      crowd: { tiers: 5, spacing: 0.56, lod: 'A', chunks: 16 },
+      beams: 6, beamK: 10.5, flashes: 10, pointLights: 3, hemi: 0.55,
+      lambertStatics: false, lambertFighters: false, faceDetail: true, fxPool: 90, smallCasterR: 0.075,
+    },
+  };
+
+  /** Resolve the user's quality setting into a concrete tier object. 'auto' = touch ? med : high (+ governor). */
+  function resolve(setting, contentLow) {
+    let id = setting;
+    if (id === 'auto' || !TIERS[id]) id = isTouch ? 'med' : 'high';
+    if (setting === 'auto' && contentLow) id = 'low';
+    const t = Object.assign({}, TIERS[id]);
+    if (isTouch && t.shadowMapTouch) t.shadowMap = t.shadowMapTouch;
+    // touch devices re-use the shadow map every other frame (one frame of lag is invisible)
+    if (isTouch && id !== 'low') t.shadowEvery = 2;
+    // desktop High keeps the original look (double-sided cones at the original opacity); everything else uses front faces only at ~half the fill cost
+    t.beamDouble = id === 'high' && !isTouch;
+    if (t.beamDouble) t.beamK = 6;
+    t.key = [id, t.shadowMap, t.pointLights, t.lambertStatics ? 'L' : 'S', t.crowd.lod, t.crowd.tiers, t.beams, t.flashes].join('|');
+    t.modelKey = (t.lambertFighters ? 'L' : 'S') + (t.faceDetail ? 'F' : 'f');
+    t.auto = setting === 'auto';
+    return t;
+  }
+
+  /** Drawing-buffer pixel ratio from the tier's pixel budget (never above dpr or the tier cap, never below the floor). */
+  function pixelRatio(tier, cssW, cssH, scale) {
+    const dpr = root.devicePixelRatio || 1;
+    const budget = (isTouch ? tier.pxBudgetTouch : tier.pxBudget) * 1e6;
+    const byBudget = Math.sqrt(budget / Math.max(1, cssW * cssH));
+    let pr = Math.min(dpr, tier.prCap, byBudget) * (scale || 1);
+    return Math.max(Math.min(tier.prFloor, dpr), Math.min(pr, tier.prCap, dpr));
+  }
+
+  /** Software GL (SwiftShader / llvmpipe / WARP) — start from a cheap level. */
+  function isSoftwareGL(gl) {
+    try {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (!ext) return false;
+      return /swiftshader|llvmpipe|software|basic render|softpipe/i.test(String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)));
+    } catch (e) { return false; }
+  }
+
+  /* ---------------------------------------------------------------- the governor (pure logic) */
+  function makeGovernor(opts) {
+    const o = Object.assign({
+      targetFps: 60, refreshHz: 60, levels: 7, startLevel: 0,
+      evalMs: 900, warmMs: 1000, warmFeatureMs: 1600,
+      isFeatureStep: () => false,
+      downBadFrac: 0.22, downAvgFps: 0.88, jumpFps: 0.55,
+      upCleanMs: 6000, probeEvalMs: 450, probeBadFrac: 0.30,
+      backoffMs: 20000, maxHitchMs: 250, cb: null,
+    }, opts || {});
+    const budget = () => 1000 / Math.min(o.targetFps, o.refreshHz);
+    const S = { level: o.startLevel, last: 0, win: [], lastChange: 0, cleanSince: 0, probing: null, banned: {}, fails: {}, warm: o.warmFeatureMs, enabled: true };
+    function change(now, lvl, reason) {
+      const from = S.level;
+      lvl = Math.max(0, Math.min(o.levels - 1, lvl));
+      if (lvl === from) return;
+      S.level = lvl; S.win = []; S.lastChange = now; S.cleanSince = now;
+      S.warm = o.isFeatureStep(from, lvl) ? o.warmFeatureMs : o.warmMs;
+      if (o.cb) o.cb(lvl, reason, from);
+    }
+    function frame(now) {
+      if (S.last === 0) { S.last = now; S.lastChange = now; return; }
+      const dtRaw = now - S.last;
+      S.last = now;
+      if (dtRaw > o.maxHitchMs) {
+        // an isolated stall (tab switch, shader compile, GC) is not a verdict — but a RUN of long frames is simply the frame rate
+        S.longRun = (S.longRun || 0) + 1;
+        if (S.longRun < 3) { S.lastChange = now; S.warm = o.warmMs; S.win = []; return; }
+      } else S.longRun = 0;
+      const dt = Math.min(dtRaw, 500);
+      if (now - S.lastChange < S.warm) return;
+      S.win.push(dt);
+      const need = S.probing ? o.probeEvalMs : o.evalMs;
+      let tot = 0;
+      for (let i = 0; i < S.win.length; i++) tot += S.win[i];
+      const minFrames = tot / S.win.length > 80 ? 4 : (S.probing ? 12 : 20);   // very slow devices: decide after a few frames
+      if (S.win.length < minFrames || tot < need) return;
+      const w = S.win;
+      S.win = [];
+      const avg = tot / w.length, fps = 1000 / avg, b = budget() * 1.3;
+      let bad = 0;
+      for (let i = 0; i < w.length; i++) if (w[i] > b) bad++;
+      bad /= w.length;
+      const down = S.probing ? bad > o.probeBadFrac : (bad > o.downBadFrac || fps < o.targetFps * o.downAvgFps);
+      if (down) {
+        if (S.probing) {
+          const { from, to } = S.probing;
+          S.probing = null;
+          S.fails[to] = (S.fails[to] || 0) + 1;
+          S.banned[to] = now + Math.min(160000, o.backoffMs * Math.pow(2, S.fails[to] - 1));
+          change(now, from, 'probe-failed');
+        } else change(now, S.level + (fps < o.targetFps * o.jumpFps ? 2 : 1), 'slow ' + fps.toFixed(0) + 'fps bad=' + Math.round(bad * 100) + '%');
+        S.cleanSince = now;
+        return;
+      }
+      if (S.probing) { if (now - S.lastChange > 3000) S.probing = null; return; }
+      if (S.level > 0 && now - S.cleanSince > o.upCleanMs && fps > o.targetFps * 0.96 && !(S.banned[S.level - 1] > now)) {
+        const from = S.level;
+        change(now, S.level - 1, 'probe-up');
+        S.probing = { from, to: S.level };
+      }
+    }
+    return {
+      frame, state: S, opts: o,
+      setTarget(fps) { o.targetFps = fps; S.win = []; },
+      setRefresh(hz) { o.refreshHz = hz; S.win = []; },
+      force(level, now) { S.level = Math.max(0, Math.min(o.levels - 1, level)); S.win = []; S.lastChange = now || S.last; S.cleanSince = S.lastChange; S.probing = null; S.warm = o.warmFeatureMs; },
+      reset(now) { S.win = []; S.last = 0; S.lastChange = now || 0; S.warm = o.warmFeatureMs; S.probing = null; },
+    };
+  }
+
+  /** What each governor level means. All of these are FREE operations (no shader recompiles). */
+  const LADDER = [
+    { res: 1.00 },
+    { res: 0.85 },
+    { res: 0.72 },
+    { res: 0.62, flashes: false, beams: 2, fxMax: 24 },
+    { res: 0.62, flashes: false, beams: 2, fxMax: 24, shadows: false },
+    { res: 0.62, flashes: false, beams: 2, fxMax: 24, shadows: false, crowd: 0.5 },
+    { res: 0.62, flashes: false, beams: 2, fxMax: 24, shadows: false, crowd: 0.5, cap30: true },
+  ];
+
+  function deviceKey() {
+    const s = root.screen || {};
+    return [String(nav.userAgent || '').slice(0, 60), s.width, s.height, root.devicePixelRatio || 1].join('|');
+  }
+
+  const Perf = {
+    isTouch, TIERS, LADDER, resolve, pixelRatio, isSoftwareGL, makeGovernor, deviceKey,
+    current: resolve('high'),   // the tier currently applied (read by model.js / arena.js / fx.js)
+    softwareGL: false,
+  };
+  BX.Perf = Perf;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+  <script>
 /* Knockout Arena — fully synthesised audio (no asset files): punches, bell, crowd, referee, music */
 (function () {
   'use strict';
@@ -631,6 +874,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   let ctx = null, master = null, sfxBus = null, musicBus = null, crowdGain = null, crowdFilter = null, noiseBuf = null;
   const st = { vol: 0.8, sfx: true, music: true, speech: true, crowdTarget: 0.12 };
   let musicTimer = null, musicStep = 0, musicNext = 0, musicMode = null;
+  let crowdLast = -1, unlockArmed = false;
+  const runningCbs = [];
 
   function init() {
     if (ctx) return true;
@@ -660,9 +905,41 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     return true;
   }
 
+  /** Resume the context from inside a user-activation event. iOS Safari only honours touchend / pointerup / click / keydown
+   *  (NOT pointerdown or touchstart), and a silent one-sample buffer played in the same event fully unlocks output. */
   function unlock() {
     init();
-    if (ctx && ctx.state === 'suspended') ctx.resume();
+    if (!ctx) return;
+    if (ctx.state !== 'running') {
+      try {
+        const b = ctx.createBuffer(1, 1, 22050);
+        const src = ctx.createBufferSource();
+        src.buffer = b; src.connect(ctx.destination); src.start(0);
+      } catch (e) { /* ignore */ }
+      const p = ctx.resume && ctx.resume();
+      if (p && p.then) p.then(onRunning, () => {});
+    }
+    onRunning();
+  }
+  function onRunning() {
+    if (!ctx || ctx.state !== 'running') return;
+    while (runningCbs.length) { try { runningCbs.shift()(); } catch (e) { /* ignore */ } }
+  }
+  /** Keep trying on every user gesture until sound is running (and again after interruptions / backgrounding). */
+  function armUnlock(cb) {
+    if (cb) runningCbs.push(cb);
+    if (unlockArmed) return;
+    unlockArmed = true;
+    const h = () => { if (!ctx || ctx.state !== 'running') unlock(); };
+    ['touchend', 'pointerup', 'click', 'keydown', 'mouseup'].forEach((ev) => window.addEventListener(ev, h, { capture: true, passive: true }));
+    document.addEventListener('visibilitychange', () => {
+      if (!ctx) return;
+      if (document.hidden) { if (musicTimer) { clearInterval(musicTimer); musicTimer = null; } }
+      else {
+        if (ctx.state !== 'running' && ctx.resume) ctx.resume().catch(() => {});
+        if (musicMode && st.music && !musicTimer) A.musicStart(musicMode, true);
+      }
+    });
   }
 
   function noise(dur, o) {
@@ -705,15 +982,16 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
   const A = {
     state: st,
-    init, unlock,
+    init, unlock, armUnlock,
     get ready() { return !!ctx; },
 
     setVolume(v) { st.vol = v; if (master) master.gain.value = v; },
     setSfx(on) { st.sfx = on; if (sfxBus) sfxBus.gain.value = on ? 1 : 0; },
     setMusic(on) {
+      const was = st.music;
       st.music = on;
       if (musicBus) musicBus.gain.value = on ? 0.32 : 0;
-      if (!on) A.musicStop(); else if (musicMode) A.musicStart(musicMode);
+      if (!on) A.musicStop(); else if (!was && musicMode) A.musicStart(musicMode);   // only restart when it was actually off
     },
     setSpeech(on) { st.speech = on; },
 
@@ -730,9 +1008,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       noise(0.1, { type: 'lowpass', freq: 500, gain: 0.35 + p * 0.2, freqEnd: 180 });
       tone(110, 0.12, { type: 'triangle', freqEnd: 70, gain: 0.3 });
     },
-    whoosh(speed) {
+    whoosh(speed, delay) {
       const s = BX.clamp(speed || 0.5, 0, 1);
-      noise(0.16, { type: 'bandpass', freq: 450 + s * 400, freqEnd: 1800 + s * 900, q: 0.8, gain: 0.07 + s * 0.08, attack: 0.05 });
+      noise(0.16, { type: 'bandpass', freq: 450 + s * 400, freqEnd: 1800 + s * 900, q: 0.8, gain: 0.07 + s * 0.08, attack: 0.05, delay: delay || 0 });
     },
     dodge() { noise(0.12, { type: 'highpass', freq: 1500, freqEnd: 3500, gain: 0.07, attack: 0.03 }); },
     knockdown() {
@@ -780,8 +1058,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     /** Per-frame crowd murmur level update. */
     update(dt) {
       if (!ctx || !crowdGain) return;
-      const t = ctx.currentTime;
       const target = st.crowdTarget * 0.22;
+      if (Math.abs(target - crowdLast) < 0.004) return;      // only touch the audio graph when the level actually moved
+      crowdLast = target;
+      const t = ctx.currentTime;
       crowdGain.gain.setTargetAtTime(target, t, 0.3);
       crowdFilter.frequency.setTargetAtTime(500 + st.crowdTarget * 700, t, 0.4);
     },
@@ -808,13 +1088,16 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     },
 
     /* ----- tiny generative music loop ----- */
-    musicStart(mode) {
-      musicMode = mode || 'menu';
-      if (!ctx || !st.music) return;
+    musicStart(mode, force) {
+      mode = mode || 'menu';
+      const same = musicMode === mode && musicTimer;
+      musicMode = mode;
+      if (!ctx || !st.music || document.hidden) return;
+      if (same && !force) return;                      // already playing this track
       if (musicTimer) clearInterval(musicTimer);
-      musicStep = 0;
+      if (!same) musicStep = 0;
       musicNext = ctx.currentTime + 0.1;
-      musicTimer = setInterval(scheduleMusic, 40);
+      musicTimer = setInterval(scheduleMusic, 100);    // 0.4 s look-ahead below keeps it gap-free at 10 Hz
     },
     musicStop() {
       if (musicTimer) clearInterval(musicTimer);
@@ -827,7 +1110,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     if (!ctx) return;
     const bpm = musicMode === 'fight' ? 118 : 98;
     const stepDur = 60 / bpm / 2; // 8th notes
-    while (musicNext < ctx.currentTime + 0.15) {
+    while (musicNext < ctx.currentTime + 0.4) {
       const i = musicStep % 16;
       const t = musicNext - ctx.currentTime;
       if (i % 4 === 0) tone(120, 0.2, { type: 'sine', freqEnd: 40, gain: 0.55, bus: musicBus, delay: t });
@@ -1136,7 +1419,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
 </script>
   <script>
-/* Knockout Arena — procedural 3D boxer avatar (built from primitives, no external assets) */
+/* Knockout Arena — procedural 3D boxer avatar (built from primitives, no external assets).
+ * Performance: spheres use a LOD by size, static parts are merged per body segment and material (63 -> ~33 draw calls per boxer),
+ * tiny parts never cast shadows, and the cheap tiers use Lambert shading and skip decorative detail. */
 (function () {
   'use strict';
   const BX = (window.BX = window.BX || {});
@@ -1158,7 +1443,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
   /* ---------- shared geometry cache ---------- */
   const GC = {};
-  const sphereG = () => GC.sphere || (GC.sphere = new T.SphereGeometry(1, 22, 16));
+  const sphereG = () => GC.sphere || (GC.sphere = new T.SphereGeometry(1, 22, 16));   // marker: mk() swaps in a LOD by size
   const boxG = () => GC.box || (GC.box = new T.BoxGeometry(1, 1, 1));
   const cylG = (open) => {
     const k = open ? 'cylo' : 'cyl';
@@ -1171,22 +1456,87 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     return GC[k] || (GC[k] = new T.CapsuleGeometry(r, len, 6, 14));
   };
   const hairCapG = () => GC.hairCap || (GC.hairCap = new T.SphereGeometry(1, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.56));
+  const sphereLod = (w, h) => { const k = 'sph' + w + 'x' + h; return GC[k] || (GC[k] = new T.SphereGeometry(1, w, h)); };
+
+  let TIER = null;   // tier being built (set by buildModel)
+
+  /** Pick a sphere resolution from the sphere's final size: tiny parts do not need 350 triangles. */
+  function lodSphere(r) {
+    const low = TIER && TIER.id === 'low';
+    if (r < 0.06) return sphereLod(8, 6);
+    if (r < 0.12) return low ? sphereLod(10, 8) : sphereLod(14, 10);
+    return low ? sphereLod(16, 12) : sphereG();
+  }
+  const geoFor = (geo, sx, sy, sz) => (geo === GC.sphere ? lodSphere(Math.max(sx, sy == null ? sx : sy, sz == null ? sx : sz)) : geo);
 
   function std(color, rough, metal, extra) {
-    const m = new T.MeshStandardMaterial(Object.assign({ color: new T.Color(color), roughness: rough == null ? 0.7 : rough, metalness: metal || 0 }, extra || {}));
-    return m;
+    if (TIER && TIER.lambertFighters) {
+      const p = { color: new T.Color(color) };
+      if (extra) { if (extra.emissive) p.emissive = extra.emissive; if (extra.side != null) p.side = extra.side; if (extra.transparent) { p.transparent = true; p.opacity = extra.opacity || 0; p.depthWrite = false; } }
+      return new T.MeshLambertMaterial(p);
+    }
+    return new T.MeshStandardMaterial(Object.assign({ color: new T.Color(color), roughness: rough == null ? 0.7 : rough, metalness: metal || 0 }, extra || {}));
   }
 
   function mk(geo, mat, parent, x, y, z, sx, sy, sz, cast) {
-    const m = new T.Mesh(geo, mat);
+    const sy2 = sy == null ? sx : sy, sz2 = sz == null ? sx : sz;
+    const m = new T.Mesh(sx != null ? geoFor(geo, sx, sy2, sz2) : geo, mat);
     m.position.set(x || 0, y || 0, z || 0);
-    if (sx != null) m.scale.set(sx, sy == null ? sx : sy, sz == null ? sx : sz);
+    if (sx != null) m.scale.set(sx, sy2, sz2);
     m.castShadow = cast !== false;
     if (parent) parent.add(m);
     return m;
   }
 
-  function addHair(style, head, mat, skin) {
+  /* ---------- geometry merging (BufferGeometryUtils is not vendored): see BX.mergeGeos in util.js ---------- */
+  const mergeGeos = (list) => BX.mergeGeos(list);
+
+  /** Merge a group's static child meshes that share a material (and shadow flag) into one mesh each. */
+  function mergeGroup(group) {
+    const buckets = new Map();
+    for (const m of group.children) {
+      if (!m.isMesh || m.userData.keep) continue;
+      const k = m.material.uuid + (m.castShadow ? 'c' : 'n');
+      let b = buckets.get(k);
+      if (!b) { b = { mat: m.material, cast: m.castShadow, list: [] }; buckets.set(k, b); }
+      b.list.push(m);
+    }
+    for (const b of buckets.values()) {
+      if (b.list.length < 2) continue;
+      const geos = b.list.map((m) => { m.updateMatrix(); const g = m.geometry.clone(); g.applyMatrix4(m.matrix); return g; });
+      const merged = mergeGeos(geos);
+      geos.forEach((g) => g.dispose());
+      for (const m of b.list) group.remove(m);
+      const mesh = new T.Mesh(merged, b.mat);
+      mesh.castShadow = b.cast;
+      group.add(mesh);
+    }
+  }
+
+  /** A left/right pair as ONE mesh (symmetric in x), for parts the face animation scales/moves in y only. */
+  function mkPair(geo, mat, parent, y, z, xoff, sx, sy, sz, rotz) {
+    const parts = [];
+    for (const side of [-1, 1]) {
+      const m = new T.Mesh(geoFor(geo, sx, sy, sz), mat);
+      m.position.set(side * xoff, 0, 0);
+      m.scale.set(sx, sy, sz);
+      if (rotz) m.rotation.z = -side * rotz;
+      m.updateMatrix();
+      const g = m.geometry.clone();
+      g.applyMatrix4(m.matrix);
+      parts.push(g);
+    }
+    const merged = mergeGeos(parts);
+    parts.forEach((g) => g.dispose());
+    const mesh = new T.Mesh(merged, mat);
+    mesh.position.set(0, y, z);
+    mesh.castShadow = false;
+    mesh.userData.keep = true;
+    parent.add(mesh);
+    return mesh;
+  }
+
+  function addHair(style, head, mat) {
     const cap = (s, tilt) => {
       const m = mk(hairCapG(), mat, head, 0, 0.16, -0.003, 0.158 * s, 0.172 * s, 0.158 * s);
       m.rotation.x = tilt == null ? -0.34 : tilt;
@@ -1246,8 +1596,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     }
   }
 
-  /** Build a complete boxer (or referee) and return the rig of parts. */
-  function buildModel(look, role) {
+  /** Build a complete boxer (or referee) and return the rig of parts. `tier` defaults to the currently applied quality tier. */
+  function buildModel(look, role, tier) {
+    TIER = tier || (BX.Perf && BX.Perf.current) || { id: 'high', lambertFighters: false, faceDetail: true, smallCasterR: 0.075 };
+    const detail = !!TIER.faceDetail;
     const ref = role === 'ref';
     const B = BUILD[look.build] || BUILD.avg;
     const w = B.w, t = B.t, limb = B.limb;
@@ -1265,8 +1617,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       lip: std(BX.shade(look.skin, -0.35), 0.6),
       shirt: std('#f4f4f4', 0.8),
       pants: std('#151515', 0.8),
-      bruise: new T.MeshStandardMaterial({ color: 0x6a2a6e, roughness: 0.9, transparent: true, opacity: 0, depthWrite: false }),
-      flush: new T.MeshStandardMaterial({ color: 0xd22a2a, roughness: 0.8, transparent: true, opacity: 0, depthWrite: false }),
+      bruise: std('#6a2a6e', 0.9, 0, { transparent: true, opacity: 0, depthWrite: false }),
+      flush: std('#d22a2a', 0.8, 0, { transparent: true, opacity: 0, depthWrite: false }),
     };
 
     const root = new T.Group();
@@ -1294,11 +1646,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     mk(sphereG(), torsoMat, chest, 0, 0.17, 0, 0.215 * w, 0.22, 0.135 * t);          // ribcage
     if (!ref) {
       for (const sx of [-1, 1]) {
-        mk(sphereG(), mats.skin, chest, sx * 0.095 * w, 0.2, 0.085 * t, 0.095, 0.075, 0.06);   // pecs
+        if (detail || TIER.id === 'med') mk(sphereG(), mats.skin, chest, sx * 0.095 * w, 0.2, 0.085 * t, 0.095, 0.075, 0.06);   // pecs
         mk(sphereG(), mats.skin, chest, sx * D.shX * w, D.shY - 0.02, 0, 0.085, 0.085, 0.085); // delts
       }
-      // abs hint
-      for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) mk(sphereG(), mats.skin, chest, sx * 0.04 * w, 0.0 - i * 0.055 + 0.04, 0.1 * t, 0.04, 0.025, 0.02);
+      if (detail) for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) mk(sphereG(), mats.skin, chest, sx * 0.04 * w, 0.0 - i * 0.055 + 0.04, 0.1 * t, 0.04, 0.025, 0.02);   // abs
     } else {
       for (const sx of [-1, 1]) mk(sphereG(), mats.shirt, chest, sx * D.shX * w, D.shY - 0.02, 0, 0.09, 0.09, 0.09);
       mk(boxG(), mats.dark, chest, 0, 0.15, 0.135 * t, 0.012, 0.3, 0.01); // shirt stripe
@@ -1313,38 +1664,33 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     const head = new T.Group();
     head.position.set(0, D.neckY + 0.02, 0.01);
     chest.add(head);
-    const skull = mk(sphereG(), mats.skin, head, 0, 0.16, 0, 0.148, 0.165, 0.152);
+    mk(sphereG(), mats.skin, head, 0, 0.16, 0, 0.148, 0.165, 0.152);          // skull
     mk(sphereG(), mats.skin, head, 0, 0.085, 0.032, 0.115, 0.09, 0.115);              // jaw
     mk(sphereG(), mats.skin, head, 0, 0.1, 0.128, 0.032, 0.03, 0.03);                 // nose (tip)
-    mk(sphereG(), mats.skin, head, 0, 0.135, 0.13, 0.02, 0.04, 0.02);                 // nose bridge
-    for (const sx of [-1, 1]) {
-      mk(sphereG(), mats.skin, head, sx * 0.145, 0.15, -0.005, 0.02, 0.04, 0.03);     // ears
+    if (detail) {
+      mk(sphereG(), mats.skin, head, 0, 0.135, 0.13, 0.02, 0.04, 0.02);               // nose bridge
+      for (const sx of [-1, 1]) mk(sphereG(), mats.skin, head, sx * 0.145, 0.15, -0.005, 0.02, 0.04, 0.03);   // ears
     }
-    const eyes = [], pupils = [], brows = [];
-    for (const sx of [-1, 1]) {
-      const e = mk(sphereG(), mats.white, head, sx * 0.058, 0.185, 0.122, 0.027, 0.02, 0.014, false);
-      const p = mk(sphereG(), mats.dark, head, sx * 0.058, 0.185, 0.134, 0.012, 0.012, 0.006, false);
-      const b = mk(boxG(), mats.hair, head, sx * 0.058, 0.222, 0.128, 0.058, 0.012, 0.016, false);
-      b.rotation.z = -sx * 0.12;
-      eyes.push(e); pupils.push(p); brows.push(b);
-    }
-    // mouth: lips + (mouthguard) teeth that show when the face is hit / the fighter is exerting
+    // face parts the animation drives (squint, brows, mouth) — symmetric pairs are single meshes scaled/moved in y
+    const eyes = mkPair(sphereG(), mats.white, head, 0.185, 0.122, 0.058, 0.027, 0.02, 0.014);
+    const pupils = mkPair(sphereG(), mats.dark, head, 0.185, 0.134, 0.058, 0.012, 0.012, 0.006);
+    const brows = mkPair(boxG(), mats.hair, head, 0.222, 0.128, 0.058, 0.058, 0.012, 0.016, 0.12);
     const mouth = new T.Group();
     mouth.position.set(0, 0.065, 0.135);
     head.add(mouth);
     const lips = mk(sphereG(), mats.lip, mouth, 0, 0, 0, 0.034, 0.008, 0.012, false);
+    lips.userData.keep = true;
     const guard = mk(sphereG(), mats.white, mouth, 0, 0, 0.004, 0.028, 0.0, 0.008, false);
-    // bruises / swelling
-    const bruises = [];
-    for (const sx of [-1, 1]) {
-      const b = mk(sphereG(), mats.bruise, head, sx * 0.075, 0.172, 0.108, 0.05, 0.04, 0.035, false);
-      bruises.push(b);
-      const c = mk(sphereG(), mats.bruise, head, sx * 0.1, 0.1, 0.1, 0.04, 0.035, 0.03, false);
-      bruises.push(c);
-    }
-    const nose = mk(sphereG(), mats.flush, head, 0, 0.1, 0.135, 0.036, 0.034, 0.034, false);
-    bruises.push(nose);
-    addHair(ref ? 'short' : look.hair, head, ref ? std('#bdbdbd', 0.85) : mats.hair, mats.skin);
+    guard.userData.keep = true;
+    guard.visible = false;
+    // bruises / swelling (hidden until the boxer is actually marked up)
+    const bruiseA = mkPair(sphereG(), mats.bruise, head, 0.172, 0.108, 0.075, 0.05, 0.04, 0.035);
+    const bruiseB = mkPair(sphereG(), mats.bruise, head, 0.1, 0.1, 0.1, 0.04, 0.035, 0.03);
+    const noseFlush = mk(sphereG(), mats.flush, head, 0, 0.1, 0.135, 0.036, 0.034, 0.034, false);
+    noseFlush.userData.keep = true;
+    for (const m of [bruiseA, bruiseB, noseFlush]) m.visible = false;
+    if (ref) mats.refHair = std('#bdbdbd', 0.85);
+    addHair(ref ? 'short' : look.hair, head, ref ? mats.refHair : mats.hair);
 
     const headCenter = new T.Object3D();
     headCenter.position.set(0, 0.16, 0.02);
@@ -1365,14 +1711,16 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       mk(capG(r2, D.fa + 0.02 - 2 * r2), mats.skin, fore, 0, 0, 0);
       body.add(fore);
       const glove = new T.Group();
-      let fist;
+      const fist = new T.Object3D();      // strike point (world position used by hit effects)
+      fist.position.set(0, ref ? 0.06 : 0.11, 0);
+      glove.add(fist);
       if (ref) {
-        fist = mk(sphereG(), mats.skin, glove, 0, 0.06, 0, 0.055, 0.07, 0.05);
+        mk(sphereG(), mats.skin, glove, 0, 0.06, 0, 0.055, 0.07, 0.05);
       } else {
-        fist = mk(sphereG(), mats.glove, glove, 0, 0.11, 0.0, 0.108, 0.118, 0.118);
+        mk(sphereG(), mats.glove, glove, 0, 0.11, 0.0, 0.108, 0.118, 0.118);
         mk(cylG(), mats.cuff, glove, 0, 0.005, 0, 0.07 * limb + 0.008, 0.07, 0.07 * limb + 0.008);
         mk(sphereG(), mats.glove, glove, sx * 0.082, 0.1, 0.0, 0.05, 0.07, 0.06);   // thumb
-        mk(boxG(), mats.cuff, glove, 0, 0.115, 0.1, 0.07, 0.005, 0.02);             // strike mark
+        if (detail) mk(boxG(), mats.cuff, glove, 0, 0.115, 0.1, 0.07, 0.005, 0.02);             // strike mark
       }
       body.add(glove);
       arms[name] = { upper, fore, glove, fist, sx };
@@ -1400,11 +1748,24 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       legs[name] = { thigh, shin, boot, sx };
     }
 
-    body.traverse((o) => { if (o.isMesh) o.receiveShadow = false; });
+    /* ---------------- finalize: merge static parts, trim shadow casters ---------------- */
+    const segs = [pelvis, chest, head, mouth];
+    for (const k of Object.keys(arms)) segs.push(arms[k].upper, arms[k].fore, arms[k].glove);
+    for (const k of Object.keys(legs)) segs.push(legs[k].thigh, legs[k].shin, legs[k].boot);
+    segs.forEach(mergeGroup);
+    const minR = TIER.smallCasterR || 0.075;
+    body.traverse((o) => {
+      if (!o.isMesh) return;
+      o.receiveShadow = false;
+      if (o.castShadow) {
+        if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+        if (o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) < minR) o.castShadow = false;
+      }
+    });
 
     return {
       root, body, pelvis, chest, head, headCenter, torsoCenter, arms, legs, mats,
-      face: { eyes, pupils, brows, mouth, lips, guard, bruises, skull },
+      face: { eyes, pupils, brows, mouth, lips, guard, bruiseA, bruiseB, noseFlush },
       dims: { w, t, limb, h: B.h, health: B.health },
       ref,
     };
@@ -1517,9 +1878,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       this.look = look;
       if (this.rig) {
         this.root.remove(this.rig.body);
-        for (const k of Object.keys(this.rig.mats)) this.rig.mats[k].dispose();
+        BX.disposeRig(this.rig);   // deferred: the replacement acquires the shared shader programs first
       }
-      this.rig = BX.Model.build(look, this.role);
+      this.rig = BX.Model.build(look, this.role, BX.Perf && BX.Perf.current);
       this.root.add(this.rig.body);
       this.mx = look.stance === 'southpaw' ? -1 : 1;
       this.rig.body.scale.x = this.mx;
@@ -2236,20 +2597,23 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       const ouch = this.ouch;
       const exert = this.act && this.act.type === 'punch' ? 1 : 0;
       const squint = BX.clamp(ouch * 1.2 + (this.act && this.act.type === 'hit' ? 0.3 : 0) + this.bruiseAmt * 0.5 + (this.blocking ? 0.35 : 0), 0, 1);
-      for (let i = 0; i < 2; i++) {
-        F.eyes[i].scale.y = 0.02 * (1 - squint * 0.7);
-        F.pupils[i].scale.y = 0.012 * (1 - squint * 0.6);
-        F.brows[i].position.y = 0.222 - squint * 0.012;
-      }
+      F.eyes.scale.y = 1 - squint * 0.7;       // eyes/pupils/brows are left+right pairs merged into one mesh each
+      F.pupils.scale.y = 1 - squint * 0.6;
+      F.brows.position.y = 0.222 - squint * 0.012;
       const open = BX.clamp(ouch * 1.3 + exert * 0.6 + (this.stamina < this.maxStamina * 0.25 ? 0.5 + Math.sin(this.t * 9) * 0.2 : 0), 0, 1);
       F.lips.scale.y = 0.008 + open * 0.02;
       F.guard.scale.y = open * 0.016;
+      F.guard.visible = open > 0.03;
       // bruises
       const b = this.bruiseAmt;
       M.bruise.opacity = Math.min(0.75, b * 1.3);
       M.flush.opacity = Math.min(0.5, 0.1 * (1 - this.healthFrac) + b * 0.4);
       const sw = 1 + b * 0.35;
-      for (let i = 0; i < 4; i++) F.bruises[i].scale.setScalar(i % 2 === 0 ? 0.05 * sw : 0.04 * sw);
+      // marks are only submitted to the GPU once they are visible
+      const showB = M.bruise.opacity > 0.02;
+      F.bruiseA.visible = showB; F.bruiseB.visible = showB;
+      if (showB) { F.bruiseA.scale.setScalar(sw); F.bruiseB.scale.setScalar(sw); }
+      F.noseFlush.visible = M.flush.opacity > 0.02;
       // fury aura
       const ready = this.fury >= 99.9;
       M.glove.emissive.setRGB(ready ? 0.5 + 0.5 * Math.sin(this.t * 10) : 0, ready ? 0.25 + 0.2 * Math.sin(this.t * 10) : 0, 0);
@@ -2354,7 +2718,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
 </script>
   <script>
-/* Knockout Arena — the ring, hall, lights, instanced animated crowd, jumbotron */
+/* Knockout Arena — the ring, hall, lights, instanced animated crowd, jumbotron.
+ * build(scene, tier): `tier` comes from BX.Perf.resolve() and decides lights, materials, shadow map, crowd size/LOD and beams.
+ * After build, the governor flips FREE features through arena.setFeatures() (no shader recompiles). */
 (function () {
   'use strict';
   const BX = (window.BX = window.BX || {});
@@ -2374,19 +2740,29 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
   const FONT = "'Bebas Neue', Impact, 'Arial Narrow Bold', 'Arial Black', sans-serif";
 
+  /** Speckle overlay: one 256² random ImageData tiled as a pattern (≈ 20x cheaper than thousands of fillRect calls). */
+  function speckle(g, w, h, rgb, amount) {
+    const n = 256;
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const cg = c.getContext('2d');
+    const img = cg.createImageData(n, n);
+    const d = img.data;
+    for (let i = 0; i < n * n; i++) {
+      d[i * 4] = rgb; d[i * 4 + 1] = rgb; d[i * 4 + 2] = rgb;
+      d[i * 4 + 3] = Math.random() < 0.5 ? Math.random() * 255 * amount : 0;
+    }
+    cg.putImageData(img, 0, 0);
+    g.fillStyle = g.createPattern(c, 'repeat');
+    g.fillRect(0, 0, w, h);
+  }
+
   function drawMat(g, w, h) {
     g.fillStyle = '#7a1018'; g.fillRect(0, 0, w, h);                 // apron
     const m = Math.round(w * 0.074);                                   // 0.55m margin of 7.4m
     g.fillStyle = '#183c70'; g.fillRect(m, m, w - 2 * m, h - 2 * m);  // canvas
-    // faint weave / wear
-    for (let i = 0; i < 9000; i++) {
-      g.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.035) + ')';
-      g.fillRect(Math.random() * w, Math.random() * h, 2, 2);
-    }
-    for (let i = 0; i < 2500; i++) {
-      g.fillStyle = 'rgba(0,0,0,' + (Math.random() * 0.05) + ')';
-      g.fillRect(Math.random() * w, Math.random() * h, 3, 3);
-    }
+    speckle(g, w, h, 255, 0.07);                                       // weave / wear
+    speckle(g, w, h, 0, 0.1);
     // border band inside the ropes
     g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 10;
     g.strokeRect(m + 36, m + 36, w - 2 * m - 72, h - 2 * m - 72);
@@ -2433,68 +2809,89 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     });
   }
 
-  function build(scene, quality) {
-    const arena = { group: new T.Group(), quality };
+  function blobTex() {
+    return canvasTex(64, 64, (g, w, h) => {
+      const r = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      r.addColorStop(0, 'rgba(0,0,0,0.9)'); r.addColorStop(0.55, 'rgba(0,0,0,0.5)'); r.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = r; g.fillRect(0, 0, w, h);
+    });
+  }
+
+  function build(scene, tier) {
+    const arena = { group: new T.Group(), tier, quality: tier.id, tierKey: tier.key };
     const G = arena.group;
     scene.add(G);
     const disposables = [];
     const own = (o) => { disposables.push(o); return o; };
+    // Lambert for the static set on cheaper tiers (a quarter of the fragment cost, same look under this lighting)
+    const M = (p) => {
+      if (!tier.lambertStatics) return own(new T.MeshStandardMaterial(p));
+      const q = Object.assign({}, p);
+      delete q.roughness; delete q.metalness;
+      if (q.color != null && typeof q.color === 'number') { const c = new T.Color(q.color); c.multiplyScalar(1.03); q.color = c; }
+      return own(new T.MeshLambertMaterial(q));
+    };
 
     scene.background = new T.Color(0x04050a);
     scene.fog = new T.FogExp2(0x04050a, 0.034);
 
     /* ---------------- lights ---------------- */
-    const hemi = new T.HemisphereLight(0x8fa4d0, 0x221a14, 0.55);
+    arena.hemiBase = tier.hemi;
+    const hemi = new T.HemisphereLight(0x8fa4d0, 0x221a14, arena.hemiBase);
     G.add(hemi);
     const key = new T.SpotLight(0xfff1dc, 1.55, 0, 0.62, 0.55, 1);
     key.position.set(0.6, 9.5, 1.2);
     key.target.position.set(0, 0, 0);
-    key.castShadow = quality !== 'low';
-    const sh = quality === 'high' ? 2048 : 1024;
-    key.shadow.mapSize.set(sh, sh);
-    key.shadow.camera.near = 4; key.shadow.camera.far = 16;
-    key.shadow.bias = -0.0004;
-    key.shadow.radius = 3;
+    key.castShadow = tier.shadowMap > 0;
+    if (key.castShadow) {
+      key.shadow.mapSize.set(tier.shadowMap, tier.shadowMap);
+      key.shadow.camera.near = 4; key.shadow.camera.far = 16;
+      key.shadow.bias = -0.0004;
+      key.shadow.focus = tier.shadowFocus;   // the ring only needs the central part of the spot cone
+    }
     G.add(key); G.add(key.target);
-    const fillA = new T.PointLight(0xff3b30, 0.55, 14, 1.4); fillA.position.set(-5, 3, -5); G.add(fillA);
-    const fillB = new T.PointLight(0x2f7bff, 0.55, 14, 1.4); fillB.position.set(5, 3, 5); G.add(fillB);
-    const fillC = new T.PointLight(0xffffff, 0.35, 12, 1.4); fillC.position.set(5, 3, -5); G.add(fillC);
-    arena.lights = { hemi, key, fillA, fillB, fillC };
+    const fills = [];
+    const addFill = (color, intensity, dist, x, z) => { const l = new T.PointLight(color, intensity, dist, 1.4); l.position.set(x, 3, z); G.add(l); fills.push(l); };
+    if (tier.pointLights >= 1) addFill(0xff3b30, tier.pointLights === 1 ? 0.55 * 1.8 : 0.55, 14, -5, -5);
+    if (tier.pointLights >= 2) addFill(0x2f7bff, 0.55, 14, 5, 5);
+    if (tier.pointLights >= 3) addFill(0xffffff, 0.35, 12, 5, -5);
+    arena.lights = { hemi, key, fills };
 
     /* ---------------- hall floor ---------------- */
     const floorTex = own(canvasTex(256, 256, (g, w, h) => {
       g.fillStyle = '#0e1016'; g.fillRect(0, 0, w, h);
-      for (let i = 0; i < 1800; i++) { g.fillStyle = 'rgba(255,255,255,' + Math.random() * 0.03 + ')'; g.fillRect(Math.random() * w, Math.random() * h, 3, 3); }
+      speckle(g, w, h, 255, 0.05);
       g.strokeStyle = 'rgba(255,255,255,0.05)'; g.lineWidth = 2;
       for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(i * w / 4, 0); g.lineTo(i * w / 4, h); g.moveTo(0, i * h / 4); g.lineTo(w, i * h / 4); g.stroke(); }
     }, true));
     floorTex.repeat.set(10, 10);
-    const hall = new T.Mesh(own(new T.PlaneGeometry(80, 80)), own(new T.MeshStandardMaterial({ map: floorTex, roughness: 0.55, metalness: 0.2 })));
-    hall.rotation.x = -Math.PI / 2; hall.position.y = -1.0; hall.receiveShadow = true;
+    const hall = new T.Mesh(own(new T.PlaneGeometry(80, 80)), M({ map: floorTex, roughness: 0.55, metalness: 0.2 }));
+    hall.rotation.x = -Math.PI / 2; hall.position.y = -1.0;
     G.add(hall);
 
     /* ---------------- ring ---------------- */
     const matTex = own(canvasTex(1024, 1024, drawMat));
     const skirtTex = own(canvasTex(1480, 200, (g, w, h) => drawBanner(g, w, h, 'KNOCKOUT ARENA', '#9b111e', '#ffffff')));
-    const sideMat = own(new T.MeshStandardMaterial({ map: skirtTex, roughness: 0.8 }));
-    const topMat = own(new T.MeshStandardMaterial({ map: matTex, roughness: 0.95 }));
-    const botMat = own(new T.MeshStandardMaterial({ color: 0x111111 }));
+    const sideMat = M({ map: skirtTex, roughness: 0.8 });
+    const topMat = M({ map: matTex, roughness: 0.95 });
+    const botMat = M({ color: 0x111111 });
     const platform = new T.Mesh(own(new T.BoxGeometry(7.4, 1.0, 7.4)), [sideMat, sideMat, topMat, botMat, sideMat, sideMat]);
     platform.position.y = -0.5;
-    platform.receiveShadow = true;
+    platform.receiveShadow = tier.shadowMap > 0;     // the only receiver in the scene
     G.add(platform);
     arena.floor = platform;
 
-    const chrome = own(new T.MeshStandardMaterial({ color: 0xdfe3ea, roughness: 0.4, metalness: 0.25, emissive: 0x20242b }));
+    const chrome = M({ color: 0xdfe3ea, roughness: 0.4, metalness: 0.25, emissive: 0x20242b });
     const padCols = [0xc1121f, 0x1e5fd6, 0xf2f2f2, 0xf2f2f2];
     const P = 3.02;
     const corners = [[-P, -P], [P, -P], [-P, P], [P, P]];
+    const casts = tier.shadowMap > 0;
     arena.posts = [];
     corners.forEach((c, i) => {
       const post = new T.Mesh(own(new T.CylinderGeometry(0.07, 0.07, 1.62, 14)), chrome);
-      post.position.set(c[0], 0.81, c[1]); post.castShadow = true; G.add(post);
-      const pad = new T.Mesh(own(new T.BoxGeometry(0.34, 1.0, 0.34)), own(new T.MeshStandardMaterial({ color: padCols[i], roughness: 0.7 })));
-      pad.position.set(c[0] * 0.985, 0.78, c[1] * 0.985); pad.castShadow = true; G.add(pad);
+      post.position.set(c[0], 0.81, c[1]); post.castShadow = casts; G.add(post);
+      const pad = new T.Mesh(own(new T.BoxGeometry(0.34, 1.0, 0.34)), M({ color: padCols[i], roughness: 0.7 }));
+      pad.position.set(c[0] * 0.985, 0.78, c[1] * 0.985); pad.castShadow = casts; G.add(pad);
       const cap = new T.Mesh(own(new T.SphereGeometry(0.085, 12, 8)), chrome);
       cap.position.set(c[0], 1.64, c[1]); G.add(cap);
       arena.posts.push({ x: c[0], z: c[1], meshes: [post, pad, cap] });
@@ -2504,31 +2901,32 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     arena.ropes = [];
     const ropeG = own(new T.CylinderGeometry(0.026, 0.026, 2 * P, 8));
     ropeY.forEach((y, ri) => {
-      const mat = own(new T.MeshStandardMaterial({ color: ropeCols[ri], roughness: 0.55 }));
+      const mat = M({ color: ropeCols[ri], roughness: 0.55 });
       for (let s = 0; s < 4; s++) {
         const rope = new T.Mesh(ropeG, mat);
         const horizontal = s < 2;
         rope.position.set(horizontal ? 0 : (s === 2 ? -P : P), y, horizontal ? (s === 0 ? -P : P) : 0);
         if (horizontal) rope.rotation.set(0, 0, Math.PI / 2); else rope.rotation.set(Math.PI / 2, 0, 0);
-        rope.castShadow = quality === 'high';
+        rope.castShadow = tier.id === 'high' && casts;
         rope.userData = { baseY: y, side: s, kick: 0 };
         G.add(rope);
         arena.ropes.push(rope);
       }
     });
-    // steps / stool decoration: two corner stools
-    const stoolMat = own(new T.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 }));
+    // corner stools
+    const stoolMat = M({ color: 0x222222, roughness: 0.8 });
     [[-3.45, -3.45, 0xc1121f], [3.45, 3.45, 0x1e5fd6]].forEach((s) => {
       const st = new T.Mesh(own(new T.CylinderGeometry(0.2, 0.17, 0.5, 14)), stoolMat);
-      st.position.set(s[0], 0.25, s[1]); st.castShadow = true; G.add(st);
-      const top = new T.Mesh(own(new T.CylinderGeometry(0.24, 0.24, 0.06, 14)), own(new T.MeshStandardMaterial({ color: s[2], roughness: 0.6 })));
+      st.position.set(s[0], 0.25, s[1]); st.castShadow = casts; G.add(st);
+      const top = new T.Mesh(own(new T.CylinderGeometry(0.24, 0.24, 0.06, 14)), M({ color: s[2], roughness: 0.6 }));
       top.position.set(s[0], 0.53, s[1]); G.add(top);
     });
 
     /* ---------------- stands ---------------- */
-    const tierMat = own(new T.MeshStandardMaterial({ color: 0x15171f, roughness: 0.9 }));
-    const nTiers = quality === 'low' ? 3 : quality === 'med' ? 4 : 5;
+    const tierMat = M({ color: 0x15171f, roughness: 0.9 });
+    const nTiers = tier.crowd.tiers;
     const tiers = [];
+    const standBoxes = [];
     for (let i = 0; i < nTiers; i++) {
       const R = 7.4 + i * 1.2;
       const top = -0.55 + i * 0.62;
@@ -2536,18 +2934,23 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       const sizeA = 2 * R + 2.4;
       const mk = (w, d, x, z) => {
         const b = new T.Mesh(own(new T.BoxGeometry(w, hgt, d)), tierMat);
-        b.position.set(x, top - hgt / 2, z); b.receiveShadow = true; G.add(b);
+        b.position.set(x, top - hgt / 2, z); G.add(b); standBoxes.push(b);
       };
       mk(sizeA, 1.2, 0, -R); mk(sizeA, 1.2, 0, R);
       mk(1.2, sizeA, -R, 0); mk(1.2, sizeA, R, 0);
       tiers.push({ R, top });
     }
-    // LED ad boards
+    arena.merged = [];
+    BX.mergeMeshes(G, standBoxes).forEach((g) => { own(g); arena.merged.push(g); });      // 4 boxes per tier -> one draw call
+    // LED ad boards (six distinct textures, shared)
     const ads = ['PUNCH-COLA', 'IRON GLOVES', 'ROUND ONE ENERGY', 'KO FITNESS', 'GLOVE & CO', 'HEAVY HITTERS'];
+    const adCols = ['#0b6bcb', '#c1121f', '#0d8a4f', '#8a2be2', '#d9822b', '#222'];
+    const adMats = ads.map((txt, i) => own(new T.MeshBasicMaterial({ map: own(canvasTex(512, 64, (g, w, h) => drawBanner(g, w, h, txt, adCols[i], '#fff'))) })));
+    const adGeo = own(new T.PlaneGeometry(5.6, 0.7));
+    const adMeshes = [];
     const adBoard = (i, x, z, ry) => {
-      const t = own(canvasTex(512, 64, (g, w, h) => drawBanner(g, w, h, ads[i % ads.length], ['#0b6bcb', '#c1121f', '#0d8a4f', '#8a2be2', '#d9822b', '#222'][i % 6], '#fff')));
-      const m = new T.Mesh(own(new T.PlaneGeometry(5.6, 0.7)), own(new T.MeshBasicMaterial({ map: t })));
-      m.position.set(x, -0.15, z); m.rotation.y = ry; G.add(m);
+      const m = new T.Mesh(adGeo, adMats[i % ads.length]);
+      m.position.set(x, -0.15, z); m.rotation.y = ry; G.add(m); adMeshes.push(m);
     };
     const bd = 6.65;
     for (let i = 0; i < 3; i++) {
@@ -2557,12 +2960,30 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       adBoard(i + 4, bd, -4.0 + i * 4.0, -Math.PI / 2);
     }
 
-    /* ---------------- crowd (instanced, GPU bobbing) ---------------- */
+    // the ad boards use plain (non-indexed-safe) planes: merge per material, keeping UVs
+    adMeshes.forEach((m) => { m.updateMatrix(); });
+    {
+      const byMat = new Map();
+      adMeshes.forEach((m) => { const l = byMat.get(m.material) || []; l.push(m); byMat.set(m.material, l); });
+      byMat.forEach((list, mat) => {
+        const parts = list.map((m) => { const g = m.geometry.clone(); g.applyMatrix4(m.matrix); return g; });
+        let vc = 0, ic = 0; parts.forEach((g) => { vc += g.attributes.position.count; ic += g.index.count; });
+        const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3), uv = new Float32Array(vc * 2), idx = new Uint16Array(ic);
+        let vo = 0, io = 0;
+        parts.forEach((g) => { const c = g.attributes.position.count; pos.set(g.attributes.position.array, vo * 3); nor.set(g.attributes.normal.array, vo * 3); uv.set(g.attributes.uv.array, vo * 2); for (let i = 0; i < g.index.count; i++) idx[io++] = g.index.array[i] + vo; vo += c; g.dispose(); });
+        const geo = new T.BufferGeometry();
+        geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('normal', new T.BufferAttribute(nor, 3)); geo.setAttribute('uv', new T.BufferAttribute(uv, 2)); geo.setIndex(new T.BufferAttribute(idx, 1));
+        geo.computeBoundingSphere(); own(geo);
+        list.forEach((m) => G.remove(m));
+        G.add(new T.Mesh(geo, mat));
+      });
+    }
+
+    /* ---------------- crowd: shuffled, split into angular chunks (frustum culled), low-poly LOD, GPU bobbing ---------------- */
     arena.crowdUniforms = { uTime: { value: 0 }, uExcite: { value: 0.2 } };
-    const spacing = quality === 'low' ? 0.95 : quality === 'med' ? 0.7 : 0.56;
     const people = [];
     tiers.forEach((tr) => {
-      const R = tr.R, y = tr.top;
+      const R = tr.R, y = tr.top, spacing = tier.crowd.spacing;
       const n = Math.floor((2 * R) / spacing);
       for (let k = 0; k <= n; k++) {
         const u = -R + k * spacing;
@@ -2574,17 +2995,12 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         }
       }
     });
-    const count = people.length;
-    arena.crowdCount = count;
-    const bodyGeo = own(new T.CapsuleGeometry(0.21, 0.26, 3, 8));
-    const headGeo = own(new T.SphereGeometry(0.14, 10, 8));
+    // Fisher-Yates: a count-prefix of any chunk is then a uniform thinning of the crowd (governor: crowd x0.5)
+    for (let i = people.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = people[i]; people[i] = people[j]; people[j] = t; }
+    arena.crowdCount = people.length;
     const bodyMat = own(new T.MeshLambertMaterial({ color: 0xffffff }));
     const headMat = own(new T.MeshLambertMaterial({ color: 0xffffff }));
-    const phases = new Float32Array(count);
-    for (let i = 0; i < count; i++) phases[i] = Math.random();
-    const attach = (geo, mat) => {
-      const g2 = geo.clone();
-      g2.setAttribute('aPhase', new T.InstancedBufferAttribute(phases, 1));
+    for (const mat of [bodyMat, headMat]) {
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = arena.crowdUniforms.uTime;
         shader.uniforms.uExcite = arena.crowdUniforms.uExcite;
@@ -2592,37 +3008,63 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
           .replace('#include <common>', '#include <common>\nattribute float aPhase;\nuniform float uTime;\nuniform float uExcite;')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\n float bb = sin(uTime*(2.5+aPhase*3.0)+aPhase*40.0); transformed.y += (max(bb,0.0)*0.2*uExcite + 0.015*bb) * (0.6+aPhase*0.8);');
       };
-      return g2;
-    };
-    const bodyMesh = new T.InstancedMesh(attach(bodyGeo, bodyMat), bodyMat, count);
-    const headMesh = new T.InstancedMesh(attach(headGeo, headMat), headMat, count);
-    bodyMesh.frustumCulled = false; headMesh.frustumCulled = false;
+    }
+    const lodA = tier.crowd.lod === 'A';
+    const bodyGeoSrc = lodA ? new T.CapsuleGeometry(0.21, 0.26, 2, 8) : new T.CapsuleGeometry(0.21, 0.26, 1, 6);
+    const headGeoSrc = lodA ? new T.SphereGeometry(0.14, 7, 5) : new T.SphereGeometry(0.14, 6, 4);
+    own(bodyGeoSrc); own(headGeoSrc);
     const shirts = ['#c1121f', '#1e5fd6', '#16a34a', '#f2b705', '#e5e5e5', '#2a2a30', '#7c3aed', '#ff7a00', '#0ea5a4', '#ec4899', '#8b5e3c'];
+    const nChunks = tier.crowd.chunks;
+    const sectors = Array.from({ length: nChunks }, () => []);
+    people.forEach((p) => {
+      const ang = Math.atan2(p[2], p[0]);
+      sectors[Math.min(nChunks - 1, Math.floor(((ang + Math.PI) / (Math.PI * 2)) * nChunks))].push(p);
+    });
     const dummy = new T.Object3D();
     const col = new T.Color();
-    people.forEach((p, i) => {
-      const s = BX.rand(0.9, 1.1);
-      dummy.position.set(p[0], p[1] + 0.34 * s, p[2]);
-      dummy.rotation.set(0, p[3], 0);
-      dummy.scale.set(s, s, s);
-      dummy.updateMatrix();
-      bodyMesh.setMatrixAt(i, dummy.matrix);
-      bodyMesh.setColorAt(i, col.set(BX.pick(shirts)).multiplyScalar(BX.rand(0.35, 0.8)));
-      dummy.position.y = p[1] + 0.34 * s + 0.4 * s;
-      dummy.updateMatrix();
-      headMesh.setMatrixAt(i, dummy.matrix);
-      headMesh.setColorAt(i, col.set(BX.pick(BX.SKINS)).multiplyScalar(BX.rand(0.45, 0.8)));
+    arena.crowdMeshes = [];
+    sectors.forEach((list) => {
+      if (!list.length) return;
+      const n = list.length;
+      const bb = new T.Box3();
+      const meshes = [[bodyGeoSrc, bodyMat, 0], [headGeoSrc, headMat, 1]].map(([src, mat, kind]) => {
+        const g = own(src.clone());
+        const ph = new Float32Array(n);
+        for (let i = 0; i < n; i++) ph[i] = Math.random();
+        g.setAttribute('aPhase', new T.InstancedBufferAttribute(ph, 1));
+        const m = own(new T.InstancedMesh(g, mat, n));
+        m.userData.max = n;
+        return m;
+      });
+      list.forEach((p, i) => {
+        const s = BX.rand(0.9, 1.1);
+        dummy.position.set(p[0], p[1] + 0.34 * s, p[2]);
+        dummy.rotation.set(0, p[3], 0);
+        dummy.scale.set(s, s, s);
+        dummy.updateMatrix();
+        meshes[0].setMatrixAt(i, dummy.matrix);
+        meshes[0].setColorAt(i, col.set(BX.pick(shirts)).multiplyScalar(BX.rand(0.35, 0.8)));
+        bb.expandByPoint(dummy.position);
+        dummy.position.y = p[1] + 0.34 * s + 0.4 * s;
+        dummy.updateMatrix();
+        meshes[1].setMatrixAt(i, dummy.matrix);
+        meshes[1].setColorAt(i, col.set(BX.pick(BX.SKINS)).multiplyScalar(BX.rand(0.45, 0.8)));
+      });
+      const center = bb.getCenter(new T.Vector3());
+      const radius = bb.getSize(new T.Vector3()).length() / 2 + 1.2;   // + body size + bobbing
+      for (const m of meshes) {
+        m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true;
+        m.geometry.boundingSphere = new T.Sphere(center, radius);       // InstancedMesh culls with the geometry sphere
+        m.frustumCulled = true;
+        G.add(m);
+        arena.crowdMeshes.push(m);
+      }
     });
-    bodyMesh.instanceMatrix.needsUpdate = true; headMesh.instanceMatrix.needsUpdate = true;
-    bodyMesh.instanceColor.needsUpdate = true; headMesh.instanceColor.needsUpdate = true;
-    G.add(bodyMesh); G.add(headMesh);
-    arena.crowdMeshes = [bodyMesh, headMesh];
 
     /* ---------------- camera flashes ---------------- */
     const gTex = own(glowTex());
     arena.flashes = [];
-    const nFlash = quality === 'low' ? 0 : 10;
-    for (let i = 0; i < nFlash; i++) {
+    for (let i = 0; i < tier.flashes; i++) {
       const s = new T.Sprite(own(new T.SpriteMaterial({ map: gTex, color: 0xffffff, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false })));
       const tr = BX.pick(tiers);
       const side = BX.randi(0, 3);
@@ -2630,24 +3072,27 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       const pos = side === 0 ? [u, tr.R] : side === 1 ? [u, -tr.R] : side === 2 ? [tr.R, u] : [-tr.R, u];
       s.position.set(pos[0] * 0.98, tr.top + 1.2, pos[1] * 0.98);
       s.scale.setScalar(0.9);
+      s.visible = false;
       s.userData = { life: 0, next: BX.rand(0.2, 4) };
       G.add(s); arena.flashes.push(s);
     }
 
     /* ---------------- lighting rig + visible beams ---------------- */
-    const rigMat = own(new T.MeshStandardMaterial({ color: 0x23262f, roughness: 0.6, metalness: 0.3 }));
-    const beamMat = own(new T.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.045, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }));
+    const rigMat = M({ color: 0x23262f, roughness: 0.6, metalness: 0.3 });
+    // cheaper tiers: front faces only + stronger opacity = similar brightness for half the blended fill
+    const beamMat = own(new T.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.045 * tier.beamK / tier.beams, blending: T.AdditiveBlending, depthWrite: false, side: tier.beamDouble ? T.DoubleSide : T.FrontSide }));
     const lampMat = own(new T.MeshBasicMaterial({ color: 0xfff6e0 }));
     const rigHeight = 8.6;
     const nLamps = 6;
     arena.beams = [];
+    const rigMeshes = [], bulbMeshes = [];
     for (let i = 0; i < nLamps; i++) {
       const a = (i / nLamps) * Math.PI * 2 + 0.3;
       const x = Math.sin(a) * 4.4, z = Math.cos(a) * 4.4;
       const lamp = new T.Mesh(own(new T.CylinderGeometry(0.28, 0.2, 0.4, 14)), rigMat);
-      lamp.position.set(x, rigHeight, z); G.add(lamp);
+      lamp.position.set(x, rigHeight, z); G.add(lamp); rigMeshes.push(lamp);
       const bulb = new T.Mesh(own(new T.CircleGeometry(0.2, 14)), lampMat);
-      bulb.rotation.x = Math.PI / 2; bulb.position.set(x, rigHeight - 0.21, z); G.add(bulb);
+      bulb.rotation.x = Math.PI / 2; bulb.position.set(x, rigHeight - 0.21, z); G.add(bulb); bulbMeshes.push(bulb);
       const len = rigHeight + 0.5;
       const beam = new T.Mesh(own(new T.CylinderGeometry(0.2, 1.9, len, 22, 1, true)), beamMat);
       const target = new T.Vector3(x * 0.3, 0, z * 0.3);
@@ -2658,9 +3103,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       beam.scale.y = from.distanceTo(target) / len;
       G.add(beam); arena.beams.push(beam);
     }
-    // ring truss
     const truss = new T.Mesh(own(new T.TorusGeometry(4.4, 0.08, 6, 36)), rigMat);
-    truss.rotation.x = Math.PI / 2; truss.position.y = rigHeight + 0.25; G.add(truss);
+    truss.rotation.x = Math.PI / 2; truss.position.y = rigHeight + 0.25; G.add(truss); rigMeshes.push(truss);
+    BX.mergeMeshes(G, rigMeshes).forEach((g) => { own(g); arena.merged.push(g); });
+    BX.mergeMeshes(G, bulbMeshes).forEach((g) => { own(g); arena.merged.push(g); });
 
     /* ---------------- jumbotron ---------------- */
     const screenTex = own(canvasTex(512, 288, (g, w, h) => { g.fillStyle = '#05070d'; g.fillRect(0, 0, w, h); }));
@@ -2671,24 +3117,38 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     jumbo.add(jBody);
     const scrMat = own(new T.MeshBasicMaterial({ map: screenTex }));
     const scrGeo = own(new T.PlaneGeometry(2.0, 1.125));
-    [[0, 1.11, 0], [Math.PI / 2, 0, 1.11], [Math.PI, 0, -1.11], [-Math.PI / 2, 0, -1.11]].forEach((d, i) => {
+    [0, Math.PI / 2, Math.PI, -Math.PI / 2].forEach((ry) => {
       const m = new T.Mesh(scrGeo, scrMat);
-      const ry = [0, Math.PI / 2, Math.PI, -Math.PI / 2][i];
       m.rotation.y = ry;
       m.position.set(Math.sin(ry) * 1.11, 0, Math.cos(ry) * 1.11);
       jumbo.add(m);
     });
+    const cableGeo = own(new T.CylinderGeometry(0.015, 0.015, 3, 6));
+    const jumboStatic = [jBody];
     for (const sx of [-0.9, 0.9]) for (const sz of [-0.9, 0.9]) {
-      const cable = new T.Mesh(own(new T.CylinderGeometry(0.015, 0.015, 3, 6)), rigMat);
-      cable.position.set(sx, 2.1, sz); jumbo.add(cable);
+      const cable = new T.Mesh(cableGeo, rigMat);
+      cable.position.set(sx, 2.1, sz); jumbo.add(cable); jumboStatic.push(cable);
     }
+    BX.mergeMeshes(jumbo, jumboStatic).forEach((g) => { own(g); arena.merged.push(g); });
     G.add(jumbo);
     arena.jumbo = jumbo;
     arena._screenKey = '';
 
+    /* ---------------- blob shadows (used when the shadow map is off) ---------------- */
+    const blobMat = own(new T.MeshBasicMaterial({ map: own(blobTex()), transparent: true, opacity: 0.6, depthWrite: false }));
+    const blobGeo = own(new T.PlaneGeometry(1, 1));
+    arena.blobs = [];
+    for (let i = 0; i < 3; i++) {
+      const b = new T.Mesh(blobGeo, blobMat);
+      b.rotation.x = -Math.PI / 2; b.position.y = 0.014; b.renderOrder = 1; b.visible = false;
+      G.add(b); arena.blobs.push(b);
+    }
+    arena.blobTargets = [];
+    arena.blobsOn = tier.shadowMap === 0;
+
     /* ---------------- API ---------------- */
     arena.drawScreen = (info) => {
-      const k = JSON.stringify(info);
+      const k = (info.title || '') + '|' + info.timer + '|' + (info.sub || '') + '|' + (info.p1 ? info.p1.name + ':' + Math.round(info.p1.frac * 40) : '') + '|' + (info.p2 ? info.p2.name + ':' + Math.round(info.p2.frac * 40) : '');
       if (k === arena._screenKey) return;
       arena._screenKey = k;
       const g = screenTex.userData.ctx, w = 512, h = 288;
@@ -2733,7 +3193,28 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     arena.kickRope = (side, amt) => {
       for (const r of arena.ropes) if (r.userData.side === side) r.userData.kick = Math.max(r.userData.kick, amt);
     };
+    arena.setBlobTargets = (list) => { arena.blobTargets = list.filter(Boolean); };
+
+    /** Free runtime switches used by the governor (no shader recompiles): beams, flashes, shadow receiving, crowd density. */
+    arena.features = { beams: tier.beams, flashes: tier.flashes > 0, shadows: tier.shadowMap > 0, crowd: 1 };
+    arena.setFeatures = (f) => {
+      const F = arena.features;
+      if (f.beams != null) F.beams = Math.min(f.beams, tier.beams); else F.beams = tier.beams;
+      if (f.flashes != null) F.flashes = !!f.flashes && tier.flashes > 0;
+      if (f.shadows != null) F.shadows = !!f.shadows && tier.shadowMap > 0;
+      if (f.crowd != null) F.crowd = f.crowd;
+      const n = Math.max(1, F.beams), step = Math.max(1, Math.round(arena.beams.length / n));
+      arena.beams.forEach((b, i) => { b.visible = i % step === 0; });
+      beamMat.opacity = 0.045 * tier.beamK / Math.max(1, arena.beams.filter((b) => b.visible).length);   // constant total brightness
+      if (!F.flashes) for (const s of arena.flashes) { s.visible = false; s.userData.life = 0; }
+      arena.floor.receiveShadow = F.shadows;
+      arena.blobsOn = !F.shadows;
+      for (const m of arena.crowdMeshes) m.count = Math.max(1, Math.ceil(m.userData.max * F.crowd));
+    };
+    arena.setFeatures({});
+
     arena.strobe = 0;
+    const _bp = new T.Vector3();
     arena.update = (dt, focus, t) => {
       arena.crowdUniforms.uTime.value = t;
       arena.crowdUniforms.uExcite.value = BX.damp(arena.crowdUniforms.uExcite.value, arena.excite, 2.5, dt);
@@ -2750,24 +3231,41 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
           r.position.y = u.baseY + Math.sin(t * 28) * 0.05 * u.kick;
         } else if (r.position.y !== u.baseY) r.position.y = u.baseY;
       }
-      // camera flashes
-      for (const s of arena.flashes) {
-        const u = s.userData;
-        if (u.life > 0) { u.life -= dt; s.material.opacity = Math.max(0, u.life / 0.09); s.scale.setScalar(0.5 + (1 - s.material.opacity) * 0.8); }
-        else {
-          u.next -= dt * (0.4 + arena.excite * 3);
-          if (u.next <= 0) { u.life = 0.09; u.next = BX.rand(0.3, 3.5); s.material.opacity = 1; }
+      // camera flashes (hidden sprites are not drawn)
+      if (arena.features.flashes) {
+        for (const s of arena.flashes) {
+          const u = s.userData;
+          if (u.life > 0) {
+            u.life -= dt;
+            if (u.life <= 0) { s.visible = false; continue; }
+            s.material.opacity = Math.max(0, u.life / 0.09); s.scale.setScalar(0.5 + (1 - s.material.opacity) * 0.8);
+          } else {
+            u.next -= dt * (0.4 + arena.excite * 3);
+            if (u.next <= 0) { u.life = 0.09; u.next = BX.rand(0.3, 3.5); s.material.opacity = 1; s.visible = true; }
+          }
         }
+      }
+      // blob shadows under the boxers and the referee
+      for (let i = 0; i < arena.blobs.length; i++) {
+        const b = arena.blobs[i], f = arena.blobTargets[i];
+        if (!arena.blobsOn || !f || !f.root.visible) { b.visible = false; continue; }
+        b.visible = true;
+        const fall = f.fall || 0;
+        b.position.set(f.root.position.x - Math.sin(f.root.rotation.y) * 0.8 * fall, 0.014, f.root.position.z - Math.cos(f.root.rotation.y) * 0.8 * fall);
+        const s = 1.15 * (1 + fall * 1.0);
+        b.scale.set(s, s, 1);
       }
       // strobe on big moments
       if (arena.strobe > 0) {
         arena.strobe = Math.max(0, arena.strobe - dt * 2.5);
-        hemi.intensity = 0.55 + arena.strobe * 1.2;
-      } else hemi.intensity = 0.55;
+        hemi.intensity = arena.hemiBase + arena.strobe * 1.2;
+      } else hemi.intensity = arena.hemiBase;
     };
 
     arena.dispose = () => {
       scene.remove(G);
+      if (key.shadow && key.shadow.map) key.shadow.map.dispose();
+      if (key.dispose) key.dispose();
       disposables.forEach((d) => { if (d && d.dispose) d.dispose(); });
     };
     return arena;
@@ -2784,20 +3282,24 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   const BX = (window.BX = window.BX || {});
   const T = THREE;
 
-  /* ------------------------------------------------------------------ particles */
+  /* ------------------------------------------------------------------ particles
+   * One InstancedMesh for every spark/sweat/dust/confetti particle (a single draw call) + a few additive flash sprites. */
+  const MAXP = 90;
   const FX = {
-    pool: [], flashes: [], scene: null, tex: null,
+    parts: [], flashes: [], scene: null, tex: null, mesh: null, cap: MAXP, live: 0,
+    _m: new T.Matrix4(),
 
     init(scene) {
       FX.scene = scene;
-      const geo = new T.SphereGeometry(1, 6, 4);
-      for (let i = 0; i < 90; i++) {
-        const m = new T.Mesh(geo, new T.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
-        m.visible = false;
-        m.userData = { vel: new T.Vector3(), life: 0, max: 1, grav: 6, size: 0.03 };
-        scene.add(m);
-        FX.pool.push(m);
-      }
+      const geo = new T.SphereGeometry(1, 5, 3);
+      const mat = new T.MeshBasicMaterial({ color: 0xffffff });
+      FX.mesh = new T.InstancedMesh(geo, mat, MAXP);
+      FX.mesh.frustumCulled = false;
+      FX.mesh.count = 0;
+      FX.mesh.visible = false;
+      FX.mesh.setColorAt(0, new T.Color(0xffffff));   // allocate the per-instance colour buffer once
+      scene.add(FX.mesh);
+      for (let i = 0; i < MAXP; i++) FX.parts.push({ pos: new T.Vector3(), vel: new T.Vector3(), color: new T.Color(), life: 0, max: 1, size: 0.03, grav: 6 });
       const c = document.createElement('canvas');
       c.width = c.height = 64;
       const g = c.getContext('2d');
@@ -2814,32 +3316,36 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       }
     },
 
+    /** Limit how many particles may be alive (quality tier / governor). */
+    configure(n) { FX.cap = Math.max(8, Math.min(MAXP, n)); },
+    setMax(n) { FX.configure(n); },
+
     clear() {
-      for (const p of FX.pool) p.visible = false;
+      for (const p of FX.parts) p.life = 0;
+      FX.live = 0;
+      if (FX.mesh) { FX.mesh.count = 0; FX.mesh.visible = false; }
       for (const s of FX.flashes) s.visible = false;
     },
 
     spawn(pos, vel, color, size, life, grav) {
+      if (FX.live >= FX.cap) return;
       let p = null;
-      for (const q of FX.pool) if (!q.visible) { p = q; break; }
+      for (const q of FX.parts) if (q.life <= 0) { p = q; break; }
       if (!p) return;
-      p.visible = true;
-      p.position.copy(pos);
-      p.material.color.set(color);
-      p.material.opacity = 1;
-      p.scale.setScalar(size);
-      const u = p.userData;
-      u.vel.copy(vel); u.life = life; u.max = life; u.size = size; u.grav = grav == null ? 6 : grav;
+      p.pos.copy(pos); p.vel.copy(vel); p.color.set(color);
+      p.size = size; p.life = life; p.max = life; p.grav = grav == null ? 6 : grav;
+      FX.live++;
     },
 
     flash(pos, size, color) {
       let s = null;
       for (const q of FX.flashes) if (!q.visible) { s = q; break; }
       if (!s) return;
+      const cap = BX.Perf && BX.Perf.current && BX.Perf.current.id === 'high' ? 1.8 : 1.1;   // big additive quads are fill-rate heavy on phones
       s.visible = true; s.position.copy(pos);
       s.material.color.set(color || 0xffffff);
-      s.userData.life = 0.18; s.userData.max = 0.18; s.userData.size = size;
-      s.scale.setScalar(size * 0.4);
+      s.userData.life = 0.18; s.userData.max = 0.18; s.userData.size = Math.min(size, cap);
+      s.scale.setScalar(s.userData.size * 0.4);
       s.material.opacity = 1;
     },
 
@@ -2881,18 +3387,26 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     },
 
     update(dt) {
-      for (const p of FX.pool) {
-        if (!p.visible) continue;
-        const u = p.userData;
-        u.life -= dt;
-        if (u.life <= 0) { p.visible = false; continue; }
-        u.vel.y -= u.grav * dt;
-        p.position.addScaledVector(u.vel, dt);
-        if (p.position.y < 0.02 && u.grav > 0) { p.position.y = 0.02; u.vel.multiplyScalar(0.3); u.vel.y = 0; }
-        const k = u.life / u.max;
-        p.material.opacity = Math.min(1, k * 1.6);
-        p.scale.setScalar(u.size * (0.4 + 0.6 * k));
+      let n = 0, live = 0;
+      const m = FX._m, mesh = FX.mesh;
+      for (const p of FX.parts) {
+        if (p.life <= 0) continue;
+        p.life -= dt;
+        if (p.life <= 0) continue;
+        live++;
+        p.vel.y -= p.grav * dt;
+        p.pos.addScaledVector(p.vel, dt);
+        if (p.pos.y < 0.02 && p.grav > 0) { p.pos.y = 0.02; p.vel.multiplyScalar(0.3); p.vel.y = 0; }
+        const sc = p.size * (0.4 + 0.6 * (p.life / p.max));     // particles shrink away instead of fading (single shared material)
+        m.makeScale(sc, sc, sc); m.setPosition(p.pos);
+        mesh.setMatrixAt(n, m);
+        mesh.setColorAt(n, p.color);
+        n++;
       }
+      FX.live = live;
+      mesh.count = n;
+      mesh.visible = n > 0;
+      if (n > 0) { mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true; }
       for (const s of FX.flashes) {
         if (!s.visible) continue;
         const u = s.userData;
@@ -3302,62 +3816,215 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       Game.canvas = canvas;
       const saved = BX.store.get('settings', null);
       Game.settings = BX.deepMerge(BX.DEFAULT_SETTINGS, saved || {});
-      // first run: pick a sensible default quality (phones / weak CPUs get Medium)
-      if (!saved) {
-        const touchy = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-        if (touchy || (navigator.hardwareConcurrency || 8) <= 4) Game.settings.quality = 'med';
-      }
-      const r = new T.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+      const Perf = BX.Perf;
+      const dpr = window.devicePixelRatio || 1;
+      // MSAA is fixed at context creation: skip it on dense screens where it is redundant (and expensive)
+      const r = new T.WebGLRenderer({ canvas, antialias: dpr < 1.5, alpha: false, stencil: false, powerPreference: 'high-performance' });
+      r.debug.checkShaderErrors = /[?&]debug/.test(location.search);   // linking stays async-friendly in production
       r.shadowMap.enabled = true;
       r.shadowMap.type = T.PCFSoftShadowMap;
       Game.renderer = r;
+      Perf.softwareGL = Perf.isSoftwareGL(r.getContext());
       Game.scene = new T.Scene();
       Game.camera = new T.PerspectiveCamera(54, 1, 0.1, 120);
       Game.rig = new BX.CameraRig(Game.camera);
+
+      // performance state (restored per device so the governor does not have to re-converge every launch)
+      Game.perf = { level: 0, scale: 1, cap30: false, gov: null, refreshHz: 60, pendingLow: false, lastSave: 0, info: '' };
+      Game.contentLow = false;
+      const savedPerf = BX.store.get('perf', null);
+      if (savedPerf && savedPerf.key === Perf.deviceKey()) { Game.perf.level = savedPerf.level | 0; Game.contentLow = !!savedPerf.contentLow; }
+      else if (Perf.softwareGL) { Game.perf.level = 6; Game.contentLow = true; }
+
       FX.init(Game.scene);
       Game.applySettings();
       Game.ref = new BX.Fighter(REF_LOOK, { role: 'ref' });
       Game.scene.add(Game.ref.root);
       Game.ref.reset(2.2, 2.2, 0);
       Game.ref.snapFeet();
-      window.addEventListener('resize', Game.resize);
-      Game.resize();
+
+      // resize: layout-driven (iframes, safe areas, rotation) and debounced to one rAF
+      window.addEventListener('resize', Game.scheduleResize);
+      window.addEventListener('orientationchange', Game.scheduleResize);
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', Game.scheduleResize);
+      if (window.ResizeObserver) new ResizeObserver(Game.scheduleResize).observe(canvas);
+      Game.resize(true);
+
+      // WebGL context loss (mobile browsers drop contexts when backgrounded): keep the game paused and restore cleanly
+      canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        Game.contextLost = true;
+        if (Game.mode === 'fight' && !Game.paused) Game.pause();
+        BX.UI.toast('Graphics interrupted — restoring…');
+        setTimeout(() => { if (Game.contextLost) BX.UI.toast('Graphics could not be restored. Please reload the page.'); }, 5000);
+      }, false);
+      canvas.addEventListener('webglcontextrestored', () => {
+        Game.contextLost = false;
+        Game.resize(true);
+        if (Game.perf.gov) Game.perf.gov.reset(0);
+        Game.precompile();
+        BX.UI.toast(Game.mode === 'fight' ? 'Graphics restored — tap Resume' : 'Graphics restored');
+      }, false);
+
       Game.initTrainingEvents();
       Game.showMenuScene();
-      let last = performance.now(), fpsT = 0, fpsN = 0;
+      Game.precompile();
+
+      let lastRender = performance.now(), fpsT = 0, fpsN = 0, hzFrames = [], hzLast = 0;
       const loop = (now) => {
-        const dt = Math.min(0.05, (now - last) / 1000);
-        last = now;
+        Game._raf = requestAnimationFrame(loop);
+        // refresh-rate detection (median of the first rAF deltas): 120 Hz screens get half the work via the cap
+        if (hzFrames.length < 40) {
+          if (hzLast) hzFrames.push(now - hzLast);
+          hzLast = now;
+          if (hzFrames.length === 40) {
+            const m = hzFrames.slice().sort((a, b) => a - b)[20];
+            Game.perf.refreshHz = m < 10.5 ? 120 : m < 13.5 ? 90 : 60;
+            if (Game.perf.gov) Game.perf.gov.setRefresh(Game.perf.refreshHz);
+          }
+        }
+        const cap = Game.fpsCap();
+        if (cap && now - lastRender < 1000 / cap - 1.5) return;
+        const dtMs = now - lastRender;
+        lastRender = now;
+        // a stalled frame (tab restore, shader compile, GC) must not burn through hit-stop and ready timers
+        const dt = dtMs > 250 ? 0 : Math.min(0.05, dtMs / 1000);
         try {
           BX.Input.pollPads();
           BX.UI.update && BX.UI.update(dt);
-          Game.tick(dt);
-          Game.render();
+          if (!Game.contextLost) {
+            Game.tick(dt);
+            Game.render();
+            Game.governorFrame(now);
+          }
         } catch (e) { console.error(e); }
         if (Game.settings.fps) {
           fpsT += dt; fpsN++;
-          if (fpsT > 0.5) { BX.UI.setFps(Math.round(fpsN / fpsT)); fpsT = 0; fpsN = 0; }
+          if (fpsT > 0.5) {
+            BX.UI.setFps(Math.round(fpsN / fpsT) + ' fps · ' + Game.tier.id + (Game.tier.auto ? ' auto L' + Game.perf.level : '') + ' · ' + (Game._pr || 1).toFixed(2) + 'x');
+            fpsT = 0; fpsN = 0;
+          }
         }
-        Game._raf = requestAnimationFrame(loop);
       };
       Game._raf = requestAnimationFrame(loop);
     },
 
     saveSettings() { BX.store.set('settings', Game.settings); },
 
+    /** Frame-rate cap: 60 on touch devices (120 Hz phones get half the work), 30 in menus/pause or with battery saver / governor L6. */
+    fpsCap() {
+      const s = Game.settings, touch = BX.Perf.isTouch;
+      if (s.batterySaver || Game.perf.cap30) return 30;
+      if (Game.mode === 'menu' || Game.paused || Game.phase === 'rest' || Game.phase === 'ended') return touch ? 30 : 0;
+      return touch ? 60 : 0;
+    },
+
+    /** Safe points: nothing is happening that a shader recompile hitch could ruin. */
+    isSafePoint() {
+      return Game.mode === 'menu' || Game.paused || Game.phase === 'intro' || Game.phase === 'ready' || Game.phase === 'rest' || Game.phase === 'ended';
+    },
+
+    /** Feed the adaptive governor (AUTO quality only, and only while a fight is actually being played). */
+    governorFrame(now) {
+      const gov = Game.perf.gov;
+      if (!gov) return;
+      const live = Game.mode === 'fight' && !Game.paused && !document.hidden && (Game.phase === 'fight' || Game.phase === 'knockdown' || Game.phase === 'ready' || Game.phase === 'roundEnd');
+      if (!live) { gov.state.last = 0; return; }   // stop the clock; do not judge menu/pause frames
+      gov.frame(now);
+    },
+
+    setupGovernor() {
+      const p = Game.perf;
+      p.gov = null;
+      if (!Game.tier.auto) { p.level = 0; return; }
+      const level = Math.max(0, Math.min(BX.Perf.LADDER.length - 1, p.level | 0));
+      p.level = level;
+      p.gov = BX.Perf.makeGovernor({
+        targetFps: BX.Perf.LADDER[level].cap30 ? 30 : 60, refreshHz: p.refreshHz, levels: BX.Perf.LADDER.length, startLevel: level,
+        isFeatureStep: (a, b) => Math.max(a, b) >= 3,
+        cb: (lvl, reason) => {
+          p.level = lvl;
+          Game.applyLevel();
+          if (lvl >= 5 && !Game.contentLow && Game.tier.id !== 'low') p.pendingLow = true;   // cheapest content at the next safe point
+          Game.savePerf();
+          if (/[?&]debug/.test(location.search)) console.log('[perf] level', lvl, reason);
+        },
+      });
+    },
+
+    savePerf() {
+      const now = performance.now();
+      if (now - Game.perf.lastSave < 2000) return;
+      Game.perf.lastSave = now;
+      BX.store.set('perf', { key: BX.Perf.deviceKey(), level: Game.perf.level, contentLow: Game.contentLow });
+    },
+
+    /** Reset adaptive state (user changed the quality setting). */
+    resetPerf() {
+      Game.contentLow = false;
+      Game.perf.level = 0;
+      Game.perf.pendingLow = false;
+      BX.store.remove('perf');
+    },
+
+    /** Apply a governor level — free operations only. */
+    applyLevel() {
+      const lv = BX.Perf.LADDER[Game.perf.level] || BX.Perf.LADDER[0];
+      Game.perf.scale = lv.res;
+      Game.perf.cap30 = !!lv.cap30;
+      Game.shadowsOn = lv.shadows !== false && Game.tier.shadowMap > 0;
+      if (Game.arena) Game.arena.setFeatures({ beams: lv.beams, flashes: lv.flashes !== false, shadows: Game.shadowsOn, crowd: lv.crowd || 1 });
+      FX.setMax(lv.fxMax || Game.tier.fxPool);
+      if (Game.perf.gov) Game.perf.gov.setTarget(lv.cap30 ? 30 : 60);
+      Game.resize();
+    },
+
+    /** One-off switch to the cheapest content (shader/material changes) — only called at a safe point. */
+    switchToLowContent() {
+      Game.perf.pendingLow = false;
+      Game.contentLow = true;
+      Game.perf.level = 3;
+      Game.applySettings();
+      if (Game.perf.gov) Game.perf.gov.force(3, performance.now());
+      Game.savePerf();
+    },
+
+    /** Compile every visible material up front so the first fight frame does not stall (referee and 2nd boxer included). */
+    precompile() {
+      try {
+        const f1 = Game.fighters && Game.fighters[1], ref = Game.ref;
+        const v = [ref ? ref.root.visible : true, f1 ? f1.root.visible : true];
+        if (ref) ref.root.visible = true;
+        if (f1) f1.root.visible = true;
+        Game.renderer.compile(Game.scene, Game.camera);
+        if (ref) ref.root.visible = v[0];
+        if (f1) f1.root.visible = v[1];
+      } catch (e) { /* optional */ }
+    },
+
     applySettings(rebuild) {
-      const s = Game.settings, r = Game.renderer;
-      const dpr = window.devicePixelRatio || 1;
-      r.setPixelRatio(s.quality === 'low' ? 1 : s.quality === 'med' ? Math.min(dpr, 1.5) : Math.min(dpr, 2));
-      r.shadowMap.enabled = s.quality !== 'low';
-      if (!Game.arena || rebuild || Game.arena.quality !== s.quality) {
+      const s = Game.settings, Perf = BX.Perf;
+      const tier = Perf.resolve(s.quality, Game.contentLow);
+      const prev = Game.tier;
+      Game.tier = tier;
+      Perf.current = tier;
+      const archChanged = !Game.arena || rebuild || !prev || prev.key !== tier.key;
+      if (archChanged) {
         if (Game.arena) Game.arena.dispose();
-        Game.arena = BX.Arena.build(Game.scene, s.quality);
+        Game.arena = BX.Arena.build(Game.scene, tier);
+        if (Game.fighters) Game.arena.setBlobTargets([Game.fighters[0], Game.fighters[1], Game.ref]);
       }
+      // boxer models depend on the tier (material class, face detail): rebuild in place when it changed
+      if (prev && prev.modelKey !== tier.modelKey) {
+        for (const f of (Game.fighters || []).concat(Game.ref ? [Game.ref] : [])) if (f && f.rig) f.setLook(f.look);
+      }
+      FX.configure(tier.fxPool);
       Game.rig.shakeEnabled = !!s.shake;
       A.setVolume(s.volume); A.setSfx(s.sfx); A.setMusic(s.music); A.setSpeech(s.speech);
       if (Game.mode === 'fight') Game.rig.mode = Game.cameraMode();
-      Game.resize();
+      Game.setupGovernor();
+      Game.applyLevel();
+      if (archChanged && Game.fighters && Game.fighters.length) Game.precompile();
     },
 
     cameraMode() {
@@ -3375,11 +4042,21 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       BX.UI.toast('Camera: ' + { behind: 'Over the shoulder', side: 'Side view', high: 'High angle', broadcast: 'Broadcast' }[nxt]);
     },
 
-    resize() {
+    scheduleResize() {
+      if (Game._rs) return;
+      Game._rs = requestAnimationFrame(() => { Game._rs = 0; Game.resize(); });
+    },
+
+    resize(force) {
       const c = Game.canvas;
-      if (!c) return;
+      if (!c || !Game.tier) return;
       const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
-      Game.renderer.setSize(w, h, false);
+      const pr = BX.Perf.pixelRatio(Game.tier, w, h, Game.perf.scale);
+      if (force || w !== Game._w || h !== Game._h || Math.abs(pr - (Game._pr || 0)) > 0.004) {
+        Game._w = w; Game._h = h; Game._pr = pr;
+        Game.renderer.setPixelRatio(pr);
+        Game.renderer.setSize(w, h, false);
+      }
       Game.camera.aspect = w / h;
       Game.rig.aspect = w / h;
       Game.applyView();
@@ -3402,12 +4079,13 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     /* =================================================================== menu / showcase scenes */
     ensureFighters(look0, stats0, look1, stats1, hide1) {
       const old = Game.fighters;
-      for (const f of old) { Game.scene.remove(f.root); for (const k of Object.keys(f.rig.mats)) f.rig.mats[k].dispose(); }
+      for (const f of old) { Game.scene.remove(f.root); BX.disposeRig(f.rig); }
       const f0 = new BX.Fighter(look0, { slot: 0, stats: stats0 });
       const f1 = new BX.Fighter(look1, { slot: 1, stats: stats1 });
       Game.scene.add(f0.root); Game.scene.add(f1.root);
       Game.fighters = [f0, f1];
       f1.root.visible = !hide1;
+      if (Game.arena) Game.arena.setBlobTargets([f0, f1, Game.ref]);
       return Game.fighters;
     },
 
@@ -3583,6 +4261,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       if (Game.hitstop > 0) { Game.hitstop -= dt; sdt = 0; }
       if (Game.paused) sdt = 0;
 
+      if (Game.perf.pendingLow && Game.isSafePoint()) Game.switchToLowContent();
       if (Game.mode === 'menu') Game.tickMenu(sdt, dt);
       else Game.tickFight(sdt, dt);
 
@@ -3757,7 +4436,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         Game.slowmo(0.55, 0.5);
       } else {
         const t = (act.def.wind * act.tm) * 0.6;
-        setTimeout(() => A.whoosh(kind === 'straight' ? 0.4 : 0.7), t * 1000);
+        A.whoosh(kind === 'straight' ? 0.4 : 0.7, t);
       }
       if (!f.isAI) Game.emit('punch', f, act.def.id);
     },
@@ -4239,7 +4918,16 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       });
     },
 
-    render() { Game.renderer.render(Game.scene, Game.camera); },
+    render() {
+      if (Game.contextLost) return;
+      const r = Game.renderer, sm = r.shadowMap;
+      // the shadow pass is skipped when the governor turned shadows off, and re-used every Nth frame on touch / mid tiers
+      if (!Game.shadowsOn) { sm.autoUpdate = false; }
+      else if (Game.tier.shadowEvery > 1) { sm.autoUpdate = false; if ((Game._frame = (Game._frame || 0) + 1) % Game.tier.shadowEvery === 0 || Game._frame < 3) sm.needsUpdate = true; }
+      else sm.autoUpdate = true;
+      r.render(Game.scene, Game.camera);
+      BX.flushDispose();
+    },
   };
 
   BX.Game = Game;
@@ -4479,8 +5167,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
             ${toggle('Sound effects & crowd', 'sfx', s.sfx)}${toggle('Music', 'music', s.music)}${toggle('Referee voice (speech)', 'speech', s.speech)}
           </div>
           <div class="card"><h3>Graphics</h3>
-            <span class="lbl">QUALITY</span><div class="row-wrap">${chips([['low', 'Low'], ['med', 'Medium'], ['high', 'High']], s.quality, 'setting', 'quality')}</div>
-            <p class="tiny">Low: no shadows, small crowd. Pick Low on slow phones.</p>
+            <span class="lbl">QUALITY</span><div class="row-wrap">${chips([['auto', 'Auto'], ['low', 'Low'], ['med', 'Medium'], ['high', 'High']], s.quality, 'setting', 'quality')}</div>
+            <p class="tiny">Auto adapts resolution and effects to your device while you fight. Low: no shadows, small crowd.</p>
+            ${toggle('Battery saver (30 fps)', 'batterySaver', s.batterySaver, 'Halves the work — cooler phone, longer battery')}
             ${toggle('Camera shake', 'shake', s.shake)}${toggle('Show FPS', 'fps', s.fps)}
             <div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>
           </div>
@@ -4722,6 +5411,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     setting(el) {
       const s = G().settings;
       s[el.dataset.k] = el.dataset.v;
+      if (el.dataset.k === 'quality') G().resetPerf();
       G().saveSettings();
       G().applySettings();
       if (el.dataset.k === 'touch') UI.updateTouchVisibility();
@@ -4885,7 +5575,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
   };
-  UI.setFps = function (n) { els.fps.textContent = n + ' fps'; };
+  UI.setFps = function (n) { els.fps.textContent = typeof n === 'number' ? n + ' fps' : n; };
   UI.shakeFury = function (slot) {
     const b = (slot === 0 ? els.hud0 : els.hud1).querySelector('.fy');
     b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
@@ -5073,9 +5763,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       return false;
     };
     // first user gesture unlocks audio
-    const unlock = () => { A.unlock(); if (G().mode === 'menu') A.musicStart('menu'); };
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
+    A.armUnlock(() => { if (G().mode === 'menu') A.musicStart('menu'); });
   };
 
   UI.openHelp = function () {
@@ -5113,7 +5801,11 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   function hasWebGL() {
     try {
       const c = document.createElement('canvas');
-      return !!(c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl'));
+      const gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
+      if (!gl) return false;
+      const ext = gl.getExtension('WEBGL_lose_context');   // do not leave a throw-away context alive
+      if (ext) ext.loseContext();
+      return true;
     } catch (e) { return false; }
   }
 

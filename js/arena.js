@@ -206,6 +206,7 @@
     const tierMat = M({ color: 0x15171f, roughness: 0.9 });
     const nTiers = tier.crowd.tiers;
     const tiers = [];
+    const standBoxes = [];
     for (let i = 0; i < nTiers; i++) {
       const R = 7.4 + i * 1.2;
       const top = -0.55 + i * 0.62;
@@ -213,20 +214,23 @@
       const sizeA = 2 * R + 2.4;
       const mk = (w, d, x, z) => {
         const b = new T.Mesh(own(new T.BoxGeometry(w, hgt, d)), tierMat);
-        b.position.set(x, top - hgt / 2, z); G.add(b);
+        b.position.set(x, top - hgt / 2, z); G.add(b); standBoxes.push(b);
       };
       mk(sizeA, 1.2, 0, -R); mk(sizeA, 1.2, 0, R);
       mk(1.2, sizeA, -R, 0); mk(1.2, sizeA, R, 0);
       tiers.push({ R, top });
     }
+    arena.merged = [];
+    BX.mergeMeshes(G, standBoxes).forEach((g) => { own(g); arena.merged.push(g); });      // 4 boxes per tier -> one draw call
     // LED ad boards (six distinct textures, shared)
     const ads = ['PUNCH-COLA', 'IRON GLOVES', 'ROUND ONE ENERGY', 'KO FITNESS', 'GLOVE & CO', 'HEAVY HITTERS'];
     const adCols = ['#0b6bcb', '#c1121f', '#0d8a4f', '#8a2be2', '#d9822b', '#222'];
     const adMats = ads.map((txt, i) => own(new T.MeshBasicMaterial({ map: own(canvasTex(512, 64, (g, w, h) => drawBanner(g, w, h, txt, adCols[i], '#fff'))) })));
     const adGeo = own(new T.PlaneGeometry(5.6, 0.7));
+    const adMeshes = [];
     const adBoard = (i, x, z, ry) => {
       const m = new T.Mesh(adGeo, adMats[i % ads.length]);
-      m.position.set(x, -0.15, z); m.rotation.y = ry; G.add(m);
+      m.position.set(x, -0.15, z); m.rotation.y = ry; G.add(m); adMeshes.push(m);
     };
     const bd = 6.65;
     for (let i = 0; i < 3; i++) {
@@ -234,6 +238,25 @@
       adBoard(i + 3, -4.0 + i * 4.0, bd, Math.PI);
       adBoard(i + 1, -bd, -4.0 + i * 4.0, Math.PI / 2);
       adBoard(i + 4, bd, -4.0 + i * 4.0, -Math.PI / 2);
+    }
+
+    // the ad boards use plain (non-indexed-safe) planes: merge per material, keeping UVs
+    adMeshes.forEach((m) => { m.updateMatrix(); });
+    {
+      const byMat = new Map();
+      adMeshes.forEach((m) => { const l = byMat.get(m.material) || []; l.push(m); byMat.set(m.material, l); });
+      byMat.forEach((list, mat) => {
+        const parts = list.map((m) => { const g = m.geometry.clone(); g.applyMatrix4(m.matrix); return g; });
+        let vc = 0, ic = 0; parts.forEach((g) => { vc += g.attributes.position.count; ic += g.index.count; });
+        const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3), uv = new Float32Array(vc * 2), idx = new Uint16Array(ic);
+        let vo = 0, io = 0;
+        parts.forEach((g) => { const c = g.attributes.position.count; pos.set(g.attributes.position.array, vo * 3); nor.set(g.attributes.normal.array, vo * 3); uv.set(g.attributes.uv.array, vo * 2); for (let i = 0; i < g.index.count; i++) idx[io++] = g.index.array[i] + vo; vo += c; g.dispose(); });
+        const geo = new T.BufferGeometry();
+        geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('normal', new T.BufferAttribute(nor, 3)); geo.setAttribute('uv', new T.BufferAttribute(uv, 2)); geo.setIndex(new T.BufferAttribute(idx, 1));
+        geo.computeBoundingSphere(); own(geo);
+        list.forEach((m) => G.remove(m));
+        G.add(new T.Mesh(geo, mat));
+      });
     }
 
     /* ---------------- crowd: shuffled, split into angular chunks (frustum culled), low-poly LOD, GPU bobbing ---------------- */
@@ -336,19 +359,20 @@
 
     /* ---------------- lighting rig + visible beams ---------------- */
     const rigMat = M({ color: 0x23262f, roughness: 0.6, metalness: 0.3 });
-    // front faces only + stronger opacity: the same brightness for half the blended fill
-    const beamMat = own(new T.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.045 * tier.beamMul, blending: T.AdditiveBlending, depthWrite: false, side: T.FrontSide }));
+    // cheaper tiers: front faces only + stronger opacity = similar brightness for half the blended fill
+    const beamMat = own(new T.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.045 * tier.beamK / tier.beams, blending: T.AdditiveBlending, depthWrite: false, side: tier.beamDouble ? T.DoubleSide : T.FrontSide }));
     const lampMat = own(new T.MeshBasicMaterial({ color: 0xfff6e0 }));
     const rigHeight = 8.6;
     const nLamps = 6;
     arena.beams = [];
+    const rigMeshes = [], bulbMeshes = [];
     for (let i = 0; i < nLamps; i++) {
       const a = (i / nLamps) * Math.PI * 2 + 0.3;
       const x = Math.sin(a) * 4.4, z = Math.cos(a) * 4.4;
       const lamp = new T.Mesh(own(new T.CylinderGeometry(0.28, 0.2, 0.4, 14)), rigMat);
-      lamp.position.set(x, rigHeight, z); G.add(lamp);
+      lamp.position.set(x, rigHeight, z); G.add(lamp); rigMeshes.push(lamp);
       const bulb = new T.Mesh(own(new T.CircleGeometry(0.2, 14)), lampMat);
-      bulb.rotation.x = Math.PI / 2; bulb.position.set(x, rigHeight - 0.21, z); G.add(bulb);
+      bulb.rotation.x = Math.PI / 2; bulb.position.set(x, rigHeight - 0.21, z); G.add(bulb); bulbMeshes.push(bulb);
       const len = rigHeight + 0.5;
       const beam = new T.Mesh(own(new T.CylinderGeometry(0.2, 1.9, len, 22, 1, true)), beamMat);
       const target = new T.Vector3(x * 0.3, 0, z * 0.3);
@@ -360,7 +384,9 @@
       G.add(beam); arena.beams.push(beam);
     }
     const truss = new T.Mesh(own(new T.TorusGeometry(4.4, 0.08, 6, 36)), rigMat);
-    truss.rotation.x = Math.PI / 2; truss.position.y = rigHeight + 0.25; G.add(truss);
+    truss.rotation.x = Math.PI / 2; truss.position.y = rigHeight + 0.25; G.add(truss); rigMeshes.push(truss);
+    BX.mergeMeshes(G, rigMeshes).forEach((g) => { own(g); arena.merged.push(g); });
+    BX.mergeMeshes(G, bulbMeshes).forEach((g) => { own(g); arena.merged.push(g); });
 
     /* ---------------- jumbotron ---------------- */
     const screenTex = own(canvasTex(512, 288, (g, w, h) => { g.fillStyle = '#05070d'; g.fillRect(0, 0, w, h); }));
@@ -378,10 +404,12 @@
       jumbo.add(m);
     });
     const cableGeo = own(new T.CylinderGeometry(0.015, 0.015, 3, 6));
+    const jumboStatic = [jBody];
     for (const sx of [-0.9, 0.9]) for (const sz of [-0.9, 0.9]) {
       const cable = new T.Mesh(cableGeo, rigMat);
-      cable.position.set(sx, 2.1, sz); jumbo.add(cable);
+      cable.position.set(sx, 2.1, sz); jumbo.add(cable); jumboStatic.push(cable);
     }
+    BX.mergeMeshes(jumbo, jumboStatic).forEach((g) => { own(g); arena.merged.push(g); });
     G.add(jumbo);
     arena.jumbo = jumbo;
     arena._screenKey = '';
@@ -457,7 +485,7 @@
       if (f.crowd != null) F.crowd = f.crowd;
       const n = Math.max(1, F.beams), step = Math.max(1, Math.round(arena.beams.length / n));
       arena.beams.forEach((b, i) => { b.visible = i % step === 0; });
-      beamMat.opacity = 0.045 * 10.5 / Math.max(1, arena.beams.filter((b) => b.visible).length);   // constant total brightness
+      beamMat.opacity = 0.045 * tier.beamK / Math.max(1, arena.beams.filter((b) => b.visible).length);   // constant total brightness
       if (!F.flashes) for (const s of arena.flashes) { s.visible = false; s.userData.life = 0; }
       arena.floor.receiveShadow = F.shadows;
       arena.blobsOn = !F.shadows;

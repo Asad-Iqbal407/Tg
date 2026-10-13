@@ -88,6 +88,57 @@
     rig.body.traverse((o) => { if (o.isMesh && o.geometry && o.geometry.userData && o.geometry.userData.owned) BX.deferDispose([o.geometry]); });
   };
 
+
+  /** Merge indexed BufferGeometries (position + normal only; fighter/arena materials have no textures on merged parts). */
+  BX.mergeGeos = (list) => {
+    const T = window.THREE;
+    let vc = 0, ic = 0;
+    for (const g of list) { vc += g.attributes.position.count; ic += g.index ? g.index.count : g.attributes.position.count; }
+    const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3);
+    const idx = vc > 65535 ? new Uint32Array(ic) : new Uint16Array(ic);
+    let vo = 0, io = 0;
+    for (const g of list) {
+      const p = g.attributes.position, n = g.attributes.normal, c = p.count;
+      pos.set(p.array.subarray(0, c * 3), vo * 3);
+      nor.set(n.array.subarray(0, c * 3), vo * 3);
+      if (g.index) { const a = g.index.array; for (let i = 0; i < a.length; i++) idx[io++] = a[i] + vo; }
+      else for (let i = 0; i < c; i++) idx[io++] = vo + i;
+      vo += c;
+    }
+    const out = new T.BufferGeometry();
+    out.setAttribute('position', new T.BufferAttribute(pos, 3));
+    out.setAttribute('normal', new T.BufferAttribute(nor, 3));
+    out.setIndex(new T.BufferAttribute(idx, 1));
+    out.computeBoundingSphere();
+    out.userData.owned = true;
+    return out;
+  };
+
+  /** Bake the local transforms of untextured static meshes (children of `parent`) into one mesh per material. Returns the new geometries. */
+  BX.mergeMeshes = (parent, meshes) => {
+    const T = window.THREE;
+    const buckets = new Map();
+    for (const m of meshes) {
+      if (Array.isArray(m.material)) continue;
+      const k = m.material.uuid + (m.castShadow ? 'c' : 'n') + (m.receiveShadow ? 'r' : 'x');
+      let b = buckets.get(k);
+      if (!b) { b = { mat: m.material, cast: m.castShadow, recv: m.receiveShadow, list: [] }; buckets.set(k, b); }
+      b.list.push(m);
+    }
+    const made = [];
+    for (const b of buckets.values()) {
+      const geos = b.list.map((m) => { m.updateMatrix(); const g = m.geometry.clone(); g.applyMatrix4(m.matrix); return g; });
+      const merged = BX.mergeGeos(geos);
+      geos.forEach((g) => g.dispose());
+      for (const m of b.list) parent.remove(m);
+      const mesh = new T.Mesh(merged, b.mat);
+      mesh.castShadow = b.cast; mesh.receiveShadow = b.recv;
+      parent.add(mesh);
+      made.push(merged);
+    }
+    return made;
+  };
+
   BX.hexToInt = (hex) => parseInt(String(hex).replace('#', ''), 16);
 
   /** Darken / lighten a hex colour by an amount (-1..1). */

@@ -67,29 +67,8 @@
     return m;
   }
 
-  /* ---------- geometry merging (BufferGeometryUtils is not vendored) ---------- */
-  function mergeGeos(list) {
-    let vc = 0, ic = 0;
-    for (const g of list) { vc += g.attributes.position.count; ic += g.index ? g.index.count : g.attributes.position.count; }
-    const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3);
-    const idx = vc > 65535 ? new Uint32Array(ic) : new Uint16Array(ic);
-    let vo = 0, io = 0;
-    for (const g of list) {
-      const p = g.attributes.position, n = g.attributes.normal, c = p.count;
-      pos.set(p.array.subarray(0, c * 3), vo * 3);
-      nor.set(n.array.subarray(0, c * 3), vo * 3);
-      if (g.index) { const a = g.index.array; for (let i = 0; i < a.length; i++) idx[io++] = a[i] + vo; }
-      else for (let i = 0; i < c; i++) idx[io++] = vo + i;
-      vo += c;
-    }
-    const out = new T.BufferGeometry();
-    out.setAttribute('position', new T.BufferAttribute(pos, 3));
-    out.setAttribute('normal', new T.BufferAttribute(nor, 3));
-    out.setIndex(new T.BufferAttribute(idx, 1));
-    out.computeBoundingSphere();
-    out.userData.owned = true;
-    return out;
-  }
+  /* ---------- geometry merging (BufferGeometryUtils is not vendored): see BX.mergeGeos in util.js ---------- */
+  const mergeGeos = (list) => BX.mergeGeos(list);
 
   /** Merge a group's static child meshes that share a material (and shadow flag) into one mesh each. */
   function mergeGroup(group) {

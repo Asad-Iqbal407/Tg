@@ -23,7 +23,7 @@
       pxBudget: 0.40, pxBudgetTouch: 0.40, prCap: 1.0, prFloor: 0.65,
       shadowMap: 0, shadowFocus: 0.7, shadowEvery: 1,
       crowd: { tiers: 3, spacing: 0.95, lod: 'B', chunks: 12 },
-      beams: 2, beamMul: 5.0, flashes: 0, pointLights: 0, hemi: 0.75,
+      beams: 2, beamK: 10.5, flashes: 0, pointLights: 0, hemi: 0.75,
       lambertStatics: true, lambertFighters: true, faceDetail: false, fxPool: 24, smallCasterR: 0.075,
     },
     med: {
@@ -31,7 +31,7 @@
       pxBudget: 0.85, pxBudgetTouch: 0.85, prCap: 1.5, prFloor: 0.65,
       shadowMap: 512, shadowFocus: 0.7, shadowEvery: 2,
       crowd: { tiers: 4, spacing: 0.7, lod: 'B', chunks: 16 },
-      beams: 3, beamMul: 3.6, flashes: 4, pointLights: 1, hemi: 0.75,
+      beams: 3, beamK: 10.5, flashes: 4, pointLights: 1, hemi: 0.75,
       lambertStatics: true, lambertFighters: false, faceDetail: false, fxPool: 48, smallCasterR: 0.075,
     },
     high: {
@@ -39,7 +39,7 @@
       pxBudget: 5.2, pxBudgetTouch: 1.8, prCap: 2.0, prFloor: 0.65,
       shadowMap: 2048, shadowMapTouch: 1024, shadowFocus: 0.7, shadowEvery: 1,
       crowd: { tiers: 5, spacing: 0.56, lod: 'A', chunks: 16 },
-      beams: 6, beamMul: 1.8, flashes: 10, pointLights: 3, hemi: 0.55,
+      beams: 6, beamK: 10.5, flashes: 10, pointLights: 3, hemi: 0.55,
       lambertStatics: false, lambertFighters: false, faceDetail: true, fxPool: 90, smallCasterR: 0.075,
     },
   };
@@ -53,6 +53,9 @@
     if (isTouch && t.shadowMapTouch) t.shadowMap = t.shadowMapTouch;
     // touch devices re-use the shadow map every other frame (one frame of lag is invisible)
     if (isTouch && id !== 'low') t.shadowEvery = 2;
+    // desktop High keeps the original look (double-sided cones at the original opacity); everything else uses front faces only at ~half the fill cost
+    t.beamDouble = id === 'high' && !isTouch;
+    if (t.beamDouble) t.beamK = 6;
     t.key = [id, t.shadowMap, t.pointLights, t.lambertStatics ? 'L' : 'S', t.crowd.lod, t.crowd.tiers, t.beams, t.flashes].join('|');
     t.modelKey = (t.lambertFighters ? 'L' : 'S') + (t.faceDetail ? 'F' : 'f');
     t.auto = setting === 'auto';
