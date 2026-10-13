@@ -4,20 +4,24 @@
   const BX = (window.BX = window.BX || {});
   const T = THREE;
 
-  /* ------------------------------------------------------------------ particles */
+  /* ------------------------------------------------------------------ particles
+   * One InstancedMesh for every spark/sweat/dust/confetti particle (a single draw call) + a few additive flash sprites. */
+  const MAXP = 90;
   const FX = {
-    pool: [], flashes: [], scene: null, tex: null,
+    parts: [], flashes: [], scene: null, tex: null, mesh: null, cap: MAXP, live: 0,
+    _m: new T.Matrix4(),
 
     init(scene) {
       FX.scene = scene;
-      const geo = new T.SphereGeometry(1, 6, 4);
-      for (let i = 0; i < 90; i++) {
-        const m = new T.Mesh(geo, new T.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
-        m.visible = false;
-        m.userData = { vel: new T.Vector3(), life: 0, max: 1, grav: 6, size: 0.03 };
-        scene.add(m);
-        FX.pool.push(m);
-      }
+      const geo = new T.SphereGeometry(1, 5, 3);
+      const mat = new T.MeshBasicMaterial({ color: 0xffffff });
+      FX.mesh = new T.InstancedMesh(geo, mat, MAXP);
+      FX.mesh.frustumCulled = false;
+      FX.mesh.count = 0;
+      FX.mesh.visible = false;
+      FX.mesh.setColorAt(0, new T.Color(0xffffff));   // allocate the per-instance colour buffer once
+      scene.add(FX.mesh);
+      for (let i = 0; i < MAXP; i++) FX.parts.push({ pos: new T.Vector3(), vel: new T.Vector3(), color: new T.Color(), life: 0, max: 1, size: 0.03, grav: 6 });
       const c = document.createElement('canvas');
       c.width = c.height = 64;
       const g = c.getContext('2d');
@@ -34,32 +38,36 @@
       }
     },
 
+    /** Limit how many particles may be alive (quality tier / governor). */
+    configure(n) { FX.cap = Math.max(8, Math.min(MAXP, n)); },
+    setMax(n) { FX.configure(n); },
+
     clear() {
-      for (const p of FX.pool) p.visible = false;
+      for (const p of FX.parts) p.life = 0;
+      FX.live = 0;
+      if (FX.mesh) { FX.mesh.count = 0; FX.mesh.visible = false; }
       for (const s of FX.flashes) s.visible = false;
     },
 
     spawn(pos, vel, color, size, life, grav) {
+      if (FX.live >= FX.cap) return;
       let p = null;
-      for (const q of FX.pool) if (!q.visible) { p = q; break; }
+      for (const q of FX.parts) if (q.life <= 0) { p = q; break; }
       if (!p) return;
-      p.visible = true;
-      p.position.copy(pos);
-      p.material.color.set(color);
-      p.material.opacity = 1;
-      p.scale.setScalar(size);
-      const u = p.userData;
-      u.vel.copy(vel); u.life = life; u.max = life; u.size = size; u.grav = grav == null ? 6 : grav;
+      p.pos.copy(pos); p.vel.copy(vel); p.color.set(color);
+      p.size = size; p.life = life; p.max = life; p.grav = grav == null ? 6 : grav;
+      FX.live++;
     },
 
     flash(pos, size, color) {
       let s = null;
       for (const q of FX.flashes) if (!q.visible) { s = q; break; }
       if (!s) return;
+      const cap = BX.Perf && BX.Perf.current && BX.Perf.current.id === 'high' ? 1.8 : 1.1;   // big additive quads are fill-rate heavy on phones
       s.visible = true; s.position.copy(pos);
       s.material.color.set(color || 0xffffff);
-      s.userData.life = 0.18; s.userData.max = 0.18; s.userData.size = size;
-      s.scale.setScalar(size * 0.4);
+      s.userData.life = 0.18; s.userData.max = 0.18; s.userData.size = Math.min(size, cap);
+      s.scale.setScalar(s.userData.size * 0.4);
       s.material.opacity = 1;
     },
 
@@ -101,18 +109,26 @@
     },
 
     update(dt) {
-      for (const p of FX.pool) {
-        if (!p.visible) continue;
-        const u = p.userData;
-        u.life -= dt;
-        if (u.life <= 0) { p.visible = false; continue; }
-        u.vel.y -= u.grav * dt;
-        p.position.addScaledVector(u.vel, dt);
-        if (p.position.y < 0.02 && u.grav > 0) { p.position.y = 0.02; u.vel.multiplyScalar(0.3); u.vel.y = 0; }
-        const k = u.life / u.max;
-        p.material.opacity = Math.min(1, k * 1.6);
-        p.scale.setScalar(u.size * (0.4 + 0.6 * k));
+      let n = 0, live = 0;
+      const m = FX._m, mesh = FX.mesh;
+      for (const p of FX.parts) {
+        if (p.life <= 0) continue;
+        p.life -= dt;
+        if (p.life <= 0) continue;
+        live++;
+        p.vel.y -= p.grav * dt;
+        p.pos.addScaledVector(p.vel, dt);
+        if (p.pos.y < 0.02 && p.grav > 0) { p.pos.y = 0.02; p.vel.multiplyScalar(0.3); p.vel.y = 0; }
+        const sc = p.size * (0.4 + 0.6 * (p.life / p.max));     // particles shrink away instead of fading (single shared material)
+        m.makeScale(sc, sc, sc); m.setPosition(p.pos);
+        mesh.setMatrixAt(n, m);
+        mesh.setColorAt(n, p.color);
+        n++;
       }
+      FX.live = live;
+      mesh.count = n;
+      mesh.visible = n > 0;
+      if (n > 0) { mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true; }
       for (const s of FX.flashes) {
         if (!s.visible) continue;
         const u = s.userData;

@@ -230,8 +230,9 @@
             ${toggle('Sound effects & crowd', 'sfx', s.sfx)}${toggle('Music', 'music', s.music)}${toggle('Referee voice (speech)', 'speech', s.speech)}
           </div>
           <div class="card"><h3>Graphics</h3>
-            <span class="lbl">QUALITY</span><div class="row-wrap">${chips([['low', 'Low'], ['med', 'Medium'], ['high', 'High']], s.quality, 'setting', 'quality')}</div>
-            <p class="tiny">Low: no shadows, small crowd. Pick Low on slow phones.</p>
+            <span class="lbl">QUALITY</span><div class="row-wrap">${chips([['auto', 'Auto'], ['low', 'Low'], ['med', 'Medium'], ['high', 'High']], s.quality, 'setting', 'quality')}</div>
+            <p class="tiny">Auto adapts resolution and effects to your device while you fight. Low: no shadows, small crowd.</p>
+            ${toggle('Battery saver (30 fps)', 'batterySaver', s.batterySaver, 'Halves the work — cooler phone, longer battery')}
             ${toggle('Camera shake', 'shake', s.shake)}${toggle('Show FPS', 'fps', s.fps)}
             <div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>
           </div>
@@ -473,6 +474,7 @@
     setting(el) {
       const s = G().settings;
       s[el.dataset.k] = el.dataset.v;
+      if (el.dataset.k === 'quality') G().resetPerf();
       G().saveSettings();
       G().applySettings();
       if (el.dataset.k === 'touch') UI.updateTouchVisibility();
@@ -636,7 +638,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
   };
-  UI.setFps = function (n) { els.fps.textContent = n + ' fps'; };
+  UI.setFps = function (n) { els.fps.textContent = typeof n === 'number' ? n + ' fps' : n; };
   UI.shakeFury = function (slot) {
     const b = (slot === 0 ? els.hud0 : els.hud1).querySelector('.fy');
     b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
@@ -824,9 +826,7 @@
       return false;
     };
     // first user gesture unlocks audio
-    const unlock = () => { A.unlock(); if (G().mode === 'menu') A.musicStart('menu'); };
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
+    A.armUnlock(() => { if (G().mode === 'menu') A.musicStart('menu'); });
   };
 
   UI.openHelp = function () {

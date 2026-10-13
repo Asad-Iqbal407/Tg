@@ -100,9 +100,9 @@
       this.look = look;
       if (this.rig) {
         this.root.remove(this.rig.body);
-        for (const k of Object.keys(this.rig.mats)) this.rig.mats[k].dispose();
+        BX.disposeRig(this.rig);   // deferred: the replacement acquires the shared shader programs first
       }
-      this.rig = BX.Model.build(look, this.role);
+      this.rig = BX.Model.build(look, this.role, BX.Perf && BX.Perf.current);
       this.root.add(this.rig.body);
       this.mx = look.stance === 'southpaw' ? -1 : 1;
       this.rig.body.scale.x = this.mx;
@@ -819,20 +819,23 @@
       const ouch = this.ouch;
       const exert = this.act && this.act.type === 'punch' ? 1 : 0;
       const squint = BX.clamp(ouch * 1.2 + (this.act && this.act.type === 'hit' ? 0.3 : 0) + this.bruiseAmt * 0.5 + (this.blocking ? 0.35 : 0), 0, 1);
-      for (let i = 0; i < 2; i++) {
-        F.eyes[i].scale.y = 0.02 * (1 - squint * 0.7);
-        F.pupils[i].scale.y = 0.012 * (1 - squint * 0.6);
-        F.brows[i].position.y = 0.222 - squint * 0.012;
-      }
+      F.eyes.scale.y = 1 - squint * 0.7;       // eyes/pupils/brows are left+right pairs merged into one mesh each
+      F.pupils.scale.y = 1 - squint * 0.6;
+      F.brows.position.y = 0.222 - squint * 0.012;
       const open = BX.clamp(ouch * 1.3 + exert * 0.6 + (this.stamina < this.maxStamina * 0.25 ? 0.5 + Math.sin(this.t * 9) * 0.2 : 0), 0, 1);
       F.lips.scale.y = 0.008 + open * 0.02;
       F.guard.scale.y = open * 0.016;
+      F.guard.visible = open > 0.03;
       // bruises
       const b = this.bruiseAmt;
       M.bruise.opacity = Math.min(0.75, b * 1.3);
       M.flush.opacity = Math.min(0.5, 0.1 * (1 - this.healthFrac) + b * 0.4);
       const sw = 1 + b * 0.35;
-      for (let i = 0; i < 4; i++) F.bruises[i].scale.setScalar(i % 2 === 0 ? 0.05 * sw : 0.04 * sw);
+      // marks are only submitted to the GPU once they are visible
+      const showB = M.bruise.opacity > 0.02;
+      F.bruiseA.visible = showB; F.bruiseB.visible = showB;
+      if (showB) { F.bruiseA.scale.setScalar(sw); F.bruiseB.scale.setScalar(sw); }
+      F.noseFlush.visible = M.flush.opacity > 0.02;
       // fury aura
       const ready = this.fury >= 99.9;
       M.glove.emissive.setRGB(ready ? 0.5 + 0.5 * Math.sin(this.t * 10) : 0, ready ? 0.25 + 0.2 * Math.sin(this.t * 10) : 0, 0);

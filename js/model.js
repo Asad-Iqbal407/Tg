@@ -1,4 +1,6 @@
-/* Knockout Arena — procedural 3D boxer avatar (built from primitives, no external assets) */
+/* Knockout Arena — procedural 3D boxer avatar (built from primitives, no external assets).
+ * Performance: spheres use a LOD by size, static parts are merged per body segment and material (63 -> ~33 draw calls per boxer),
+ * tiny parts never cast shadows, and the cheap tiers use Lambert shading and skip decorative detail. */
 (function () {
   'use strict';
   const BX = (window.BX = window.BX || {});
@@ -20,7 +22,7 @@
 
   /* ---------- shared geometry cache ---------- */
   const GC = {};
-  const sphereG = () => GC.sphere || (GC.sphere = new T.SphereGeometry(1, 22, 16));
+  const sphereG = () => GC.sphere || (GC.sphere = new T.SphereGeometry(1, 22, 16));   // marker: mk() swaps in a LOD by size
   const boxG = () => GC.box || (GC.box = new T.BoxGeometry(1, 1, 1));
   const cylG = (open) => {
     const k = open ? 'cylo' : 'cyl';
@@ -33,22 +35,108 @@
     return GC[k] || (GC[k] = new T.CapsuleGeometry(r, len, 6, 14));
   };
   const hairCapG = () => GC.hairCap || (GC.hairCap = new T.SphereGeometry(1, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.56));
+  const sphereLod = (w, h) => { const k = 'sph' + w + 'x' + h; return GC[k] || (GC[k] = new T.SphereGeometry(1, w, h)); };
+
+  let TIER = null;   // tier being built (set by buildModel)
+
+  /** Pick a sphere resolution from the sphere's final size: tiny parts do not need 350 triangles. */
+  function lodSphere(r) {
+    const low = TIER && TIER.id === 'low';
+    if (r < 0.06) return sphereLod(8, 6);
+    if (r < 0.12) return low ? sphereLod(10, 8) : sphereLod(14, 10);
+    return low ? sphereLod(16, 12) : sphereG();
+  }
+  const geoFor = (geo, sx, sy, sz) => (geo === GC.sphere ? lodSphere(Math.max(sx, sy == null ? sx : sy, sz == null ? sx : sz)) : geo);
 
   function std(color, rough, metal, extra) {
-    const m = new T.MeshStandardMaterial(Object.assign({ color: new T.Color(color), roughness: rough == null ? 0.7 : rough, metalness: metal || 0 }, extra || {}));
-    return m;
+    if (TIER && TIER.lambertFighters) {
+      const p = { color: new T.Color(color) };
+      if (extra) { if (extra.emissive) p.emissive = extra.emissive; if (extra.side != null) p.side = extra.side; if (extra.transparent) { p.transparent = true; p.opacity = extra.opacity || 0; p.depthWrite = false; } }
+      return new T.MeshLambertMaterial(p);
+    }
+    return new T.MeshStandardMaterial(Object.assign({ color: new T.Color(color), roughness: rough == null ? 0.7 : rough, metalness: metal || 0 }, extra || {}));
   }
 
   function mk(geo, mat, parent, x, y, z, sx, sy, sz, cast) {
-    const m = new T.Mesh(geo, mat);
+    const sy2 = sy == null ? sx : sy, sz2 = sz == null ? sx : sz;
+    const m = new T.Mesh(sx != null ? geoFor(geo, sx, sy2, sz2) : geo, mat);
     m.position.set(x || 0, y || 0, z || 0);
-    if (sx != null) m.scale.set(sx, sy == null ? sx : sy, sz == null ? sx : sz);
+    if (sx != null) m.scale.set(sx, sy2, sz2);
     m.castShadow = cast !== false;
     if (parent) parent.add(m);
     return m;
   }
 
-  function addHair(style, head, mat, skin) {
+  /* ---------- geometry merging (BufferGeometryUtils is not vendored) ---------- */
+  function mergeGeos(list) {
+    let vc = 0, ic = 0;
+    for (const g of list) { vc += g.attributes.position.count; ic += g.index ? g.index.count : g.attributes.position.count; }
+    const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3);
+    const idx = vc > 65535 ? new Uint32Array(ic) : new Uint16Array(ic);
+    let vo = 0, io = 0;
+    for (const g of list) {
+      const p = g.attributes.position, n = g.attributes.normal, c = p.count;
+      pos.set(p.array.subarray(0, c * 3), vo * 3);
+      nor.set(n.array.subarray(0, c * 3), vo * 3);
+      if (g.index) { const a = g.index.array; for (let i = 0; i < a.length; i++) idx[io++] = a[i] + vo; }
+      else for (let i = 0; i < c; i++) idx[io++] = vo + i;
+      vo += c;
+    }
+    const out = new T.BufferGeometry();
+    out.setAttribute('position', new T.BufferAttribute(pos, 3));
+    out.setAttribute('normal', new T.BufferAttribute(nor, 3));
+    out.setIndex(new T.BufferAttribute(idx, 1));
+    out.computeBoundingSphere();
+    out.userData.owned = true;
+    return out;
+  }
+
+  /** Merge a group's static child meshes that share a material (and shadow flag) into one mesh each. */
+  function mergeGroup(group) {
+    const buckets = new Map();
+    for (const m of group.children) {
+      if (!m.isMesh || m.userData.keep) continue;
+      const k = m.material.uuid + (m.castShadow ? 'c' : 'n');
+      let b = buckets.get(k);
+      if (!b) { b = { mat: m.material, cast: m.castShadow, list: [] }; buckets.set(k, b); }
+      b.list.push(m);
+    }
+    for (const b of buckets.values()) {
+      if (b.list.length < 2) continue;
+      const geos = b.list.map((m) => { m.updateMatrix(); const g = m.geometry.clone(); g.applyMatrix4(m.matrix); return g; });
+      const merged = mergeGeos(geos);
+      geos.forEach((g) => g.dispose());
+      for (const m of b.list) group.remove(m);
+      const mesh = new T.Mesh(merged, b.mat);
+      mesh.castShadow = b.cast;
+      group.add(mesh);
+    }
+  }
+
+  /** A left/right pair as ONE mesh (symmetric in x), for parts the face animation scales/moves in y only. */
+  function mkPair(geo, mat, parent, y, z, xoff, sx, sy, sz, rotz) {
+    const parts = [];
+    for (const side of [-1, 1]) {
+      const m = new T.Mesh(geoFor(geo, sx, sy, sz), mat);
+      m.position.set(side * xoff, 0, 0);
+      m.scale.set(sx, sy, sz);
+      if (rotz) m.rotation.z = -side * rotz;
+      m.updateMatrix();
+      const g = m.geometry.clone();
+      g.applyMatrix4(m.matrix);
+      parts.push(g);
+    }
+    const merged = mergeGeos(parts);
+    parts.forEach((g) => g.dispose());
+    const mesh = new T.Mesh(merged, mat);
+    mesh.position.set(0, y, z);
+    mesh.castShadow = false;
+    mesh.userData.keep = true;
+    parent.add(mesh);
+    return mesh;
+  }
+
+  function addHair(style, head, mat) {
     const cap = (s, tilt) => {
       const m = mk(hairCapG(), mat, head, 0, 0.16, -0.003, 0.158 * s, 0.172 * s, 0.158 * s);
       m.rotation.x = tilt == null ? -0.34 : tilt;
@@ -108,8 +196,10 @@
     }
   }
 
-  /** Build a complete boxer (or referee) and return the rig of parts. */
-  function buildModel(look, role) {
+  /** Build a complete boxer (or referee) and return the rig of parts. `tier` defaults to the currently applied quality tier. */
+  function buildModel(look, role, tier) {
+    TIER = tier || (BX.Perf && BX.Perf.current) || { id: 'high', lambertFighters: false, faceDetail: true, smallCasterR: 0.075 };
+    const detail = !!TIER.faceDetail;
     const ref = role === 'ref';
     const B = BUILD[look.build] || BUILD.avg;
     const w = B.w, t = B.t, limb = B.limb;
@@ -127,8 +217,8 @@
       lip: std(BX.shade(look.skin, -0.35), 0.6),
       shirt: std('#f4f4f4', 0.8),
       pants: std('#151515', 0.8),
-      bruise: new T.MeshStandardMaterial({ color: 0x6a2a6e, roughness: 0.9, transparent: true, opacity: 0, depthWrite: false }),
-      flush: new T.MeshStandardMaterial({ color: 0xd22a2a, roughness: 0.8, transparent: true, opacity: 0, depthWrite: false }),
+      bruise: std('#6a2a6e', 0.9, 0, { transparent: true, opacity: 0, depthWrite: false }),
+      flush: std('#d22a2a', 0.8, 0, { transparent: true, opacity: 0, depthWrite: false }),
     };
 
     const root = new T.Group();
@@ -156,11 +246,10 @@
     mk(sphereG(), torsoMat, chest, 0, 0.17, 0, 0.215 * w, 0.22, 0.135 * t);          // ribcage
     if (!ref) {
       for (const sx of [-1, 1]) {
-        mk(sphereG(), mats.skin, chest, sx * 0.095 * w, 0.2, 0.085 * t, 0.095, 0.075, 0.06);   // pecs
+        if (detail || TIER.id === 'med') mk(sphereG(), mats.skin, chest, sx * 0.095 * w, 0.2, 0.085 * t, 0.095, 0.075, 0.06);   // pecs
         mk(sphereG(), mats.skin, chest, sx * D.shX * w, D.shY - 0.02, 0, 0.085, 0.085, 0.085); // delts
       }
-      // abs hint
-      for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) mk(sphereG(), mats.skin, chest, sx * 0.04 * w, 0.0 - i * 0.055 + 0.04, 0.1 * t, 0.04, 0.025, 0.02);
+      if (detail) for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) mk(sphereG(), mats.skin, chest, sx * 0.04 * w, 0.0 - i * 0.055 + 0.04, 0.1 * t, 0.04, 0.025, 0.02);   // abs
     } else {
       for (const sx of [-1, 1]) mk(sphereG(), mats.shirt, chest, sx * D.shX * w, D.shY - 0.02, 0, 0.09, 0.09, 0.09);
       mk(boxG(), mats.dark, chest, 0, 0.15, 0.135 * t, 0.012, 0.3, 0.01); // shirt stripe
@@ -175,38 +264,33 @@
     const head = new T.Group();
     head.position.set(0, D.neckY + 0.02, 0.01);
     chest.add(head);
-    const skull = mk(sphereG(), mats.skin, head, 0, 0.16, 0, 0.148, 0.165, 0.152);
+    mk(sphereG(), mats.skin, head, 0, 0.16, 0, 0.148, 0.165, 0.152);          // skull
     mk(sphereG(), mats.skin, head, 0, 0.085, 0.032, 0.115, 0.09, 0.115);              // jaw
     mk(sphereG(), mats.skin, head, 0, 0.1, 0.128, 0.032, 0.03, 0.03);                 // nose (tip)
-    mk(sphereG(), mats.skin, head, 0, 0.135, 0.13, 0.02, 0.04, 0.02);                 // nose bridge
-    for (const sx of [-1, 1]) {
-      mk(sphereG(), mats.skin, head, sx * 0.145, 0.15, -0.005, 0.02, 0.04, 0.03);     // ears
+    if (detail) {
+      mk(sphereG(), mats.skin, head, 0, 0.135, 0.13, 0.02, 0.04, 0.02);               // nose bridge
+      for (const sx of [-1, 1]) mk(sphereG(), mats.skin, head, sx * 0.145, 0.15, -0.005, 0.02, 0.04, 0.03);   // ears
     }
-    const eyes = [], pupils = [], brows = [];
-    for (const sx of [-1, 1]) {
-      const e = mk(sphereG(), mats.white, head, sx * 0.058, 0.185, 0.122, 0.027, 0.02, 0.014, false);
-      const p = mk(sphereG(), mats.dark, head, sx * 0.058, 0.185, 0.134, 0.012, 0.012, 0.006, false);
-      const b = mk(boxG(), mats.hair, head, sx * 0.058, 0.222, 0.128, 0.058, 0.012, 0.016, false);
-      b.rotation.z = -sx * 0.12;
-      eyes.push(e); pupils.push(p); brows.push(b);
-    }
-    // mouth: lips + (mouthguard) teeth that show when the face is hit / the fighter is exerting
+    // face parts the animation drives (squint, brows, mouth) — symmetric pairs are single meshes scaled/moved in y
+    const eyes = mkPair(sphereG(), mats.white, head, 0.185, 0.122, 0.058, 0.027, 0.02, 0.014);
+    const pupils = mkPair(sphereG(), mats.dark, head, 0.185, 0.134, 0.058, 0.012, 0.012, 0.006);
+    const brows = mkPair(boxG(), mats.hair, head, 0.222, 0.128, 0.058, 0.058, 0.012, 0.016, 0.12);
     const mouth = new T.Group();
     mouth.position.set(0, 0.065, 0.135);
     head.add(mouth);
     const lips = mk(sphereG(), mats.lip, mouth, 0, 0, 0, 0.034, 0.008, 0.012, false);
+    lips.userData.keep = true;
     const guard = mk(sphereG(), mats.white, mouth, 0, 0, 0.004, 0.028, 0.0, 0.008, false);
-    // bruises / swelling
-    const bruises = [];
-    for (const sx of [-1, 1]) {
-      const b = mk(sphereG(), mats.bruise, head, sx * 0.075, 0.172, 0.108, 0.05, 0.04, 0.035, false);
-      bruises.push(b);
-      const c = mk(sphereG(), mats.bruise, head, sx * 0.1, 0.1, 0.1, 0.04, 0.035, 0.03, false);
-      bruises.push(c);
-    }
-    const nose = mk(sphereG(), mats.flush, head, 0, 0.1, 0.135, 0.036, 0.034, 0.034, false);
-    bruises.push(nose);
-    addHair(ref ? 'short' : look.hair, head, ref ? std('#bdbdbd', 0.85) : mats.hair, mats.skin);
+    guard.userData.keep = true;
+    guard.visible = false;
+    // bruises / swelling (hidden until the boxer is actually marked up)
+    const bruiseA = mkPair(sphereG(), mats.bruise, head, 0.172, 0.108, 0.075, 0.05, 0.04, 0.035);
+    const bruiseB = mkPair(sphereG(), mats.bruise, head, 0.1, 0.1, 0.1, 0.04, 0.035, 0.03);
+    const noseFlush = mk(sphereG(), mats.flush, head, 0, 0.1, 0.135, 0.036, 0.034, 0.034, false);
+    noseFlush.userData.keep = true;
+    for (const m of [bruiseA, bruiseB, noseFlush]) m.visible = false;
+    if (ref) mats.refHair = std('#bdbdbd', 0.85);
+    addHair(ref ? 'short' : look.hair, head, ref ? mats.refHair : mats.hair);
 
     const headCenter = new T.Object3D();
     headCenter.position.set(0, 0.16, 0.02);
@@ -227,14 +311,16 @@
       mk(capG(r2, D.fa + 0.02 - 2 * r2), mats.skin, fore, 0, 0, 0);
       body.add(fore);
       const glove = new T.Group();
-      let fist;
+      const fist = new T.Object3D();      // strike point (world position used by hit effects)
+      fist.position.set(0, ref ? 0.06 : 0.11, 0);
+      glove.add(fist);
       if (ref) {
-        fist = mk(sphereG(), mats.skin, glove, 0, 0.06, 0, 0.055, 0.07, 0.05);
+        mk(sphereG(), mats.skin, glove, 0, 0.06, 0, 0.055, 0.07, 0.05);
       } else {
-        fist = mk(sphereG(), mats.glove, glove, 0, 0.11, 0.0, 0.108, 0.118, 0.118);
+        mk(sphereG(), mats.glove, glove, 0, 0.11, 0.0, 0.108, 0.118, 0.118);
         mk(cylG(), mats.cuff, glove, 0, 0.005, 0, 0.07 * limb + 0.008, 0.07, 0.07 * limb + 0.008);
         mk(sphereG(), mats.glove, glove, sx * 0.082, 0.1, 0.0, 0.05, 0.07, 0.06);   // thumb
-        mk(boxG(), mats.cuff, glove, 0, 0.115, 0.1, 0.07, 0.005, 0.02);             // strike mark
+        if (detail) mk(boxG(), mats.cuff, glove, 0, 0.115, 0.1, 0.07, 0.005, 0.02);             // strike mark
       }
       body.add(glove);
       arms[name] = { upper, fore, glove, fist, sx };
@@ -262,11 +348,24 @@
       legs[name] = { thigh, shin, boot, sx };
     }
 
-    body.traverse((o) => { if (o.isMesh) o.receiveShadow = false; });
+    /* ---------------- finalize: merge static parts, trim shadow casters ---------------- */
+    const segs = [pelvis, chest, head, mouth];
+    for (const k of Object.keys(arms)) segs.push(arms[k].upper, arms[k].fore, arms[k].glove);
+    for (const k of Object.keys(legs)) segs.push(legs[k].thigh, legs[k].shin, legs[k].boot);
+    segs.forEach(mergeGroup);
+    const minR = TIER.smallCasterR || 0.075;
+    body.traverse((o) => {
+      if (!o.isMesh) return;
+      o.receiveShadow = false;
+      if (o.castShadow) {
+        if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+        if (o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) < minR) o.castShadow = false;
+      }
+    });
 
     return {
       root, body, pelvis, chest, head, headCenter, torsoCenter, arms, legs, mats,
-      face: { eyes, pupils, brows, mouth, lips, guard, bruises, skull },
+      face: { eyes, pupils, brows, mouth, lips, guard, bruiseA, bruiseB, noseFlush },
       dims: { w, t, limb, h: B.h, health: B.health },
       ref,
     };

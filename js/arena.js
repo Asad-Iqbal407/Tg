@@ -1,4 +1,6 @@
-/* Knockout Arena — the ring, hall, lights, instanced animated crowd, jumbotron */
+/* Knockout Arena — the ring, hall, lights, instanced animated crowd, jumbotron.
+ * build(scene, tier): `tier` comes from BX.Perf.resolve() and decides lights, materials, shadow map, crowd size/LOD and beams.
+ * After build, the governor flips FREE features through arena.setFeatures() (no shader recompiles). */
 (function () {
   'use strict';
   const BX = (window.BX = window.BX || {});
@@ -18,19 +20,29 @@
 
   const FONT = "'Bebas Neue', Impact, 'Arial Narrow Bold', 'Arial Black', sans-serif";
 
+  /** Speckle overlay: one 256² random ImageData tiled as a pattern (≈ 20x cheaper than thousands of fillRect calls). */
+  function speckle(g, w, h, rgb, amount) {
+    const n = 256;
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const cg = c.getContext('2d');
+    const img = cg.createImageData(n, n);
+    const d = img.data;
+    for (let i = 0; i < n * n; i++) {
+      d[i * 4] = rgb; d[i * 4 + 1] = rgb; d[i * 4 + 2] = rgb;
+      d[i * 4 + 3] = Math.random() < 0.5 ? Math.random() * 255 * amount : 0;
+    }
+    cg.putImageData(img, 0, 0);
+    g.fillStyle = g.createPattern(c, 'repeat');
+    g.fillRect(0, 0, w, h);
+  }
+
   function drawMat(g, w, h) {
     g.fillStyle = '#7a1018'; g.fillRect(0, 0, w, h);                 // apron
     const m = Math.round(w * 0.074);                                   // 0.55m margin of 7.4m
     g.fillStyle = '#183c70'; g.fillRect(m, m, w - 2 * m, h - 2 * m);  // canvas
-    // faint weave / wear
-    for (let i = 0; i < 9000; i++) {
-      g.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.035) + ')';
-      g.fillRect(Math.random() * w, Math.random() * h, 2, 2);
-    }
-    for (let i = 0; i < 2500; i++) {
-      g.fillStyle = 'rgba(0,0,0,' + (Math.random() * 0.05) + ')';
-      g.fillRect(Math.random() * w, Math.random() * h, 3, 3);
-    }
+    speckle(g, w, h, 255, 0.07);                                       // weave / wear
+    speckle(g, w, h, 0, 0.1);
     // border band inside the ropes
     g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 10;
     g.strokeRect(m + 36, m + 36, w - 2 * m - 72, h - 2 * m - 72);
@@ -77,68 +89,89 @@
     });
   }
 
-  function build(scene, quality) {
-    const arena = { group: new T.Group(), quality };
+  function blobTex() {
+    return canvasTex(64, 64, (g, w, h) => {
+      const r = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      r.addColorStop(0, 'rgba(0,0,0,0.9)'); r.addColorStop(0.55, 'rgba(0,0,0,0.5)'); r.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = r; g.fillRect(0, 0, w, h);
+    });
+  }
+
+  function build(scene, tier) {
+    const arena = { group: new T.Group(), tier, quality: tier.id, tierKey: tier.key };
     const G = arena.group;
     scene.add(G);
     const disposables = [];
     const own = (o) => { disposables.push(o); return o; };
+    // Lambert for the static set on cheaper tiers (a quarter of the fragment cost, same look under this lighting)
+    const M = (p) => {
+      if (!tier.lambertStatics) return own(new T.MeshStandardMaterial(p));
+      const q = Object.assign({}, p);
+      delete q.roughness; delete q.metalness;
+      if (q.color != null && typeof q.color === 'number') { const c = new T.Color(q.color); c.multiplyScalar(1.03); q.color = c; }
+      return own(new T.MeshLambertMaterial(q));
+    };
 
     scene.background = new T.Color(0x04050a);
     scene.fog = new T.FogExp2(0x04050a, 0.034);
 
     /* ---------------- lights ---------------- */
-    const hemi = new T.HemisphereLight(0x8fa4d0, 0x221a14, 0.55);
+    arena.hemiBase = tier.hemi;
+    const hemi = new T.HemisphereLight(0x8fa4d0, 0x221a14, arena.hemiBase);
     G.add(hemi);
     const key = new T.SpotLight(0xfff1dc, 1.55, 0, 0.62, 0.55, 1);
     key.position.set(0.6, 9.5, 1.2);
     key.target.position.set(0, 0, 0);
-    key.castShadow = quality !== 'low';
-    const sh = quality === 'high' ? 2048 : 1024;
-    key.shadow.mapSize.set(sh, sh);
-    key.shadow.camera.near = 4; key.shadow.camera.far = 16;
-    key.shadow.bias = -0.0004;
-    key.shadow.radius = 3;
+    key.castShadow = tier.shadowMap > 0;
+    if (key.castShadow) {
+      key.shadow.mapSize.set(tier.shadowMap, tier.shadowMap);
+      key.shadow.camera.near = 4; key.shadow.camera.far = 16;
+      key.shadow.bias = -0.0004;
+      key.shadow.focus = tier.shadowFocus;   // the ring only needs the central part of the spot cone
+    }
     G.add(key); G.add(key.target);
-    const fillA = new T.PointLight(0xff3b30, 0.55, 14, 1.4); fillA.position.set(-5, 3, -5); G.add(fillA);
-    const fillB = new T.PointLight(0x2f7bff, 0.55, 14, 1.4); fillB.position.set(5, 3, 5); G.add(fillB);
-    const fillC = new T.PointLight(0xffffff, 0.35, 12, 1.4); fillC.position.set(5, 3, -5); G.add(fillC);
-    arena.lights = { hemi, key, fillA, fillB, fillC };
+    const fills = [];
+    const addFill = (color, intensity, dist, x, z) => { const l = new T.PointLight(color, intensity, dist, 1.4); l.position.set(x, 3, z); G.add(l); fills.push(l); };
+    if (tier.pointLights >= 1) addFill(0xff3b30, tier.pointLights === 1 ? 0.55 * 1.8 : 0.55, 14, -5, -5);
+    if (tier.pointLights >= 2) addFill(0x2f7bff, 0.55, 14, 5, 5);
+    if (tier.pointLights >= 3) addFill(0xffffff, 0.35, 12, 5, -5);
+    arena.lights = { hemi, key, fills };
 
     /* ---------------- hall floor ---------------- */
     const floorTex = own(canvasTex(256, 256, (g, w, h) => {
       g.fillStyle = '#0e1016'; g.fillRect(0, 0, w, h);
-      for (let i = 0; i < 1800; i++) { g.fillStyle = 'rgba(255,255,255,' + Math.random() * 0.03 + ')'; g.fillRect(Math.random() * w, Math.random() * h, 3, 3); }
+      speckle(g, w, h, 255, 0.05);
       g.strokeStyle = 'rgba(255,255,255,0.05)'; g.lineWidth = 2;
       for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(i * w / 4, 0); g.lineTo(i * w / 4, h); g.moveTo(0, i * h / 4); g.lineTo(w, i * h / 4); g.stroke(); }
     }, true));
     floorTex.repeat.set(10, 10);
-    const hall = new T.Mesh(own(new T.PlaneGeometry(80, 80)), own(new T.MeshStandardMaterial({ map: floorTex, roughness: 0.55, metalness: 0.2 })));
-    hall.rotation.x = -Math.PI / 2; hall.position.y = -1.0; hall.receiveShadow = true;
+    const hall = new T.Mesh(own(new T.PlaneGeometry(80, 80)), M({ map: floorTex, roughness: 0.55, metalness: 0.2 }));
+    hall.rotation.x = -Math.PI / 2; hall.position.y = -1.0;
     G.add(hall);
 
     /* ---------------- ring ---------------- */
     const matTex = own(canvasTex(1024, 1024, drawMat));
     const skirtTex = own(canvasTex(1480, 200, (g, w, h) => drawBanner(g, w, h, 'KNOCKOUT ARENA', '#9b111e', '#ffffff')));
-    const sideMat = own(new T.MeshStandardMaterial({ map: skirtTex, roughness: 0.8 }));
-    const topMat = own(new T.MeshStandardMaterial({ map: matTex, roughness: 0.95 }));
-    const botMat = own(new T.MeshStandardMaterial({ color: 0x111111 }));
+    const sideMat = M({ map: skirtTex, roughness: 0.8 });
+    const topMat = M({ map: matTex, roughness: 0.95 });
+    const botMat = M({ color: 0x111111 });
     const platform = new T.Mesh(own(new T.BoxGeometry(7.4, 1.0, 7.4)), [sideMat, sideMat, topMat, botMat, sideMat, sideMat]);
     platform.position.y = -0.5;
-    platform.receiveShadow = true;
+    platform.receiveShadow = tier.shadowMap > 0;     // the only receiver in the scene
     G.add(platform);
     arena.floor = platform;
 
-    const chrome = own(new T.MeshStandardMaterial({ color: 0xdfe3ea, roughness: 0.4, metalness: 0.25, emissive: 0x20242b }));
+    const chrome = M({ color: 0xdfe3ea, roughness: 0.4, metalness: 0.25, emissive: 0x20242b });
     const padCols = [0xc1121f, 0x1e5fd6, 0xf2f2f2, 0xf2f2f2];
     const P = 3.02;
     const corners = [[-P, -P], [P, -P], [-P, P], [P, P]];
+    const casts = tier.shadowMap > 0;
     arena.posts = [];
     corners.forEach((c, i) => {
       const post = new T.Mesh(own(new T.CylinderGeometry(0.07, 0.07, 1.62, 14)), chrome);
-      post.position.set(c[0], 0.81, c[1]); post.castShadow = true; G.add(post);
-      const pad = new T.Mesh(own(new T.BoxGeometry(0.34, 1.0, 0.34)), own(new T.MeshStandardMaterial({ color: padCols[i], roughness: 0.7 })));
-      pad.position.set(c[0] * 0.985, 0.78, c[1] * 0.985); pad.castShadow = true; G.add(pad);
+      post.position.set(c[0], 0.81, c[1]); post.castShadow = casts; G.add(post);
+      const pad = new T.Mesh(own(new T.BoxGeometry(0.34, 1.0, 0.34)), M({ color: padCols[i], roughness: 0.7 }));
+      pad.position.set(c[0] * 0.985, 0.78, c[1] * 0.985); pad.castShadow = casts; G.add(pad);
       const cap = new T.Mesh(own(new T.SphereGeometry(0.085, 12, 8)), chrome);
       cap.position.set(c[0], 1.64, c[1]); G.add(cap);
       arena.posts.push({ x: c[0], z: c[1], meshes: [post, pad, cap] });
@@ -148,30 +181,30 @@
     arena.ropes = [];
     const ropeG = own(new T.CylinderGeometry(0.026, 0.026, 2 * P, 8));
     ropeY.forEach((y, ri) => {
-      const mat = own(new T.MeshStandardMaterial({ color: ropeCols[ri], roughness: 0.55 }));
+      const mat = M({ color: ropeCols[ri], roughness: 0.55 });
       for (let s = 0; s < 4; s++) {
         const rope = new T.Mesh(ropeG, mat);
         const horizontal = s < 2;
         rope.position.set(horizontal ? 0 : (s === 2 ? -P : P), y, horizontal ? (s === 0 ? -P : P) : 0);
         if (horizontal) rope.rotation.set(0, 0, Math.PI / 2); else rope.rotation.set(Math.PI / 2, 0, 0);
-        rope.castShadow = quality === 'high';
+        rope.castShadow = tier.id === 'high' && casts;
         rope.userData = { baseY: y, side: s, kick: 0 };
         G.add(rope);
         arena.ropes.push(rope);
       }
     });
-    // steps / stool decoration: two corner stools
-    const stoolMat = own(new T.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 }));
+    // corner stools
+    const stoolMat = M({ color: 0x222222, roughness: 0.8 });
     [[-3.45, -3.45, 0xc1121f], [3.45, 3.45, 0x1e5fd6]].forEach((s) => {
       const st = new T.Mesh(own(new T.CylinderGeometry(0.2, 0.17, 0.5, 14)), stoolMat);
-      st.position.set(s[0], 0.25, s[1]); st.castShadow = true; G.add(st);
-      const top = new T.Mesh(own(new T.CylinderGeometry(0.24, 0.24, 0.06, 14)), own(new T.MeshStandardMaterial({ color: s[2], roughness: 0.6 })));
+      st.position.set(s[0], 0.25, s[1]); st.castShadow = casts; G.add(st);
+      const top = new T.Mesh(own(new T.CylinderGeometry(0.24, 0.24, 0.06, 14)), M({ color: s[2], roughness: 0.6 }));
       top.position.set(s[0], 0.53, s[1]); G.add(top);
     });
 
     /* ---------------- stands ---------------- */
-    const tierMat = own(new T.MeshStandardMaterial({ color: 0x15171f, roughness: 0.9 }));
-    const nTiers = quality === 'low' ? 3 : quality === 'med' ? 4 : 5;
+    const tierMat = M({ color: 0x15171f, roughness: 0.9 });
+    const nTiers = tier.crowd.tiers;
     const tiers = [];
     for (let i = 0; i < nTiers; i++) {
       const R = 7.4 + i * 1.2;
@@ -180,17 +213,19 @@
       const sizeA = 2 * R + 2.4;
       const mk = (w, d, x, z) => {
         const b = new T.Mesh(own(new T.BoxGeometry(w, hgt, d)), tierMat);
-        b.position.set(x, top - hgt / 2, z); b.receiveShadow = true; G.add(b);
+        b.position.set(x, top - hgt / 2, z); G.add(b);
       };
       mk(sizeA, 1.2, 0, -R); mk(sizeA, 1.2, 0, R);
       mk(1.2, sizeA, -R, 0); mk(1.2, sizeA, R, 0);
       tiers.push({ R, top });
     }
-    // LED ad boards
+    // LED ad boards (six distinct textures, shared)
     const ads = ['PUNCH-COLA', 'IRON GLOVES', 'ROUND ONE ENERGY', 'KO FITNESS', 'GLOVE & CO', 'HEAVY HITTERS'];
+    const adCols = ['#0b6bcb', '#c1121f', '#0d8a4f', '#8a2be2', '#d9822b', '#222'];
+    const adMats = ads.map((txt, i) => own(new T.MeshBasicMaterial({ map: own(canvasTex(512, 64, (g, w, h) => drawBanner(g, w, h, txt, adCols[i], '#fff'))) })));
+    const adGeo = own(new T.PlaneGeometry(5.6, 0.7));
     const adBoard = (i, x, z, ry) => {
-      const t = own(canvasTex(512, 64, (g, w, h) => drawBanner(g, w, h, ads[i % ads.length], ['#0b6bcb', '#c1121f', '#0d8a4f', '#8a2be2', '#d9822b', '#222'][i % 6], '#fff')));
-      const m = new T.Mesh(own(new T.PlaneGeometry(5.6, 0.7)), own(new T.MeshBasicMaterial({ map: t })));
+      const m = new T.Mesh(adGeo, adMats[i % ads.length]);
       m.position.set(x, -0.15, z); m.rotation.y = ry; G.add(m);
     };
     const bd = 6.65;
@@ -201,12 +236,11 @@
       adBoard(i + 4, bd, -4.0 + i * 4.0, -Math.PI / 2);
     }
 
-    /* ---------------- crowd (instanced, GPU bobbing) ---------------- */
+    /* ---------------- crowd: shuffled, split into angular chunks (frustum culled), low-poly LOD, GPU bobbing ---------------- */
     arena.crowdUniforms = { uTime: { value: 0 }, uExcite: { value: 0.2 } };
-    const spacing = quality === 'low' ? 0.95 : quality === 'med' ? 0.7 : 0.56;
     const people = [];
     tiers.forEach((tr) => {
-      const R = tr.R, y = tr.top;
+      const R = tr.R, y = tr.top, spacing = tier.crowd.spacing;
       const n = Math.floor((2 * R) / spacing);
       for (let k = 0; k <= n; k++) {
         const u = -R + k * spacing;
@@ -218,17 +252,12 @@
         }
       }
     });
-    const count = people.length;
-    arena.crowdCount = count;
-    const bodyGeo = own(new T.CapsuleGeometry(0.21, 0.26, 3, 8));
-    const headGeo = own(new T.SphereGeometry(0.14, 10, 8));
+    // Fisher-Yates: a count-prefix of any chunk is then a uniform thinning of the crowd (governor: crowd x0.5)
+    for (let i = people.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = people[i]; people[i] = people[j]; people[j] = t; }
+    arena.crowdCount = people.length;
     const bodyMat = own(new T.MeshLambertMaterial({ color: 0xffffff }));
     const headMat = own(new T.MeshLambertMaterial({ color: 0xffffff }));
-    const phases = new Float32Array(count);
-    for (let i = 0; i < count; i++) phases[i] = Math.random();
-    const attach = (geo, mat) => {
-      const g2 = geo.clone();
-      g2.setAttribute('aPhase', new T.InstancedBufferAttribute(phases, 1));
+    for (const mat of [bodyMat, headMat]) {
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = arena.crowdUniforms.uTime;
         shader.uniforms.uExcite = arena.crowdUniforms.uExcite;
@@ -236,37 +265,63 @@
           .replace('#include <common>', '#include <common>\nattribute float aPhase;\nuniform float uTime;\nuniform float uExcite;')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\n float bb = sin(uTime*(2.5+aPhase*3.0)+aPhase*40.0); transformed.y += (max(bb,0.0)*0.2*uExcite + 0.015*bb) * (0.6+aPhase*0.8);');
       };
-      return g2;
-    };
-    const bodyMesh = new T.InstancedMesh(attach(bodyGeo, bodyMat), bodyMat, count);
-    const headMesh = new T.InstancedMesh(attach(headGeo, headMat), headMat, count);
-    bodyMesh.frustumCulled = false; headMesh.frustumCulled = false;
+    }
+    const lodA = tier.crowd.lod === 'A';
+    const bodyGeoSrc = lodA ? new T.CapsuleGeometry(0.21, 0.26, 2, 8) : new T.CapsuleGeometry(0.21, 0.26, 1, 6);
+    const headGeoSrc = lodA ? new T.SphereGeometry(0.14, 7, 5) : new T.SphereGeometry(0.14, 6, 4);
+    own(bodyGeoSrc); own(headGeoSrc);
     const shirts = ['#c1121f', '#1e5fd6', '#16a34a', '#f2b705', '#e5e5e5', '#2a2a30', '#7c3aed', '#ff7a00', '#0ea5a4', '#ec4899', '#8b5e3c'];
+    const nChunks = tier.crowd.chunks;
+    const sectors = Array.from({ length: nChunks }, () => []);
+    people.forEach((p) => {
+      const ang = Math.atan2(p[2], p[0]);
+      sectors[Math.min(nChunks - 1, Math.floor(((ang + Math.PI) / (Math.PI * 2)) * nChunks))].push(p);
+    });
     const dummy = new T.Object3D();
     const col = new T.Color();
-    people.forEach((p, i) => {
-      const s = BX.rand(0.9, 1.1);
-      dummy.position.set(p[0], p[1] + 0.34 * s, p[2]);
-      dummy.rotation.set(0, p[3], 0);
-      dummy.scale.set(s, s, s);
-      dummy.updateMatrix();
-      bodyMesh.setMatrixAt(i, dummy.matrix);
-      bodyMesh.setColorAt(i, col.set(BX.pick(shirts)).multiplyScalar(BX.rand(0.35, 0.8)));
-      dummy.position.y = p[1] + 0.34 * s + 0.4 * s;
-      dummy.updateMatrix();
-      headMesh.setMatrixAt(i, dummy.matrix);
-      headMesh.setColorAt(i, col.set(BX.pick(BX.SKINS)).multiplyScalar(BX.rand(0.45, 0.8)));
+    arena.crowdMeshes = [];
+    sectors.forEach((list) => {
+      if (!list.length) return;
+      const n = list.length;
+      const bb = new T.Box3();
+      const meshes = [[bodyGeoSrc, bodyMat, 0], [headGeoSrc, headMat, 1]].map(([src, mat, kind]) => {
+        const g = own(src.clone());
+        const ph = new Float32Array(n);
+        for (let i = 0; i < n; i++) ph[i] = Math.random();
+        g.setAttribute('aPhase', new T.InstancedBufferAttribute(ph, 1));
+        const m = own(new T.InstancedMesh(g, mat, n));
+        m.userData.max = n;
+        return m;
+      });
+      list.forEach((p, i) => {
+        const s = BX.rand(0.9, 1.1);
+        dummy.position.set(p[0], p[1] + 0.34 * s, p[2]);
+        dummy.rotation.set(0, p[3], 0);
+        dummy.scale.set(s, s, s);
+        dummy.updateMatrix();
+        meshes[0].setMatrixAt(i, dummy.matrix);
+        meshes[0].setColorAt(i, col.set(BX.pick(shirts)).multiplyScalar(BX.rand(0.35, 0.8)));
+        bb.expandByPoint(dummy.position);
+        dummy.position.y = p[1] + 0.34 * s + 0.4 * s;
+        dummy.updateMatrix();
+        meshes[1].setMatrixAt(i, dummy.matrix);
+        meshes[1].setColorAt(i, col.set(BX.pick(BX.SKINS)).multiplyScalar(BX.rand(0.45, 0.8)));
+      });
+      const center = bb.getCenter(new T.Vector3());
+      const radius = bb.getSize(new T.Vector3()).length() / 2 + 1.2;   // + body size + bobbing
+      for (const m of meshes) {
+        m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true;
+        m.geometry.boundingSphere = new T.Sphere(center, radius);       // InstancedMesh culls with the geometry sphere
+        m.frustumCulled = true;
+        G.add(m);
+        arena.crowdMeshes.push(m);
+      }
     });
-    bodyMesh.instanceMatrix.needsUpdate = true; headMesh.instanceMatrix.needsUpdate = true;
-    bodyMesh.instanceColor.needsUpdate = true; headMesh.instanceColor.needsUpdate = true;
-    G.add(bodyMesh); G.add(headMesh);
-    arena.crowdMeshes = [bodyMesh, headMesh];
 
     /* ---------------- camera flashes ---------------- */
     const gTex = own(glowTex());
     arena.flashes = [];
-    const nFlash = quality === 'low' ? 0 : 10;
-    for (let i = 0; i < nFlash; i++) {
+    for (let i = 0; i < tier.flashes; i++) {
       const s = new T.Sprite(own(new T.SpriteMaterial({ map: gTex, color: 0xffffff, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false })));
       const tr = BX.pick(tiers);
       const side = BX.randi(0, 3);
@@ -274,13 +329,15 @@
       const pos = side === 0 ? [u, tr.R] : side === 1 ? [u, -tr.R] : side === 2 ? [tr.R, u] : [-tr.R, u];
       s.position.set(pos[0] * 0.98, tr.top + 1.2, pos[1] * 0.98);
       s.scale.setScalar(0.9);
+      s.visible = false;
       s.userData = { life: 0, next: BX.rand(0.2, 4) };
       G.add(s); arena.flashes.push(s);
     }
 
     /* ---------------- lighting rig + visible beams ---------------- */
-    const rigMat = own(new T.MeshStandardMaterial({ color: 0x23262f, roughness: 0.6, metalness: 0.3 }));
-    const beamMat = own(new T.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.045, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }));
+    const rigMat = M({ color: 0x23262f, roughness: 0.6, metalness: 0.3 });
+    // front faces only + stronger opacity: the same brightness for half the blended fill
+    const beamMat = own(new T.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.045 * tier.beamMul, blending: T.AdditiveBlending, depthWrite: false, side: T.FrontSide }));
     const lampMat = own(new T.MeshBasicMaterial({ color: 0xfff6e0 }));
     const rigHeight = 8.6;
     const nLamps = 6;
@@ -302,7 +359,6 @@
       beam.scale.y = from.distanceTo(target) / len;
       G.add(beam); arena.beams.push(beam);
     }
-    // ring truss
     const truss = new T.Mesh(own(new T.TorusGeometry(4.4, 0.08, 6, 36)), rigMat);
     truss.rotation.x = Math.PI / 2; truss.position.y = rigHeight + 0.25; G.add(truss);
 
@@ -315,24 +371,36 @@
     jumbo.add(jBody);
     const scrMat = own(new T.MeshBasicMaterial({ map: screenTex }));
     const scrGeo = own(new T.PlaneGeometry(2.0, 1.125));
-    [[0, 1.11, 0], [Math.PI / 2, 0, 1.11], [Math.PI, 0, -1.11], [-Math.PI / 2, 0, -1.11]].forEach((d, i) => {
+    [0, Math.PI / 2, Math.PI, -Math.PI / 2].forEach((ry) => {
       const m = new T.Mesh(scrGeo, scrMat);
-      const ry = [0, Math.PI / 2, Math.PI, -Math.PI / 2][i];
       m.rotation.y = ry;
       m.position.set(Math.sin(ry) * 1.11, 0, Math.cos(ry) * 1.11);
       jumbo.add(m);
     });
+    const cableGeo = own(new T.CylinderGeometry(0.015, 0.015, 3, 6));
     for (const sx of [-0.9, 0.9]) for (const sz of [-0.9, 0.9]) {
-      const cable = new T.Mesh(own(new T.CylinderGeometry(0.015, 0.015, 3, 6)), rigMat);
+      const cable = new T.Mesh(cableGeo, rigMat);
       cable.position.set(sx, 2.1, sz); jumbo.add(cable);
     }
     G.add(jumbo);
     arena.jumbo = jumbo;
     arena._screenKey = '';
 
+    /* ---------------- blob shadows (used when the shadow map is off) ---------------- */
+    const blobMat = own(new T.MeshBasicMaterial({ map: own(blobTex()), transparent: true, opacity: 0.6, depthWrite: false }));
+    const blobGeo = own(new T.PlaneGeometry(1, 1));
+    arena.blobs = [];
+    for (let i = 0; i < 3; i++) {
+      const b = new T.Mesh(blobGeo, blobMat);
+      b.rotation.x = -Math.PI / 2; b.position.y = 0.014; b.renderOrder = 1; b.visible = false;
+      G.add(b); arena.blobs.push(b);
+    }
+    arena.blobTargets = [];
+    arena.blobsOn = tier.shadowMap === 0;
+
     /* ---------------- API ---------------- */
     arena.drawScreen = (info) => {
-      const k = JSON.stringify(info);
+      const k = (info.title || '') + '|' + info.timer + '|' + (info.sub || '') + '|' + (info.p1 ? info.p1.name + ':' + Math.round(info.p1.frac * 40) : '') + '|' + (info.p2 ? info.p2.name + ':' + Math.round(info.p2.frac * 40) : '');
       if (k === arena._screenKey) return;
       arena._screenKey = k;
       const g = screenTex.userData.ctx, w = 512, h = 288;
@@ -377,7 +445,28 @@
     arena.kickRope = (side, amt) => {
       for (const r of arena.ropes) if (r.userData.side === side) r.userData.kick = Math.max(r.userData.kick, amt);
     };
+    arena.setBlobTargets = (list) => { arena.blobTargets = list.filter(Boolean); };
+
+    /** Free runtime switches used by the governor (no shader recompiles): beams, flashes, shadow receiving, crowd density. */
+    arena.features = { beams: tier.beams, flashes: tier.flashes > 0, shadows: tier.shadowMap > 0, crowd: 1 };
+    arena.setFeatures = (f) => {
+      const F = arena.features;
+      if (f.beams != null) F.beams = Math.min(f.beams, tier.beams); else F.beams = tier.beams;
+      if (f.flashes != null) F.flashes = !!f.flashes && tier.flashes > 0;
+      if (f.shadows != null) F.shadows = !!f.shadows && tier.shadowMap > 0;
+      if (f.crowd != null) F.crowd = f.crowd;
+      const n = Math.max(1, F.beams), step = Math.max(1, Math.round(arena.beams.length / n));
+      arena.beams.forEach((b, i) => { b.visible = i % step === 0; });
+      beamMat.opacity = 0.045 * 10.5 / Math.max(1, arena.beams.filter((b) => b.visible).length);   // constant total brightness
+      if (!F.flashes) for (const s of arena.flashes) { s.visible = false; s.userData.life = 0; }
+      arena.floor.receiveShadow = F.shadows;
+      arena.blobsOn = !F.shadows;
+      for (const m of arena.crowdMeshes) m.count = Math.max(1, Math.ceil(m.userData.max * F.crowd));
+    };
+    arena.setFeatures({});
+
     arena.strobe = 0;
+    const _bp = new T.Vector3();
     arena.update = (dt, focus, t) => {
       arena.crowdUniforms.uTime.value = t;
       arena.crowdUniforms.uExcite.value = BX.damp(arena.crowdUniforms.uExcite.value, arena.excite, 2.5, dt);
@@ -394,24 +483,41 @@
           r.position.y = u.baseY + Math.sin(t * 28) * 0.05 * u.kick;
         } else if (r.position.y !== u.baseY) r.position.y = u.baseY;
       }
-      // camera flashes
-      for (const s of arena.flashes) {
-        const u = s.userData;
-        if (u.life > 0) { u.life -= dt; s.material.opacity = Math.max(0, u.life / 0.09); s.scale.setScalar(0.5 + (1 - s.material.opacity) * 0.8); }
-        else {
-          u.next -= dt * (0.4 + arena.excite * 3);
-          if (u.next <= 0) { u.life = 0.09; u.next = BX.rand(0.3, 3.5); s.material.opacity = 1; }
+      // camera flashes (hidden sprites are not drawn)
+      if (arena.features.flashes) {
+        for (const s of arena.flashes) {
+          const u = s.userData;
+          if (u.life > 0) {
+            u.life -= dt;
+            if (u.life <= 0) { s.visible = false; continue; }
+            s.material.opacity = Math.max(0, u.life / 0.09); s.scale.setScalar(0.5 + (1 - s.material.opacity) * 0.8);
+          } else {
+            u.next -= dt * (0.4 + arena.excite * 3);
+            if (u.next <= 0) { u.life = 0.09; u.next = BX.rand(0.3, 3.5); s.material.opacity = 1; s.visible = true; }
+          }
         }
+      }
+      // blob shadows under the boxers and the referee
+      for (let i = 0; i < arena.blobs.length; i++) {
+        const b = arena.blobs[i], f = arena.blobTargets[i];
+        if (!arena.blobsOn || !f || !f.root.visible) { b.visible = false; continue; }
+        b.visible = true;
+        const fall = f.fall || 0;
+        b.position.set(f.root.position.x - Math.sin(f.root.rotation.y) * 0.8 * fall, 0.014, f.root.position.z - Math.cos(f.root.rotation.y) * 0.8 * fall);
+        const s = 1.15 * (1 + fall * 1.0);
+        b.scale.set(s, s, 1);
       }
       // strobe on big moments
       if (arena.strobe > 0) {
         arena.strobe = Math.max(0, arena.strobe - dt * 2.5);
-        hemi.intensity = 0.55 + arena.strobe * 1.2;
-      } else hemi.intensity = 0.55;
+        hemi.intensity = arena.hemiBase + arena.strobe * 1.2;
+      } else hemi.intensity = arena.hemiBase;
     };
 
     arena.dispose = () => {
       scene.remove(G);
+      if (key.shadow && key.shadow.map) key.shadow.map.dispose();
+      if (key.dispose) key.dispose();
       disposables.forEach((d) => { if (d && d.dispose) d.dispose(); });
     };
     return arena;

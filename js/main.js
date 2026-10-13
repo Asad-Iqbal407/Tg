@@ -6,7 +6,11 @@
   function hasWebGL() {
     try {
       const c = document.createElement('canvas');
-      return !!(c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl'));
+      const gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
+      if (!gl) return false;
+      const ext = gl.getExtension('WEBGL_lose_context');   // do not leave a throw-away context alive
+      if (ext) ext.loseContext();
+      return true;
     } catch (e) { return false; }
   }
 

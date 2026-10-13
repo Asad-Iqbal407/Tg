@@ -6,6 +6,8 @@
   let ctx = null, master = null, sfxBus = null, musicBus = null, crowdGain = null, crowdFilter = null, noiseBuf = null;
   const st = { vol: 0.8, sfx: true, music: true, speech: true, crowdTarget: 0.12 };
   let musicTimer = null, musicStep = 0, musicNext = 0, musicMode = null;
+  let crowdLast = -1, unlockArmed = false;
+  const runningCbs = [];
 
   function init() {
     if (ctx) return true;
@@ -35,9 +37,41 @@
     return true;
   }
 
+  /** Resume the context from inside a user-activation event. iOS Safari only honours touchend / pointerup / click / keydown
+   *  (NOT pointerdown or touchstart), and a silent one-sample buffer played in the same event fully unlocks output. */
   function unlock() {
     init();
-    if (ctx && ctx.state === 'suspended') ctx.resume();
+    if (!ctx) return;
+    if (ctx.state !== 'running') {
+      try {
+        const b = ctx.createBuffer(1, 1, 22050);
+        const src = ctx.createBufferSource();
+        src.buffer = b; src.connect(ctx.destination); src.start(0);
+      } catch (e) { /* ignore */ }
+      const p = ctx.resume && ctx.resume();
+      if (p && p.then) p.then(onRunning, () => {});
+    }
+    onRunning();
+  }
+  function onRunning() {
+    if (!ctx || ctx.state !== 'running') return;
+    while (runningCbs.length) { try { runningCbs.shift()(); } catch (e) { /* ignore */ } }
+  }
+  /** Keep trying on every user gesture until sound is running (and again after interruptions / backgrounding). */
+  function armUnlock(cb) {
+    if (cb) runningCbs.push(cb);
+    if (unlockArmed) return;
+    unlockArmed = true;
+    const h = () => { if (!ctx || ctx.state !== 'running') unlock(); };
+    ['touchend', 'pointerup', 'click', 'keydown', 'mouseup'].forEach((ev) => window.addEventListener(ev, h, { capture: true, passive: true }));
+    document.addEventListener('visibilitychange', () => {
+      if (!ctx) return;
+      if (document.hidden) { if (musicTimer) { clearInterval(musicTimer); musicTimer = null; } }
+      else {
+        if (ctx.state !== 'running' && ctx.resume) ctx.resume().catch(() => {});
+        if (musicMode && st.music && !musicTimer) A.musicStart(musicMode, true);
+      }
+    });
   }
 
   function noise(dur, o) {
@@ -80,15 +114,16 @@
 
   const A = {
     state: st,
-    init, unlock,
+    init, unlock, armUnlock,
     get ready() { return !!ctx; },
 
     setVolume(v) { st.vol = v; if (master) master.gain.value = v; },
     setSfx(on) { st.sfx = on; if (sfxBus) sfxBus.gain.value = on ? 1 : 0; },
     setMusic(on) {
+      const was = st.music;
       st.music = on;
       if (musicBus) musicBus.gain.value = on ? 0.32 : 0;
-      if (!on) A.musicStop(); else if (musicMode) A.musicStart(musicMode);
+      if (!on) A.musicStop(); else if (!was && musicMode) A.musicStart(musicMode);   // only restart when it was actually off
     },
     setSpeech(on) { st.speech = on; },
 
@@ -105,9 +140,9 @@
       noise(0.1, { type: 'lowpass', freq: 500, gain: 0.35 + p * 0.2, freqEnd: 180 });
       tone(110, 0.12, { type: 'triangle', freqEnd: 70, gain: 0.3 });
     },
-    whoosh(speed) {
+    whoosh(speed, delay) {
       const s = BX.clamp(speed || 0.5, 0, 1);
-      noise(0.16, { type: 'bandpass', freq: 450 + s * 400, freqEnd: 1800 + s * 900, q: 0.8, gain: 0.07 + s * 0.08, attack: 0.05 });
+      noise(0.16, { type: 'bandpass', freq: 450 + s * 400, freqEnd: 1800 + s * 900, q: 0.8, gain: 0.07 + s * 0.08, attack: 0.05, delay: delay || 0 });
     },
     dodge() { noise(0.12, { type: 'highpass', freq: 1500, freqEnd: 3500, gain: 0.07, attack: 0.03 }); },
     knockdown() {
@@ -155,8 +190,10 @@
     /** Per-frame crowd murmur level update. */
     update(dt) {
       if (!ctx || !crowdGain) return;
-      const t = ctx.currentTime;
       const target = st.crowdTarget * 0.22;
+      if (Math.abs(target - crowdLast) < 0.004) return;      // only touch the audio graph when the level actually moved
+      crowdLast = target;
+      const t = ctx.currentTime;
       crowdGain.gain.setTargetAtTime(target, t, 0.3);
       crowdFilter.frequency.setTargetAtTime(500 + st.crowdTarget * 700, t, 0.4);
     },
@@ -183,13 +220,16 @@
     },
 
     /* ----- tiny generative music loop ----- */
-    musicStart(mode) {
-      musicMode = mode || 'menu';
-      if (!ctx || !st.music) return;
+    musicStart(mode, force) {
+      mode = mode || 'menu';
+      const same = musicMode === mode && musicTimer;
+      musicMode = mode;
+      if (!ctx || !st.music || document.hidden) return;
+      if (same && !force) return;                      // already playing this track
       if (musicTimer) clearInterval(musicTimer);
-      musicStep = 0;
+      if (!same) musicStep = 0;
       musicNext = ctx.currentTime + 0.1;
-      musicTimer = setInterval(scheduleMusic, 40);
+      musicTimer = setInterval(scheduleMusic, 100);    // 0.4 s look-ahead below keeps it gap-free at 10 Hz
     },
     musicStop() {
       if (musicTimer) clearInterval(musicTimer);
@@ -202,7 +242,7 @@
     if (!ctx) return;
     const bpm = musicMode === 'fight' ? 118 : 98;
     const stepDur = 60 / bpm / 2; // 8th notes
-    while (musicNext < ctx.currentTime + 0.15) {
+    while (musicNext < ctx.currentTime + 0.4) {
       const i = musicStep % 16;
       const t = musicNext - ctx.currentTime;
       if (i % 4 === 0) tone(120, 0.2, { type: 'sine', freqEnd: 40, gain: 0.55, bus: musicBus, delay: t });

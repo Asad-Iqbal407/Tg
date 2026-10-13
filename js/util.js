@@ -75,6 +75,19 @@
     return m + ':' + (r < 10 ? '0' : '') + r;
   };
 
+  /** Deferred GPU-resource disposal: dispose a few frames later so the replacement acquires the shared shader program first
+   *  (disposing the last user of a program deletes it and forces a re-link on the next frame). */
+  const _dq = [];
+  let _df = 0;
+  BX.deferDispose = (objs) => { for (const o of objs) if (o && o.dispose) _dq.push({ o, f: _df + 3 }); };
+  BX.flushDispose = () => { _df++; while (_dq.length && _dq[0].f <= _df) _dq.shift().o.dispose(); };
+  /** Dispose a boxer rig (materials + geometries it owns) — deferred. */
+  BX.disposeRig = (rig) => {
+    if (!rig) return;
+    BX.deferDispose(Object.values(rig.mats));
+    rig.body.traverse((o) => { if (o.isMesh && o.geometry && o.geometry.userData && o.geometry.userData.owned) BX.deferDispose([o.geometry]); });
+  };
+
   BX.hexToInt = (hex) => parseInt(String(hex).replace('#', ''), 16);
 
   /** Darken / lighten a hex colour by an amount (-1..1). */

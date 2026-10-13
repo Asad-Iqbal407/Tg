@@ -54,62 +54,215 @@
       Game.canvas = canvas;
       const saved = BX.store.get('settings', null);
       Game.settings = BX.deepMerge(BX.DEFAULT_SETTINGS, saved || {});
-      // first run: pick a sensible default quality (phones / weak CPUs get Medium)
-      if (!saved) {
-        const touchy = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-        if (touchy || (navigator.hardwareConcurrency || 8) <= 4) Game.settings.quality = 'med';
-      }
-      const r = new T.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+      const Perf = BX.Perf;
+      const dpr = window.devicePixelRatio || 1;
+      // MSAA is fixed at context creation: skip it on dense screens where it is redundant (and expensive)
+      const r = new T.WebGLRenderer({ canvas, antialias: dpr < 1.5, alpha: false, stencil: false, powerPreference: 'high-performance' });
+      r.debug.checkShaderErrors = /[?&]debug/.test(location.search);   // linking stays async-friendly in production
       r.shadowMap.enabled = true;
       r.shadowMap.type = T.PCFSoftShadowMap;
       Game.renderer = r;
+      Perf.softwareGL = Perf.isSoftwareGL(r.getContext());
       Game.scene = new T.Scene();
       Game.camera = new T.PerspectiveCamera(54, 1, 0.1, 120);
       Game.rig = new BX.CameraRig(Game.camera);
+
+      // performance state (restored per device so the governor does not have to re-converge every launch)
+      Game.perf = { level: 0, scale: 1, cap30: false, gov: null, refreshHz: 60, pendingLow: false, lastSave: 0, info: '' };
+      Game.contentLow = false;
+      const savedPerf = BX.store.get('perf', null);
+      if (savedPerf && savedPerf.key === Perf.deviceKey()) { Game.perf.level = savedPerf.level | 0; Game.contentLow = !!savedPerf.contentLow; }
+      else if (Perf.softwareGL) { Game.perf.level = 6; Game.contentLow = true; }
+
       FX.init(Game.scene);
       Game.applySettings();
       Game.ref = new BX.Fighter(REF_LOOK, { role: 'ref' });
       Game.scene.add(Game.ref.root);
       Game.ref.reset(2.2, 2.2, 0);
       Game.ref.snapFeet();
-      window.addEventListener('resize', Game.resize);
-      Game.resize();
+
+      // resize: layout-driven (iframes, safe areas, rotation) and debounced to one rAF
+      window.addEventListener('resize', Game.scheduleResize);
+      window.addEventListener('orientationchange', Game.scheduleResize);
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', Game.scheduleResize);
+      if (window.ResizeObserver) new ResizeObserver(Game.scheduleResize).observe(canvas);
+      Game.resize(true);
+
+      // WebGL context loss (mobile browsers drop contexts when backgrounded): keep the game paused and restore cleanly
+      canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        Game.contextLost = true;
+        if (Game.mode === 'fight' && !Game.paused) Game.pause();
+        BX.UI.toast('Graphics interrupted — restoring…');
+        setTimeout(() => { if (Game.contextLost) BX.UI.toast('Graphics could not be restored. Please reload the page.'); }, 5000);
+      }, false);
+      canvas.addEventListener('webglcontextrestored', () => {
+        Game.contextLost = false;
+        Game.resize(true);
+        if (Game.perf.gov) Game.perf.gov.reset(0);
+        Game.precompile();
+        BX.UI.toast(Game.mode === 'fight' ? 'Graphics restored — tap Resume' : 'Graphics restored');
+      }, false);
+
       Game.initTrainingEvents();
       Game.showMenuScene();
-      let last = performance.now(), fpsT = 0, fpsN = 0;
+      Game.precompile();
+
+      let lastRender = performance.now(), fpsT = 0, fpsN = 0, hzFrames = [], hzLast = 0;
       const loop = (now) => {
-        const dt = Math.min(0.05, (now - last) / 1000);
-        last = now;
+        Game._raf = requestAnimationFrame(loop);
+        // refresh-rate detection (median of the first rAF deltas): 120 Hz screens get half the work via the cap
+        if (hzFrames.length < 40) {
+          if (hzLast) hzFrames.push(now - hzLast);
+          hzLast = now;
+          if (hzFrames.length === 40) {
+            const m = hzFrames.slice().sort((a, b) => a - b)[20];
+            Game.perf.refreshHz = m < 10.5 ? 120 : m < 13.5 ? 90 : 60;
+            if (Game.perf.gov) Game.perf.gov.setRefresh(Game.perf.refreshHz);
+          }
+        }
+        const cap = Game.fpsCap();
+        if (cap && now - lastRender < 1000 / cap - 1.5) return;
+        const dtMs = now - lastRender;
+        lastRender = now;
+        // a stalled frame (tab restore, shader compile, GC) must not burn through hit-stop and ready timers
+        const dt = dtMs > 250 ? 0 : Math.min(0.05, dtMs / 1000);
         try {
           BX.Input.pollPads();
           BX.UI.update && BX.UI.update(dt);
-          Game.tick(dt);
-          Game.render();
+          if (!Game.contextLost) {
+            Game.tick(dt);
+            Game.render();
+            Game.governorFrame(now);
+          }
         } catch (e) { console.error(e); }
         if (Game.settings.fps) {
           fpsT += dt; fpsN++;
-          if (fpsT > 0.5) { BX.UI.setFps(Math.round(fpsN / fpsT)); fpsT = 0; fpsN = 0; }
+          if (fpsT > 0.5) {
+            BX.UI.setFps(Math.round(fpsN / fpsT) + ' fps · ' + Game.tier.id + (Game.tier.auto ? ' auto L' + Game.perf.level : '') + ' · ' + (Game._pr || 1).toFixed(2) + 'x');
+            fpsT = 0; fpsN = 0;
+          }
         }
-        Game._raf = requestAnimationFrame(loop);
       };
       Game._raf = requestAnimationFrame(loop);
     },
 
     saveSettings() { BX.store.set('settings', Game.settings); },
 
+    /** Frame-rate cap: 60 on touch devices (120 Hz phones get half the work), 30 in menus/pause or with battery saver / governor L6. */
+    fpsCap() {
+      const s = Game.settings, touch = BX.Perf.isTouch;
+      if (s.batterySaver || Game.perf.cap30) return 30;
+      if (Game.mode === 'menu' || Game.paused || Game.phase === 'rest' || Game.phase === 'ended') return touch ? 30 : 0;
+      return touch ? 60 : 0;
+    },
+
+    /** Safe points: nothing is happening that a shader recompile hitch could ruin. */
+    isSafePoint() {
+      return Game.mode === 'menu' || Game.paused || Game.phase === 'intro' || Game.phase === 'ready' || Game.phase === 'rest' || Game.phase === 'ended';
+    },
+
+    /** Feed the adaptive governor (AUTO quality only, and only while a fight is actually being played). */
+    governorFrame(now) {
+      const gov = Game.perf.gov;
+      if (!gov) return;
+      const live = Game.mode === 'fight' && !Game.paused && !document.hidden && (Game.phase === 'fight' || Game.phase === 'knockdown' || Game.phase === 'ready' || Game.phase === 'roundEnd');
+      if (!live) { gov.state.last = 0; return; }   // stop the clock; do not judge menu/pause frames
+      gov.frame(now);
+    },
+
+    setupGovernor() {
+      const p = Game.perf;
+      p.gov = null;
+      if (!Game.tier.auto) { p.level = 0; return; }
+      const level = Math.max(0, Math.min(BX.Perf.LADDER.length - 1, p.level | 0));
+      p.level = level;
+      p.gov = BX.Perf.makeGovernor({
+        targetFps: BX.Perf.LADDER[level].cap30 ? 30 : 60, refreshHz: p.refreshHz, levels: BX.Perf.LADDER.length, startLevel: level,
+        isFeatureStep: (a, b) => Math.max(a, b) >= 3,
+        cb: (lvl, reason) => {
+          p.level = lvl;
+          Game.applyLevel();
+          if (lvl >= 5 && !Game.contentLow && Game.tier.id !== 'low') p.pendingLow = true;   // cheapest content at the next safe point
+          Game.savePerf();
+          if (/[?&]debug/.test(location.search)) console.log('[perf] level', lvl, reason);
+        },
+      });
+    },
+
+    savePerf() {
+      const now = performance.now();
+      if (now - Game.perf.lastSave < 2000) return;
+      Game.perf.lastSave = now;
+      BX.store.set('perf', { key: BX.Perf.deviceKey(), level: Game.perf.level, contentLow: Game.contentLow });
+    },
+
+    /** Reset adaptive state (user changed the quality setting). */
+    resetPerf() {
+      Game.contentLow = false;
+      Game.perf.level = 0;
+      Game.perf.pendingLow = false;
+      BX.store.remove('perf');
+    },
+
+    /** Apply a governor level — free operations only. */
+    applyLevel() {
+      const lv = BX.Perf.LADDER[Game.perf.level] || BX.Perf.LADDER[0];
+      Game.perf.scale = lv.res;
+      Game.perf.cap30 = !!lv.cap30;
+      Game.shadowsOn = lv.shadows !== false && Game.tier.shadowMap > 0;
+      if (Game.arena) Game.arena.setFeatures({ beams: lv.beams, flashes: lv.flashes !== false, shadows: Game.shadowsOn, crowd: lv.crowd || 1 });
+      FX.setMax(lv.fxMax || Game.tier.fxPool);
+      if (Game.perf.gov) Game.perf.gov.setTarget(lv.cap30 ? 30 : 60);
+      Game.resize();
+    },
+
+    /** One-off switch to the cheapest content (shader/material changes) — only called at a safe point. */
+    switchToLowContent() {
+      Game.perf.pendingLow = false;
+      Game.contentLow = true;
+      Game.perf.level = 3;
+      Game.applySettings();
+      if (Game.perf.gov) Game.perf.gov.force(3, performance.now());
+      Game.savePerf();
+    },
+
+    /** Compile every visible material up front so the first fight frame does not stall (referee and 2nd boxer included). */
+    precompile() {
+      try {
+        const f1 = Game.fighters && Game.fighters[1], ref = Game.ref;
+        const v = [ref ? ref.root.visible : true, f1 ? f1.root.visible : true];
+        if (ref) ref.root.visible = true;
+        if (f1) f1.root.visible = true;
+        Game.renderer.compile(Game.scene, Game.camera);
+        if (ref) ref.root.visible = v[0];
+        if (f1) f1.root.visible = v[1];
+      } catch (e) { /* optional */ }
+    },
+
     applySettings(rebuild) {
-      const s = Game.settings, r = Game.renderer;
-      const dpr = window.devicePixelRatio || 1;
-      r.setPixelRatio(s.quality === 'low' ? 1 : s.quality === 'med' ? Math.min(dpr, 1.5) : Math.min(dpr, 2));
-      r.shadowMap.enabled = s.quality !== 'low';
-      if (!Game.arena || rebuild || Game.arena.quality !== s.quality) {
+      const s = Game.settings, Perf = BX.Perf;
+      const tier = Perf.resolve(s.quality, Game.contentLow);
+      const prev = Game.tier;
+      Game.tier = tier;
+      Perf.current = tier;
+      const archChanged = !Game.arena || rebuild || !prev || prev.key !== tier.key;
+      if (archChanged) {
         if (Game.arena) Game.arena.dispose();
-        Game.arena = BX.Arena.build(Game.scene, s.quality);
+        Game.arena = BX.Arena.build(Game.scene, tier);
+        if (Game.fighters) Game.arena.setBlobTargets([Game.fighters[0], Game.fighters[1], Game.ref]);
       }
+      // boxer models depend on the tier (material class, face detail): rebuild in place when it changed
+      if (prev && prev.modelKey !== tier.modelKey) {
+        for (const f of (Game.fighters || []).concat(Game.ref ? [Game.ref] : [])) if (f && f.rig) f.setLook(f.look);
+      }
+      FX.configure(tier.fxPool);
       Game.rig.shakeEnabled = !!s.shake;
       A.setVolume(s.volume); A.setSfx(s.sfx); A.setMusic(s.music); A.setSpeech(s.speech);
       if (Game.mode === 'fight') Game.rig.mode = Game.cameraMode();
-      Game.resize();
+      Game.setupGovernor();
+      Game.applyLevel();
+      if (archChanged && Game.fighters && Game.fighters.length) Game.precompile();
     },
 
     cameraMode() {
@@ -127,11 +280,21 @@
       BX.UI.toast('Camera: ' + { behind: 'Over the shoulder', side: 'Side view', high: 'High angle', broadcast: 'Broadcast' }[nxt]);
     },
 
-    resize() {
+    scheduleResize() {
+      if (Game._rs) return;
+      Game._rs = requestAnimationFrame(() => { Game._rs = 0; Game.resize(); });
+    },
+
+    resize(force) {
       const c = Game.canvas;
-      if (!c) return;
+      if (!c || !Game.tier) return;
       const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
-      Game.renderer.setSize(w, h, false);
+      const pr = BX.Perf.pixelRatio(Game.tier, w, h, Game.perf.scale);
+      if (force || w !== Game._w || h !== Game._h || Math.abs(pr - (Game._pr || 0)) > 0.004) {
+        Game._w = w; Game._h = h; Game._pr = pr;
+        Game.renderer.setPixelRatio(pr);
+        Game.renderer.setSize(w, h, false);
+      }
       Game.camera.aspect = w / h;
       Game.rig.aspect = w / h;
       Game.applyView();
@@ -154,12 +317,13 @@
     /* =================================================================== menu / showcase scenes */
     ensureFighters(look0, stats0, look1, stats1, hide1) {
       const old = Game.fighters;
-      for (const f of old) { Game.scene.remove(f.root); for (const k of Object.keys(f.rig.mats)) f.rig.mats[k].dispose(); }
+      for (const f of old) { Game.scene.remove(f.root); BX.disposeRig(f.rig); }
       const f0 = new BX.Fighter(look0, { slot: 0, stats: stats0 });
       const f1 = new BX.Fighter(look1, { slot: 1, stats: stats1 });
       Game.scene.add(f0.root); Game.scene.add(f1.root);
       Game.fighters = [f0, f1];
       f1.root.visible = !hide1;
+      if (Game.arena) Game.arena.setBlobTargets([f0, f1, Game.ref]);
       return Game.fighters;
     },
 
@@ -335,6 +499,7 @@
       if (Game.hitstop > 0) { Game.hitstop -= dt; sdt = 0; }
       if (Game.paused) sdt = 0;
 
+      if (Game.perf.pendingLow && Game.isSafePoint()) Game.switchToLowContent();
       if (Game.mode === 'menu') Game.tickMenu(sdt, dt);
       else Game.tickFight(sdt, dt);
 
@@ -509,7 +674,7 @@
         Game.slowmo(0.55, 0.5);
       } else {
         const t = (act.def.wind * act.tm) * 0.6;
-        setTimeout(() => A.whoosh(kind === 'straight' ? 0.4 : 0.7), t * 1000);
+        A.whoosh(kind === 'straight' ? 0.4 : 0.7, t);
       }
       if (!f.isAI) Game.emit('punch', f, act.def.id);
     },
@@ -991,7 +1156,16 @@
       });
     },
 
-    render() { Game.renderer.render(Game.scene, Game.camera); },
+    render() {
+      if (Game.contextLost) return;
+      const r = Game.renderer, sm = r.shadowMap;
+      // the shadow pass is skipped when the governor turned shadows off, and re-used every Nth frame on touch / mid tiers
+      if (!Game.shadowsOn) { sm.autoUpdate = false; }
+      else if (Game.tier.shadowEvery > 1) { sm.autoUpdate = false; if ((Game._frame = (Game._frame || 0) + 1) % Game.tier.shadowEvery === 0 || Game._frame < 3) sm.needsUpdate = true; }
+      else sm.autoUpdate = true;
+      r.render(Game.scene, Game.camera);
+      BX.flushDispose();
+    },
   };
 
   BX.Game = Game;

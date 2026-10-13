@@ -87,7 +87,7 @@
 
   BX.DEFAULT_SETTINGS = {
     volume: 0.8, sfx: true, music: true, shake: true, hints: true,
-    camera: 'behind', quality: 'high', rounds: 3, roundTime: 60, difficulty: 1,
+    camera: 'behind', quality: 'auto', batterySaver: false, rounds: 3, roundTime: 60, difficulty: 1,
     touch: 'auto', fps: false, speech: true,
   };
 
