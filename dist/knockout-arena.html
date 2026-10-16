@@ -440,6 +440,15 @@ body.touchui .mash { bottom: auto; top: 56%; width: min(300px, 46vw); }
 .touchonly { display: none; }
 @media (any-hover: none) and (pointer: coarse) { .touchonly { display: block; } }
 
+/* quick fight on phones: the FIGHT button stays pinned to the bottom instead of sitting under the opponent list */
+.fightbar { display: none; }
+@media (max-width: 760px), (max-height: 520px) {
+  .split.quick .card > [data-act="startQuick"] { display: none; }
+  .fightbar { display: block; position: sticky; bottom: 0; z-index: 2; margin-top: auto; padding: 10px 0 4px; background: linear-gradient(0deg, rgba(5, 7, 13, 0.96) 70%, rgba(5, 7, 13, 0)); }
+  .fightbar .btn { width: 100%; }
+}
+@media (max-height: 520px) { .fightbar .btn.big { font-size: 22px; padding: 8px 14px; } }
+
 </style>
 </head>
 <body>
@@ -5289,6 +5298,7 @@ body.touchui .mash { bottom: auto; top: 56%; width: min(300px, 46vw); }
             <button class="btn primary big" data-act="startQuick">FIGHT!</button>
           </div>
         </div>
+        <div class="fightbar"><button class="btn primary big" data-act="startQuick">FIGHT!</button></div>
       </div>`;
     },
 

@@ -123,6 +123,7 @@
             <button class="btn primary big" data-act="startQuick">FIGHT!</button>
           </div>
         </div>
+        <div class="fightbar"><button class="btn primary big" data-act="startQuick">FIGHT!</button></div>
       </div>`;
     },
 
