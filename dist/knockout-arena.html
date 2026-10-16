@@ -7,7 +7,6 @@
   <title>Knockout Arena</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
 /* Knockout Arena — UI */
 :root {
@@ -87,7 +86,7 @@ button { font-family: inherit; color: inherit; }
 .mash .mb { margin-top: 6px; height: 16px; border: 2px solid #fff; background: rgba(0, 0, 0, 0.6); border-radius: 8px; overflow: hidden; }
 .mash .mb i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--gold), #ff7a00); }
 
-.train { position: absolute; left: 12px; top: 22%; width: min(300px, 40vw); opacity: 0.92; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.train { position: absolute; left: max(12px, env(safe-area-inset-left)); top: 22%; width: min(300px, 40vw); opacity: 0.92; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
 .train h4 { margin: 0 0 4px; font-family: var(--head); letter-spacing: 3px; color: var(--gold); font-size: 20px; }
 .train ul { list-style: none; padding: 0; margin: 0; font-size: 13px; line-height: 1.25; }
 .train li { padding: 2px 0 2px 22px; position: relative; color: var(--dim); }
@@ -147,12 +146,12 @@ button { font-family: inherit; color: inherit; }
 #overlay { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(5, 7, 13, 0.25), rgba(5, 7, 13, 0.7)); touch-action: pan-y; }
 #overlay.clear { background: linear-gradient(90deg, rgba(5, 7, 13, 0.82) 0%, rgba(5, 7, 13, 0.5) 38%, rgba(5, 7, 13, 0) 62%); align-items: stretch; justify-content: flex-start; }
 #overlay.dim { background: rgba(5, 7, 13, 0.72); }
-.screen { width: 100%; height: 100%; max-width: 1180px; padding: max(18px, env(safe-area-inset-top)) 22px 18px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; overflow-x: hidden; animation: fadeIn 0.3s both; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+.screen { width: 100%; height: 100%; max-width: 1180px; padding: max(18px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left)); display: flex; flex-direction: column; gap: 14px; overflow-y: auto; overflow-x: hidden; animation: fadeIn 0.3s both; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .screen.center { align-items: center; text-align: center; }
 .screen.center::before, .screen.center::after { content: ''; flex: 1 0 0; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .title { font-family: var(--head); font-size: clamp(34px, 6vw, 62px); letter-spacing: 4px; line-height: 1; margin: 0; }
-.title small { display: block; font-size: 0.32em; color: var(--gold); letter-spacing: 6px; margin-top: 4px; }
+.title small { display: block; font-size: max(0.32em, 12px); color: var(--gold); letter-spacing: 6px; margin-top: 4px; }
 .topbar { display: flex; align-items: center; gap: 14px; justify-content: space-between; flex-wrap: wrap; }
 .btn { appearance: none; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-family: var(--head); font-size: 22px; letter-spacing: 2px; padding: 10px 22px; border-radius: 8px; cursor: pointer; transition: transform 0.12s, background 0.12s, border-color 0.12s; text-align: center; touch-action: manipulation; }
 .btn:hover, .btn:focus-visible { background: rgba(60, 72, 120, 0.95); border-color: var(--gold); outline: none; transform: translateY(-1px); }
@@ -171,6 +170,7 @@ button { font-family: inherit; color: inherit; }
 .menu { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: 26px; align-content: stretch; align-items: stretch; }
 .menu .mleft { display: flex; flex-direction: column; gap: 22px; justify-content: center; }
 .menu .card { align-self: end; margin-bottom: 4vh; }
+.split.quick { grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); }
 .logo .l1 { display: block; font-family: var(--head); font-size: clamp(44px, min(11vw, 17vh), 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#fff 20%, #bcc7ff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
 .logo .l2 { display: block; font-family: var(--head); font-size: clamp(44px, min(11vw, 17vh), 124px); line-height: 0.85; letter-spacing: 5px; background: linear-gradient(#ffd24d, #e11d2e); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6)); }
 .logo small { display: block; margin-top: 8px; letter-spacing: 8px; color: var(--dim); font-size: 14px; }
@@ -179,9 +179,9 @@ button { font-family: inherit; color: inherit; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
 .card h3 { margin: 0 0 8px; font-family: var(--head); letter-spacing: 3px; font-size: 22px; color: var(--gold); font-weight: 400; }
 .card p { margin: 6px 0; color: var(--dim); font-size: 15px; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.split { display: grid; grid-template-columns: minmax(250px, 340px) 1fr; gap: 16px; flex: 1; min-height: 0; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.split { display: grid; grid-template-columns: minmax(250px, 340px) minmax(0, 1fr); gap: 16px; flex: 1; min-height: 0; }
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .row-wrap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .muted { color: var(--dim); }
@@ -253,39 +253,65 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 .pad-map { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
 
 /* ----------------------------------------------------------- touch controls */
-#touch { position: fixed; inset: 0; z-index: 9; pointer-events: none; }
+:root { --edge: 14px; --pb: clamp(48px, min(16vh, 15.5vw), 66px); --sb: 44px; --tl: 170px; --tr: calc(var(--edge) + 3 * var(--pb) + 12px + 10px); }
+@media (min-width: 700px) and (min-height: 700px) { :root { --pb: 78px; --sb: 54px; --tl: 200px; } }
+#touch { position: fixed; inset: 0; z-index: 9; pointer-events: none; -webkit-touch-callout: none; }
 #touch > * { pointer-events: auto; }
-#joy { position: absolute; left: max(18px, env(safe-area-inset-left)); bottom: max(18px, env(safe-area-inset-bottom)); width: 138px; height: 138px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(255, 255, 255, 0.25); touch-action: none; }
-#joyKnob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); border: 2px solid rgba(255, 255, 255, 0.55); pointer-events: none; }
-#tdef { position: absolute; left: max(18px, env(safe-area-inset-left)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 150px); display: flex; gap: 8px; }
-#tmove { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 142px); display: flex; gap: 6px; }
-#tpunch { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-#tpunch .tb { width: 62px; height: 62px; }
-.tb { width: 58px; height: 52px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.4); background: rgba(10, 14, 26, 0.62); color: #fff; font: 700 12px var(--body); letter-spacing: 0.5px; touch-action: none; padding: 0; }
-#tdef .tb { width: 76px; height: 54px; }
-.tb.on { background: rgba(255, 210, 77, 0.75); color: #000; }
+#joyZone { position: absolute; left: max(24px, env(safe-area-inset-left)); top: 34%; bottom: 0; width: 46%; touch-action: none; }
+#touch.lefty #joyZone { left: auto; right: max(24px, env(safe-area-inset-right)); }
+#joy { position: absolute; pointer-events: none; left: calc(max(var(--edge), env(safe-area-inset-left)) + 62px); top: calc(100% - max(var(--edge), env(safe-area-inset-bottom)) - 62px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; background: rgba(255, 255, 255, 0.07); border: 2px solid rgba(255, 255, 255, 0.22); opacity: 0.55; transition: opacity 0.15s; }
+#touch.lefty #joy { left: calc(100% - max(var(--edge), env(safe-area-inset-right)) - 62px); }
+#joy.active { opacity: 1; border-color: rgba(255, 255, 255, 0.45); transition: none; }
+#joyKnob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); border: 2px solid rgba(255, 255, 255, 0.55); pointer-events: none; }
+#tdef { position: absolute; left: max(var(--edge), env(safe-area-inset-left)); bottom: calc(max(var(--edge), env(safe-area-inset-bottom)) + 112px + 14px); display: flex; gap: 8px; }
+#touch.lefty #tdef { left: auto; right: max(var(--edge), env(safe-area-inset-right)); flex-direction: row-reverse; }
+#tmove { position: absolute; right: max(var(--edge), env(safe-area-inset-right)); bottom: calc(max(var(--edge), env(safe-area-inset-bottom)) + 2 * var(--pb) + 6px + 8px); display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; width: max(188px, calc(3 * var(--pb) + 12px)); }
+#touch.lefty #tmove { right: auto; left: max(var(--edge), env(safe-area-inset-left)); }
+#tpunch { position: absolute; right: max(var(--edge), env(safe-area-inset-right)); bottom: max(var(--edge), env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, var(--pb)); grid-auto-rows: var(--pb); gap: 6px; }
+#touch.lefty #tpunch { right: auto; left: max(var(--edge), env(safe-area-inset-left)); direction: rtl; }
+#touch.lefty #tpunch .tb { direction: ltr; }
+.tb { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: auto; height: auto; min-width: 44px; min-height: 44px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.4); background: rgba(10, 14, 26, 0.62); color: #fff; font: 700 13px/1 var(--body); letter-spacing: 0.5px; touch-action: none; padding: 0; -webkit-user-select: none; user-select: none; transition: transform 0.06s; }
+.tb b { font-weight: 700; font-size: 13px; pointer-events: none; }
+.tb i { font-style: normal; font-size: 10px; opacity: 0.75; pointer-events: none; }
+.tb i[data-side] { position: absolute; top: 3px; left: 6px; font-weight: 700; }
+#tmove .tb { height: var(--sb); }
+#tdef .tb { width: 68px; height: calc(var(--sb) + 4px); }
+.tb.on { background: rgba(255, 210, 77, 0.8); color: #000; transform: scale(0.94); }
+.tb.latched { background: rgba(255, 210, 77, 0.55); color: #000; border-color: var(--gold); }
 .tb.fury { border-color: var(--gold); color: var(--gold); }
 .tb.fury.ready { background: rgba(242, 183, 5, 0.85); color: #000; animation: furyPulse 0.4s infinite alternate; }
-#tpunch .tb:nth-child(1), #tpunch .tb:nth-child(3), #tpunch .tb:nth-child(5) { }
 
-#hud.touch .hud-btns { top: calc(max(10px, env(safe-area-inset-top)) + 64px); right: 50%; transform: translateX(50%); flex-direction: row; }
-#hud.touch .hud-btn { width: 34px; height: 34px; font-size: 13px; }
-@media (max-width: 560px) {
-  .tb { width: 50px; height: 46px; font-size: 11px; }
-  #tdef .tb { width: 64px; height: 46px; }
-  #tpunch .tb { width: 56px; height: 56px; }
-  #tmove { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 126px); gap: 4px; }
-  #tdef { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 150px); }
+#hud.touch .hud-btns { top: calc(max(10px, env(safe-area-inset-top)) + 64px); bottom: auto; right: max(12px, env(safe-area-inset-right)); transform: none; flex-direction: row; }
+@media (min-width: 700px) and (min-height: 700px) { #hud.touch .hud-btns { top: calc(max(10px, env(safe-area-inset-top)) + 92px); } }
+#hud.touch .hud-btn { width: var(--sb); height: var(--sb); font-size: 16px; }
+#hud.touch .hud-btn:not(#bPause) { display: none; }
+#hud.touch .mash { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 4px + var(--pb)); left: var(--tl); right: var(--tr); width: auto; transform: none; }
+#hud.touch .mash .mt { font-size: clamp(16px, 4.4vh, 28px); letter-spacing: 2px; }
+#hud.touch .train { display: block; left: max(12px, env(safe-area-inset-left)); top: calc(max(10px, env(safe-area-inset-top)) + 64px); width: min(250px, 34vw); padding: 5px 10px; }
+#hud.touch .train h4 { font-size: 15px; margin: 0 0 1px; }
+#hud.touch .train li { font-size: 12px; }
+#hud.touch .train li:nth-child(n+2) { display: none; }
+@media (max-width: 380px) { #tdef .tb { width: 60px; } }
+@media (max-width: 350px) { #tdef { bottom: calc(max(var(--edge), env(safe-area-inset-bottom)) + 112px + 14px + 52px); } }
+@media (orientation: portrait) {
+  #hud.touch .mash { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 2 * var(--pb) + 6px + 8px + 44px + 14px); left: 4vw; right: 4vw; }
+}
+@media (max-height: 340px) {
+  :root { --pb: 48px; --sb: 44px; }
+  #joy { width: 96px; height: 96px; margin: -48px 0 0 -48px; top: calc(100% - max(10px, env(safe-area-inset-bottom)) - 52px); }
+  #tdef { bottom: calc(max(var(--edge), env(safe-area-inset-bottom)) + 96px + 12px); }
+}
+
+@media (max-width: 760px) and (orientation: portrait), (max-width: 639px) {
+  .menu { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .menu .card { align-self: stretch; margin-bottom: 0; }
+  .split, .split.quick { grid-template-columns: minmax(0, 1fr); }
+  .grid2, .grid3 { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-  .menu { grid-template-columns: 1fr; gap: 14px; }
-  .menu .card { align-self: stretch; margin-bottom: 0; }
-  .split { grid-template-columns: 1fr; }
-  .grid2, .grid3 { grid-template-columns: 1fr; }
   .mainnav .btn { font-size: 20px; padding: 10px; }
   .hud-btns { top: auto; bottom: 46%; }
   #overlay.clear { background: linear-gradient(180deg, rgba(5, 7, 13, 0.9) 0%, rgba(5, 7, 13, 0.35) 60%, transparent 100%); }
-  .train { display: none; }
 }
 @media (max-height: 520px) {
   .hud-center .timer { font-size: 30px; }
@@ -294,6 +320,125 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   .screen { padding-top: 10px; gap: 8px; }
   .title { font-size: 30px; }
 }
+
+/* ============================================================ MOBILE LAYOUT PATCH (appended) */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* phones/tablets only: the host preview sets body{font:14px}, which made unsized labels smaller than the standalone page */
+@media (max-width: 760px), (pointer: coarse) { body { font-size: 16px; } .badge { font-size: 12px; } }
+
+/* menu card: keyboard hints on desktop, touch hint on touch-only devices */
+.touchhint { display: none; }
+@media (any-hover: none) and (pointer: coarse) { .kbhint { display: none; } .touchhint { display: block; margin: 6px 0; color: var(--dim); font-size: 15px; } .tab.kbtab { display: none; } .tab[data-v="basics"] { order: -2; } .tab[data-v="touch"] { order: -1; } }
+
+/* top bar: keep the Back button on the title row on phones */
+@media (max-width: 560px) {
+  .title small { letter-spacing: 3px; }
+  .topbar { flex-wrap: nowrap; gap: 10px; align-items: flex-start; }
+  .topbar .title { min-width: 0; }
+  .topbar .btn { flex: none; padding: 8px 14px; font-size: 18px; }
+}
+
+/* avatar creator */
+.screen.avatar { max-width: 430px; margin: 0; }
+.avatar-done { display: none; }
+@media (max-width: 760px) { .avatar-done { display: block; flex: none; } .screen.avatar .topbar { flex-wrap: nowrap; align-items: flex-start; } }
+@media (max-width: 760px) and (orientation: portrait) {
+  #overlay.clear { align-items: flex-end; background: linear-gradient(180deg, rgba(5, 7, 13, 0.5) 0%, rgba(5, 7, 13, 0) 30%); touch-action: none; }
+  #overlay.clear .screen.avatar { max-width: none; height: 62%; border-top: 1px solid var(--line); background: rgba(5, 7, 13, 0.94); border-radius: 16px 16px 0 0; }
+}
+@media (max-width: 760px) and (orientation: landscape) {
+  #overlay.clear { background: linear-gradient(90deg, rgba(5, 7, 13, 0.82) 0%, rgba(5, 7, 13, 0.5) 45%, rgba(5, 7, 13, 0) 62%); touch-action: none; }
+  .screen.avatar { width: min(430px, 50vw); }
+}
+
+/* pause */
+.screen.pause { gap: 12px; max-width: 420px; }
+.pause-btns { display: grid; gap: 12px; width: 100%; }
+.pause-btns .btn { width: 100%; }
+@media (max-height: 520px) {
+  .screen.pause { max-width: 640px; gap: 8px; }
+  .pause-btns { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pause-btns .btn.primary { grid-column: 1 / -1; }
+  .pause-btns .btn.big { font-size: 22px; padding: 8px 14px; }
+}
+
+/* sticky primary actions on rest / result when the screen scrolls */
+@media (max-height: 520px), (max-width: 560px) {
+  .screen .actions { position: sticky; bottom: 0; z-index: 2; width: 100%; margin-top: auto; padding: 10px 0 4px; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; background: linear-gradient(0deg, rgba(5, 7, 13, 0.96) 70%, rgba(5, 7, 13, 0)); }
+  .screen .actions .btn, .screen .actions .btn.big { font-size: 19px; padding: 8px 8px; }
+}
+
+/* main menu on landscape phones */
+@media (max-height: 520px) and (orientation: landscape) {
+  .logo .l1, .logo .l2 { font-size: min(11vw, 15vh); }
+  .logo small { margin-top: 4px; letter-spacing: 6px; }
+  .menu .mleft { gap: 12px; }
+  .mainnav { gap: 8px; }
+  .mainnav .btn, .mainnav .btn.big { font-size: 18px; padding: 6px 6px; }
+  .mainnav .btn.wide { font-size: 22px; }
+  .menu .card { margin-bottom: 0; align-self: center; }
+}
+
+/* touch HUD: nothing ghosting through menus, intro cards clear of the controls, tap targets */
+body.ov #touch { visibility: hidden; }
+body.intro #touch { visibility: hidden; }
+body.touchui #intro { pointer-events: auto; }
+body.touchui #toast { top: calc(max(10px, env(safe-area-inset-top)) + 116px); }
+body.touchui .mash { bottom: auto; top: 26%; }
+@media (pointer: coarse) {
+  .btn.small { min-height: 40px; padding: 8px 16px; }
+  .chip { padding: 9px 16px; min-height: 40px; }
+  .tab { padding: 10px 16px; min-height: 42px; }
+  .keycap { min-height: 40px; padding: 9px 10px; }
+  .mini { width: 40px; height: 40px; font-size: 22px; }
+  .stat-row .btns { gap: 8px; }
+  .sw { width: 36px; height: 36px; }
+  .row-wrap { gap: 10px; }
+  .switch { width: 52px; height: 30px; border-radius: 15px; }
+  .switch::after { width: 24px; height: 24px; }
+  .switch.on::after { left: 25px; }
+  .toggle { padding: 9px 0; }
+  .hud-btn, #hud.touch .hud-btn { width: 40px; height: 40px; }
+}
+
+/* training panel on touch: portrait = one-line strip under the HUD bar; landscape keeps the compact corner card from the touch block above */
+@media (max-width: 760px) and (orientation: portrait) {
+  #hud.touch .train { left: 50%; right: auto; transform: translateX(-50%); top: calc(max(10px, env(safe-area-inset-top)) + 112px); width: min(92vw, 460px); display: flex; align-items: center; gap: 10px; padding: 6px 12px; }
+  #hud.touch .train h4 { margin: 0; letter-spacing: 2px; white-space: nowrap; }
+  #hud.touch .train ul { line-height: 1.2; }
+  #hud.touch .train li { padding-left: 0; font-size: 13px; }
+  #hud.touch .train li::before { content: none; }
+}
+
+@media (max-height: 520px) and (orientation: landscape) and (min-width: 640px) { .mainnav { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* HUD: side safe-area insets (landscape notch), touch HUD buttons, toast / mash / count placement */
+.hud-top { width: min(1100px, calc(100vw - 2 * max(2vw, env(safe-area-inset-left), env(safe-area-inset-right)))); }
+.hud-btns { right: max(8px, env(safe-area-inset-right)); }
+.combo { left: max(3vw, env(safe-area-inset-left)); }
+.combo.r { left: auto; right: max(3vw, env(safe-area-inset-right)); }
+#intro { padding: 0 max(3vw, env(safe-area-inset-right)) 0 max(3vw, env(safe-area-inset-left)); }
+#fps { left: max(6px, env(safe-area-inset-left)); bottom: max(6px, env(safe-area-inset-bottom)); }
+#hud.touch .hud-btns { bottom: auto; }
+@media (max-height: 520px) {
+  .hud-btns { top: calc(max(10px, env(safe-area-inset-top)) + 64px); bottom: auto; right: 50%; transform: translateX(50%); flex-direction: row; }
+  .hud-btn { width: 34px; height: 34px; font-size: 13px; }
+  #count { font-size: clamp(64px, 30vh, 280px); }
+}
+@media (max-height: 520px) and (pointer: coarse) { .hud-btn, #hud.touch .hud-btn { width: 40px; height: 40px; } }
+body.touchui #toast { top: calc(max(10px, env(safe-area-inset-top)) + 156px); }
+body.touchui #hud { z-index: 10; }
+body.touchui .mash { bottom: auto; top: 56%; width: min(300px, 46vw); }
+@media (max-height: 520px) { body.touchui .mash { top: 60%; width: min(240px, 44vw); } body.touchui .mash .mt { font-size: 22px; letter-spacing: 2px; } body.touchui #toast { top: calc(max(10px, env(safe-area-inset-top)) + 118px); } }
+
+@media (max-width: 760px) {
+  .bar.st { height: 10px; }
+  .bar.fy { height: 12px; }
+  .bar.fy b { font: 700 10px/12px var(--body); }
+}
+/* versus on touch-only devices */
+.touchonly { display: none; }
+@media (any-hover: none) and (pointer: coarse) { .touchonly { display: block; } }
 
 </style>
 </head>
@@ -347,24 +492,25 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
   <!-- ===================== touch controls ===================== -->
   <div id="touch" class="hidden">
+    <div id="joyZone"></div>
     <div id="joy"><div id="joyKnob"></div></div>
     <div id="tdef">
-      <button class="tb hold" data-a="block">BLOCK</button>
-      <button class="tb hold" data-a="crouch">DUCK</button>
+      <button class="tb hold" data-a="block"><b>BLOCK</b></button>
+      <button class="tb hold" data-a="crouch"><b>DUCK</b></button>
     </div>
     <div id="tmove">
-      <button class="tb" data-a="slipL">◀ SLIP</button>
-      <button class="tb" data-a="slipR">SLIP ▶</button>
-      <button class="tb" data-a="dodge">DASH</button>
-      <button class="tb fury" data-a="special">FURY</button>
+      <button class="tb" data-a="slipL"><b>◀</b><i>SLIP</i></button>
+      <button class="tb" data-a="slipR"><b>▶</b><i>SLIP</i></button>
+      <button class="tb" data-a="dodge"><b>DASH</b></button>
+      <button class="tb fury" data-a="special"><b>FURY</b></button>
     </div>
     <div id="tpunch">
-      <button class="tb" data-a="jab">JAB</button>
-      <button class="tb" data-a="cross">CROSS</button>
-      <button class="tb" data-a="leadHook">L HOOK</button>
-      <button class="tb" data-a="rearHook">R HOOK</button>
-      <button class="tb" data-a="leadUpper">L UPPER</button>
-      <button class="tb" data-a="rearUpper">R UPPER</button>
+      <button class="tb" data-a="leadUpper"><b>UPPER</b><i data-side="lead">L</i></button>
+      <button class="tb" data-a="leadHook"><b>HOOK</b><i data-side="lead">L</i></button>
+      <button class="tb big" data-a="jab"><b>JAB</b></button>
+      <button class="tb" data-a="rearUpper"><b>UPPER</b><i data-side="rear">R</i></button>
+      <button class="tb" data-a="rearHook"><b>HOOK</b><i data-side="rear">R</i></button>
+      <button class="tb big" data-a="cross"><b>CROSS</b></button>
     </div>
   </div>
 
@@ -629,7 +775,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   BX.DEFAULT_SETTINGS = {
     volume: 0.8, sfx: true, music: true, shake: true, hints: true,
     camera: 'behind', quality: 'auto', batterySaver: false, rounds: 3, roundTime: 60, difficulty: 1,
-    touch: 'auto', fps: false, speech: true,
+    touch: 'auto', touchHand: 'right', haptics: true, fps: false, speech: true,
   };
 
   /** Rebindable actions (label shown in the controls screen). */
@@ -874,7 +1020,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   let ctx = null, master = null, sfxBus = null, musicBus = null, crowdGain = null, crowdFilter = null, noiseBuf = null;
   const st = { vol: 0.8, sfx: true, music: true, speech: true, crowdTarget: 0.12 };
   let musicTimer = null, musicStep = 0, musicNext = 0, musicMode = null;
-  let crowdLast = -1, unlockArmed = false;
+  let crowdLast = -1, unlockArmed = false, speechPrimed = false;
   const runningCbs = [];
 
   function init() {
@@ -902,6 +1048,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     crowdGain = ctx.createGain(); crowdGain.gain.value = 0;
     src.connect(crowdFilter); crowdFilter.connect(crowdGain); crowdGain.connect(sfxBus);
     src.start();
+    ctx.onstatechange = () => { if (ctx.state === 'running') onRunning(); };
     return true;
   }
 
@@ -918,6 +1065,11 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       } catch (e) { /* ignore */ }
       const p = ctx.resume && ctx.resume();
       if (p && p.then) p.then(onRunning, () => {});
+      // iOS also gates speech synthesis behind a user gesture: prime it once with a silent utterance
+      if (!speechPrimed) {
+        speechPrimed = true;
+        try { const ss = window.speechSynthesis; if (ss && typeof SpeechSynthesisUtterance !== 'undefined') { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; ss.speak(u); } } catch (e) { /* ignore */ }
+      }
     }
     onRunning();
   }
@@ -984,6 +1136,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     state: st,
     init, unlock, armUnlock,
     get ready() { return !!ctx; },
+    get running() { return !!ctx && ctx.state === 'running'; },
+    suspendAudio() { if (ctx && ctx.state === 'running') { try { ctx.suspend().catch(() => {}); } catch (e) {} } try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {} },
+    resumeAudio() { if (ctx && ctx.state !== 'running') { try { ctx.resume().catch(() => {}); } catch (e) {} } if (ctx && musicTimer) musicNext = ctx.currentTime + 0.1; },
 
     setVolume(v) { st.vol = v; if (master) master.gain.value = v; },
     setSfx(on) { st.sfx = on; if (sfxBus) sfxBus.gain.value = on ? 1 : 0; },
@@ -1110,9 +1265,11 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     if (!ctx) return;
     const bpm = musicMode === 'fight' ? 118 : 98;
     const stepDur = 60 / bpm / 2; // 8th notes
-    while (musicNext < ctx.currentTime + 0.4) {
+    const now = ctx.currentTime;
+    if (musicNext < now - 0.05) musicNext = now + 0.05;   // after a stall, restart the grid instead of bursting
+    while (musicNext < now + 0.4) {
       const i = musicStep % 16;
-      const t = musicNext - ctx.currentTime;
+      const t = musicNext - now;
       if (i % 4 === 0) tone(120, 0.2, { type: 'sine', freqEnd: 40, gain: 0.55, bus: musicBus, delay: t });
       if (i % 4 === 2) noise(0.06, { type: 'highpass', freq: 6000, gain: 0.12, bus: musicBus, delay: t });
       if (i % 8 === 4) noise(0.14, { type: 'bandpass', freq: 1800, q: 0.8, gain: 0.3, bus: musicBus, delay: t });
@@ -1150,6 +1307,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     onAnyKey: null,
     padState: [{}, {}],
     lastDevice: 'keyboard',
+    ptrType: 'mouse',   // pointerType of the most recent pointerdown (compat mouse events from touch must not punch)
+    onReleaseAll: null,
 
     loadBindings() {
       const saved = BX.store.get('bindings', null);
@@ -1222,6 +1381,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       I.queue = [[], []];
       I.analog = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
       I.padState = [{}, {}];
+      if (I.onReleaseAll) I.onReleaseAll();
     },
 
     /** Build the intent object a Fighter consumes this frame. */
@@ -1277,20 +1437,28 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     /* ------------ mouse (single player: left = jab, right = cross) ------------ */
     _mousedown(e) {
       if (!I.active || I.mode !== 'solo') return;
-      if (e.target && e.target.closest && e.target.closest('.hud-btn, #touch, #overlay, .panel')) return;
+      if (I.ptrType !== 'mouse') return; // compat mouse event synthesised from a touch / pen tap
+      if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
+      if (e.target && e.target.closest && e.target.closest('.hud-btn, .hud-btns, #hud button, #touch, #overlay, .panel')) return;
       I.lastDevice = 'keyboard';
       if (e.button === 0) I.press(0, 'jab', 'm:0');
       else if (e.button === 2) I.press(0, 'cross', 'm:2');
     },
     _mouseup(e) {
+      if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
+      if (performance.now() - (I._touchT || -1e9) < 900) return;
       if (e.button === 0) I.release(0, 'jab', 'm:0');
       else if (e.button === 2) I.release(0, 'cross', 'm:2');
     },
 
     /* ------------ gamepad ------------ */
+    /** navigator.getGamepads() throws SecurityError under a restrictive permissions policy: never let that reach the frame loop. */
+    getPads() {
+      if (I._padsBroken || !navigator.getGamepads) return null;
+      try { return navigator.getGamepads(); } catch (e) { I._padsBroken = true; return null; }
+    },
     pollPads() {
-      if (!navigator.getGamepads) return;
-      const pads = navigator.getGamepads();
+      const pads = I.getPads();
       if (!pads) return;
       const connected = [];
       for (const p of pads) if (p && p.connected) connected.push(p);
@@ -1339,7 +1507,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       I.loadBindings();
       window.addEventListener('keydown', I._keydown, { passive: false });
       window.addEventListener('keyup', I._keyup, { passive: false });
+      window.addEventListener('touchstart', () => { I._touchT = performance.now(); }, { passive: true, capture: true });
+      window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' || e.pointerType === 'pen') I._touchT = performance.now(); }, { passive: true, capture: true });
       window.addEventListener('blur', () => I.releaseAll());
+      window.addEventListener('pointerdown', (e) => { I.ptrType = e.pointerType || 'mouse'; }, true);
       window.addEventListener('mousedown', I._mousedown);
       window.addEventListener('mouseup', I._mouseup);
       window.addEventListener('contextmenu', (e) => { if (I.active) e.preventDefault(); });
@@ -3421,6 +3592,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   BX.FX = FX;
 
   /* ------------------------------------------------------------------ camera director */
+  const COMPACT = { phiP: 25, phiL: 36, ph1P: 45, ph1L: 30, kdP: 3.2, kdL: 2.2, RP: 4.2, RL: 4.1, HP: 2.6, HL: 2.3, fovP: 58, fovL: 50, a0: 0.55, a1: 1.35 };
   class CameraRig {
     constructor(camera) {
       this.cam = camera;
@@ -3436,6 +3608,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       this._p = new T.Vector3(); this._l = new T.Vector3();
       this.shakeEnabled = true;
       this.aspect = 16 / 9;
+      this.compact = false;   // touch controls on screen: wider over-the-shoulder angle so the opponent is not hidden behind the player's back
+      this.camScale = 1;      // distance multiplier for the cinematic cameras (narrow screens need more room)
     }
     setOverride(fn, dur, smooth) { this.override = { fn, dur: dur == null ? Infinity : dur, t: 0, smooth: smooth || 4 }; }
     clearOverride() { this.override = null; }
@@ -3443,8 +3617,28 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     kickFov(d) { this.fovKick = Math.min(18, this.fovKick + d); }
     snap(pos, look) { this.pos.copy(pos); this.look.copy(look); }
 
+    /** Over-the-shoulder framing for phones/tablets. Blends between a portrait and a landscape parameter set by aspect ratio;
+     *  the camera swings further to the side the closer the fighters are, so the opponent stays visible past the player's shoulder. */
+    frameCompact(a, b, outPos, outLook) {
+      const c = COMPACT, t = BX.clamp((this.aspect - c.a0) / (c.a1 - c.a0), 0, 1), mix = (p, l) => p + (l - p) * t;
+      const d = this._d.set(b.pos.x - a.pos.x, 0, b.pos.z - a.pos.z);
+      const dist = Math.max(0.5, d.length());
+      d.multiplyScalar(1 / dist);
+      const r = this._r.set(-d.z, 0, d.x);
+      const mid = this._mid.set((a.pos.x + b.pos.x) / 2, 0, (a.pos.z + b.pos.z) / 2);
+      const kd0 = mix(c.kdP, c.kdL), k = BX.clamp((kd0 - dist) / (kd0 - 0.9), 0, 1);
+      const phi = (mix(c.phiP, c.phiL) + mix(c.ph1P, c.ph1L) * k) * Math.PI / 180;
+      const R = mix(c.RP, c.RL) + 0.25 * dist, H = mix(c.HP, c.HL) + 0.1 * dist;
+      outPos.set(mid.x + (-d.x * Math.cos(phi) + r.x * Math.sin(phi)) * R, H, mid.z + (-d.z * Math.cos(phi) + r.z * Math.sin(phi)) * R);
+      outLook.set(mid.x, 1.2, mid.z);
+      outPos.x = BX.clamp(outPos.x, -6.3, 6.3);
+      outPos.z = BX.clamp(outPos.z, -6.3, 6.3);
+      return mix(c.fovP, c.fovL);
+    }
+
     /** Desired framing for the current gameplay camera mode. */
     frame(a, b, mode, outPos, outLook) {
+      if (mode === 'behind' && (this.compact || this.aspect < 1.25)) return this.frameCompact(a, b, outPos, outLook);
       const d = this._d.set(b.pos.x - a.pos.x, 0, b.pos.z - a.pos.z);
       const dist = Math.max(0.5, d.length());
       d.multiplyScalar(1 / dist);
@@ -3889,15 +4083,14 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         lastRender = now;
         // a stalled frame (tab restore, shader compile, GC) must not burn through hit-stop and ready timers
         const dt = dtMs > 250 ? 0 : Math.min(0.05, dtMs / 1000);
-        try {
-          BX.Input.pollPads();
-          BX.UI.update && BX.UI.update(dt);
-          if (!Game.contextLost) {
-            Game.tick(dt);
-            Game.render();
-            Game.governorFrame(now);
-          }
-        } catch (e) { console.error(e); }
+        // each stage has its own guard so one throwing stage can neither freeze the loop nor starve the others
+        try { BX.Input.pollPads(); } catch (e) { Game._err(e); }
+        try { BX.UI.update && BX.UI.update(dt); } catch (e) { Game._err(e); }
+        if (!Game.contextLost) {
+          try { Game.tick(dt); } catch (e) { Game._err(e); }
+          try { Game.render(); } catch (e) { Game._err(e); }
+          try { Game.governorFrame(now); } catch (e) { Game._err(e); }
+        }
         if (Game.settings.fps) {
           fpsT += dt; fpsN++;
           if (fpsT > 0.5) {
@@ -3907,6 +4100,12 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         }
       };
       Game._raf = requestAnimationFrame(loop);
+    },
+
+    _err(e) {
+      Game._errN = (Game._errN || 0) + 1;
+      if (Game._errN <= 3 || Game._errN % 300 === 0) console.error(e);
+      if (Game._errN === 120 && Game.mode === 'fight') { try { BX.UI.toast('Something went wrong - back to the menu'); Game.quitToMenu(); BX.UI.show('menu'); } catch (_) {} }
     },
 
     saveSettings() { BX.store.set('settings', Game.settings); },
@@ -4033,9 +4232,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     },
 
     cycleCamera() {
-      const order = ['behind', 'side', 'high', 'broadcast'];
+      const touch = document.body.classList.contains('touchui');
+      const order = touch ? (Game.camera.aspect < 1 ? ['behind', 'high'] : ['behind', 'side']) : ['behind', 'side', 'high', 'broadcast'];
       const cur = Game.settings.camera;
-      const nxt = order[(order.indexOf(cur) + 1) % order.length];
+      const nxt = order[(order.indexOf(cur) + 1) % order.length];   // an unlisted current mode (e.g. broadcast set on desktop) falls back to the first
       Game.settings.camera = nxt;
       Game.saveSettings();
       Game.rig.mode = Game.cameraMode();
@@ -4064,12 +4264,36 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
     /** Shift the rendered scene sideways (used by the avatar creator so the boxer sits beside the panel). */
     setViewShift(f, fy) { Game.viewShift = f; Game.viewShiftY = fy || 0; Game.applyView(); },
+    /** Pixel offset that moves the middle of the screen to the middle of the area not covered by the touch controls. */
+    touchShift(w, h) {
+      const rect = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 ? r : null; };
+      const left = ['#tdef', '#joy'].map(rect).filter(Boolean), right = ['#tmove', '#tpunch'].map(rect).filter(Boolean);
+      if (!left.length || !right.length) return { x: 0, y: 0 };
+      if (w > h) {
+        const x0 = Math.max.apply(null, left.map((r) => r.right)), x1 = Math.min.apply(null, right.map((r) => r.left));
+        return { x: x1 > x0 ? BX.clamp(w / 2 - (x0 + x1) / 2, 0, 0.12 * w) : 0, y: 0 };
+      }
+      const top = Math.min.apply(null, left.concat(right).map((r) => r.top));
+      return { x: 0, y: BX.clamp(h / 2 - (110 + top) / 2, 0, 0.12 * h) };
+    },
     applyView() {
       const c = Game.canvas, cam = Game.camera;
       const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
-      const narrow = w < 760;
-      if (Game.viewShift && !narrow) cam.setViewOffset(w, h, -Game.viewShift * w, (Game.viewShiftY || 0) * h, w, h);
-      else cam.clearViewOffset();
+      Game.rig.compact = document.body.classList.contains('touchui');
+      Game.rig.camScale = 1 + BX.clamp((1.1 - w / h) * 0.45, 0, 0.3);
+      const sc = document.querySelector('#overlay.clear .screen.avatar');
+      if (Game.viewShift && sc && h > w * 1.05 && w < 760) {
+        // portrait phone: boxer lives in the top preview window above the form panel
+        const ph = Math.max(0.3, 1 - sc.offsetHeight / h), s = Math.min(0.62, ph * 0.9), cy = ph * 0.52;
+        cam.setViewOffset(w * s, h * s, -(1 - s) * w / 2, (s / 2 - cy) * h, w, h);
+      } else if (Game.viewShift && (w >= 760 || sc)) {
+        const f = sc ? sc.offsetWidth / (2 * w) : Game.viewShift;
+        cam.setViewOffset(w, h, -f * w, (Game.viewShiftY || 0) * h, w, h);
+      } else if (Game.rig.compact) {
+        // keep the action centred in the free area between the thumb controls
+        const s = Game.touchShift(w, h);
+        if (s.x || s.y) cam.setViewOffset(w, h, s.x, s.y, w, h); else cam.clearViewOffset();
+      } else cam.clearViewOffset();
       cam.updateProjectionMatrix();
     },
 
@@ -4297,7 +4521,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     tickFight(sdt, dt) {
       const fs = Game.fighters;
       const [a, b] = fs;
-      Game.phaseT += dt;
+      if (!Game.paused) Game.phaseT += dt;
       const phase = Game.phase;
 
       // ----- phase machine
@@ -4646,7 +4870,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       Game.kd = { f, att, count: 0, timer: -1.2, landed: false, mash: 0, rising: false, upDone: false, number: kdThisRound, resumeT: 0, tko: kdThisRound >= 3, ending: false };
       Game.combo[0].n = 0; Game.combo[1].n = 0;
       const rig = Game.rig;
-      BX.UI.banner('KNOCKDOWN!', '', 1700, 'kd');
+      BX.UI.banner('KNOCKDOWN!', '', 950, 'kd');
       A.gasp(); A.cheer(0.9);
       Game.arena.strobe = 1;
       Game.excitePulse(0.6);
@@ -4658,7 +4882,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       rig.setOverride((t, dt, P, L) => {
         const k = BX.ease.outCubic(Math.min(1, t / 1.4));
         const base = f.pos;
-        P.set(base.x + toCam.x * (3.4 - k * 0.5) + side.x * (1.6 - 1.6 * k), 0.9 + k * 0.9, base.z + toCam.z * (3.4 - k * 0.5) + side.z * (1.6 - 1.6 * k));
+        const cs = rig.camScale;
+        P.set(base.x + toCam.x * (3.4 - k * 0.5) * cs + side.x * (1.6 - 1.6 * k), 0.9 + k * 0.9, base.z + toCam.z * (3.4 - k * 0.5) * cs + side.z * (1.6 - 1.6 * k));
         L.set(base.x - Math.sin(f.yaw) * 0.5, 0.35, base.z - Math.cos(f.yaw) * 0.5);
         return 50;
       }, Infinity, 3.5);
@@ -4703,7 +4928,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
           Game.endFight('KO', att.slot);
           kd.ending = true;
         }
-        BX.UI.mash(f, kd.mash / 100, kd.count >= 3);
+        if (!kd.ending) BX.UI.mash(f, kd.mash / 100, kd.count >= 3);   // endFight('KO') above already hid the prompt
       } else {
         BX.UI.mash(null);
         if (kd.upDone) {
@@ -4759,6 +4984,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     afterRound() {
       if (Game.cfg.mode === 'training') { Game.beginPhase('ready'); return; }
       if (Game.round >= Game.totalRounds) { Game.decision(); return; }
+      Game.paused = false;
       Game.phase = 'rest';
       Game.phaseT = 0;
       for (const f of Game.fighters) { f.locked = true; f.forcedPose = 'corner'; }
@@ -4773,6 +4999,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
     continueFromRest() {
       if (Game.phase !== 'rest') return;
+      Game.paused = false;
       Game.round++;
       Game.startRoundRecords();
       const [a, b] = Game.fighters;
@@ -4839,13 +5066,15 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         if (ko && lose) {
           const ang = 0.6 + t * 0.35;
           const cx = lose.pos.x, cz = lose.pos.z;
-          P.set(cx + Math.sin(ang) * 3.4, 1.4, cz + Math.cos(ang) * 3.4);
+          const cs = Game.rig.camScale;
+          P.set(cx + Math.sin(ang) * 3.4 * cs, 1.4, cz + Math.cos(ang) * 3.4 * cs);
           L.set(cx, 0.5, cz);
           return 48;
         }
         const f = tgt;
         const fx = Math.sin(f.yaw), fz = Math.cos(f.yaw);
-        P.set(f.pos.x + fx * 2.5 + -fz * 0.4, 1.55, f.pos.z + fz * 2.5 + fx * 0.4);
+        const cs = Game.rig.camScale;
+        P.set(f.pos.x + fx * 2.5 * cs + -fz * 0.4, 1.55, f.pos.z + fz * 2.5 * cs + fx * 0.4);
         L.set(f.pos.x, 1.45, f.pos.z);
         return 46;
       }, Infinity, 3);
@@ -4874,7 +5103,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
     /* =================================================================== pause / quit */
     pause() {
-      if (Game.mode !== 'fight' || Game.phase === 'ended') return;
+      if (Game.mode !== 'fight' || Game.phase === 'ended' || Game.phase === 'rest' || Game.phase === 'roundEnd') return;
       Game.paused = true;
       BX.Input.releaseAll();
       BX.UI.showPause(true);
@@ -4886,7 +5115,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     },
     togglePause() {
       if (Game.mode !== 'fight') return;
-      if (Game.phase === 'rest' || Game.phase === 'ended') return;
+      if (Game.phase === 'rest' || Game.phase === 'ended' || Game.phase === 'roundEnd') return;
       Game.paused ? Game.resume() : Game.pause();
     },
     quitToMenu() {
@@ -4947,6 +5176,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   const kn = (set, action, idx) => BX.keyName((I.bindings[set][action] || [])[idx || 0]);
   const DIFF_IDS = BX.DIFFICULTY.map((d) => d.id);
 
+  const canFullscreen = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  const touchOnly = () => !!(window.matchMedia && matchMedia('(any-hover: none) and (pointer: coarse)').matches);
   const els = {};
   let bannerTimer = 0, introTimer = 0, toastTimer = 0;
 
@@ -4954,7 +5185,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   const opts = {
     quick: { opp: 0, diff: 'auto', rounds: 3, time: 60, upgrades: true },
     versus: { rounds: 3, time: 60, p2: { name: 'PLAYER 2', skin: '#8d5a36', hair: 'buzz', hairColor: '#15110e', trunks: '#1e5fd6', trim: '#f4f4f4', gloves: '#1e5fd6', boots: '#171717', build: 'avg', stance: 'orthodox' } },
-    ctlTab: 'basics',
+    ctlTab: (window.matchMedia && matchMedia('(any-hover: none) and (pointer: coarse)').matches) ? 'touch' : 'basics',
     from: 'menu',
   };
 
@@ -5004,9 +5235,10 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         </div>
         <div class="card">
           <h3>${esc(p.look.name)} <span class="muted tiny">· Record ${p.record.wins}W – ${p.record.losses}L – ${p.record.draws}D · ${p.record.kos} KOs</span></h3>
-          <p><b class="gold">Move</b> <span class="kbd">${kn('solo', 'up')}</span><span class="kbd">${kn('solo', 'left')}</span><span class="kbd">${kn('solo', 'down')}</span><span class="kbd">${kn('solo', 'right')}</span>
+          <div class="kbhint"><p><b class="gold">Move</b> <span class="kbd">${kn('solo', 'up')}</span><span class="kbd">${kn('solo', 'left')}</span><span class="kbd">${kn('solo', 'down')}</span><span class="kbd">${kn('solo', 'right')}</span>
           &nbsp;<b class="gold">Punch</b> <span class="kbd">${kn('solo', 'jab')}</span><span class="kbd">${kn('solo', 'cross')}</span><span class="kbd">${kn('solo', 'leadHook')}</span><span class="kbd">${kn('solo', 'rearHook')}</span><span class="kbd">${kn('solo', 'leadUpper')}</span><span class="kbd">${kn('solo', 'rearUpper')}</span></p>
-          <p><b class="gold">Block</b> <span class="kbd">${kn('solo', 'block')}</span> &nbsp;<b class="gold">Duck</b> <span class="kbd">${kn('solo', 'crouch')}</span> &nbsp;<b class="gold">Slip</b> <span class="kbd">${kn('solo', 'slipL')}</span><span class="kbd">${kn('solo', 'slipR')}</span> &nbsp;<b class="gold">Dash</b> <span class="kbd">${kn('solo', 'dodge')}</span> &nbsp;<b class="gold">FURY</b> <span class="kbd">${kn('solo', 'special')}</span></p>
+          <p><b class="gold">Block</b> <span class="kbd">${kn('solo', 'block')}</span> &nbsp;<b class="gold">Duck</b> <span class="kbd">${kn('solo', 'crouch')}</span> &nbsp;<b class="gold">Slip</b> <span class="kbd">${kn('solo', 'slipL')}</span><span class="kbd">${kn('solo', 'slipR')}</span> &nbsp;<b class="gold">Dash</b> <span class="kbd">${kn('solo', 'dodge')}</span> &nbsp;<b class="gold">FURY</b> <span class="kbd">${kn('solo', 'special')}</span></p></div>
+          <p class="touchhint"><b class="gold">Touch</b> stick = move · right-hand buttons = punches · <b>BLOCK</b>/<b>DUCK</b> = hold · <b>FURY</b> glows when full.</p>
           <p class="tiny">Gamepad and touch controls are supported too — open <b>Controls</b> for the full list and key rebinding. New here? Try <b>Training</b> first.</p>
         </div>
       </div>`;
@@ -5046,7 +5278,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         <span class="badge ${BX.DIFFICULTY[o.diff].id}">${BX.DIFFICULTY[o.diff].name}</span></div>`).join('');
       return `<div class="screen">
         <div class="topbar"><h1 class="title">QUICK FIGHT<small>Pick an opponent and the rules</small></h1>${back('menu')}</div>
-        <div class="split" style="grid-template-columns:1fr minmax(260px,360px)">
+        <div class="split quick">
           <div class="stack">${list}</div>
           <div class="card stack">
             <h3>RULES</h3>
@@ -5067,7 +5299,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       return `<div class="screen">
         <div class="topbar"><h1 class="title">2-PLAYER VERSUS<small>Two boxers, one keyboard (or two gamepads)</small></h1>${back('menu')}</div>
         <div class="grid2">
-          <div class="card stack"><h3>PLAYER 1 — ${esc(P.get().look.name)}</h3><p>Uses your boxer from <b>My Boxer</b> (base stats).</p>${s('p1')}</div>
+          <div class="card stack"><p class="touchonly gold">2-player needs a keyboard or two gamepads — there are no touch controls in this mode.</p><h3>PLAYER 1 — ${esc(P.get().look.name)}</h3><p>Uses your boxer from <b>My Boxer</b> (base stats).</p>${s('p1')}</div>
           <div class="card stack"><h3>PLAYER 2</h3>
             <input type="text" maxlength="10" value="${esc(p2.name)}" data-input="p2name" aria-label="Player 2 name">
             <span class="lbl">SKIN</span><div class="row-wrap">${swatches(BX.SKINS, p2.skin, 'p2.skin')}</div>
@@ -5088,8 +5320,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     /* ---------------- avatar creator ---------------- */
     avatar() {
       const l = P.get().look;
-      return `<div class="screen" style="max-width:430px;margin:0">
-        <div class="topbar"><h1 class="title">MY BOXER<small>Drag the boxer to rotate</small></h1></div>
+      return `<div class="screen avatar">
+        <div class="topbar"><h1 class="title">MY BOXER<small>Drag the boxer to rotate</small></h1><button class="btn primary small avatar-done" data-act="back" data-v="menu">Done</button></div>
         <div class="card stack">
           <span class="lbl">NAME</span><input type="text" maxlength="10" value="${esc(l.name)}" data-input="name" aria-label="Boxer name">
           <span class="lbl">SKIN</span><div class="row-wrap">${swatches(BX.SKINS, l.skin, 'skin')}</div>
@@ -5109,7 +5341,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     /* ---------------- controls ---------------- */
     controls() {
       const tab = opts.ctlTab;
-      const tabs = [['basics', 'How to play'], ['solo', 'Keyboard'], ['p1', 'Versus P1'], ['p2', 'Versus P2'], ['pad', 'Gamepad'], ['touch', 'Mouse & touch']];
+      const tabs = [['basics', 'How to play'], ['solo', 'Keyboard', 1], ['p1', 'Versus P1', 1], ['p2', 'Versus P2', 1], ['pad', 'Gamepad'], ['touch', 'Mouse & touch']];
       let body = '';
       if (tab === 'basics') {
         body = `<div class="help-grid">
@@ -5151,7 +5383,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       }
       return `<div class="screen">
         <div class="topbar"><h1 class="title">CONTROLS<small>Keyboard · mouse · gamepad · touch</small></h1>${back(opts.from === 'pause' ? 'pause' : 'menu')}</div>
-        <div class="tabs">${tabs.map((t) => `<span class="tab${t[0] === tab ? ' on' : ''}" tabindex="0" role="button" data-act="tab" data-v="${t[0]}">${t[1]}</span>`).join('')}</div>
+        <div class="tabs">${tabs.map((t) => `<span class="tab${t[2] ? ' kbtab' : ''}${t[0] === tab ? ' on' : ''}" tabindex="0" role="button" data-act="tab" data-v="${t[0]}">${t[1]}</span>`).join('')}</div>
         <div class="stack">${body}</div>
       </div>`;
     },
@@ -5171,12 +5403,14 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
             <p class="tiny">Auto adapts resolution and effects to your device while you fight. Low: no shadows, small crowd.</p>
             ${toggle('Battery saver (30 fps)', 'batterySaver', s.batterySaver, 'Halves the work — cooler phone, longer battery')}
             ${toggle('Camera shake', 'shake', s.shake)}${toggle('Show FPS', 'fps', s.fps)}
-            <div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>
+            ${canFullscreen() ? '<div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>' : ''}
           </div>
           <div class="card"><h3>Gameplay</h3>
             <span class="lbl">CAMERA (TAB TO CYCLE)</span><div class="row-wrap">${chips([['behind', 'Over shoulder'], ['side', 'Side'], ['high', 'High'], ['broadcast', 'Broadcast']], s.camera, 'setting', 'camera')}</div>
             ${toggle('Show key hints in fights', 'hints', s.hints)}
             <span class="lbl">TOUCH CONTROLS</span><div class="row-wrap">${chips([['auto', 'Auto'], ['on', 'Always on'], ['off', 'Off']], s.touch, 'setting', 'touch')}</div>
+            <span class="lbl">TOUCH LAYOUT</span><div class="row-wrap">${chips([['right', 'Right-handed'], ['left', 'Left-handed']], s.touchHand, 'setting', 'touchHand')}</div>
+            ${toggle('Vibration (haptics)', 'haptics', s.haptics)}
           </div>
           <div class="card"><h3>Data</h3>
             <p class="tiny">Your boxer, upgrades, career and key bindings are saved in this browser.</p>
@@ -5188,13 +5422,16 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 
     /* ---------------- pause ---------------- */
     pause() {
-      return `<div class="screen center" style="gap:12px;max-width:420px">
+      return `<div class="screen center pause">
         <h1 class="title">PAUSED</h1>
-        <button class="btn primary big" style="width:100%" data-act="resume">Resume</button>
-        <button class="btn big" style="width:100%" data-act="restart">Restart fight</button>
-        <button class="btn" style="width:100%" data-act="pauseTo" data-v="controls">Controls</button>
-        <button class="btn" style="width:100%" data-act="pauseTo" data-v="settings">Settings</button>
-        <button class="btn ghost" style="width:100%" data-act="quit">Quit to menu</button>
+        <div class="pause-btns">
+        <button class="btn primary big" data-act="resume">Resume</button>
+        <button class="btn big" data-act="restart">Restart fight</button>
+        <button class="btn" data-act="pauseTo" data-v="controls">Controls</button>
+        <button class="btn" data-act="pauseTo" data-v="settings">Settings</button>
+        ${UI.touchOn ? '<button class="btn" data-act="cycleCam">Camera</button><button class="btn" data-act="muteToggle">Sound</button>' : ''}
+        <button class="btn ghost" data-act="quit">Quit to menu</button>
+        </div>
       </div>`;
     },
 
@@ -5214,7 +5451,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
           <tr><td>${a.kds}</td><td class="k">Knockdowns</td><td>${b.kds}</td></tr></table></div>
         <p class="muted">💡 ${esc(BX.pick(tips))}</p>
         <p class="tiny muted">Your corner patches you up: some health and most stamina are restored.</p>
-        <button class="btn primary big" data-act="nextRound">Ring the bell — Round ${g.round + 1}</button>
+        <div class="actions"><button class="btn primary big" data-act="nextRound">Ring the bell — Round ${g.round + 1}</button></div>
       </div>`;
     },
 
@@ -5270,7 +5507,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
           ${row('Best combo', sa.bestCombo, sb.bestCombo, true)}
         </table></div>
         ${rewardHtml}
-        <div class="row-wrap" style="justify-content:center">${btns}</div>
+        <div class="row-wrap actions" style="justify-content:center">${btns}</div>
       </div>`;
     },
   };
@@ -5284,6 +5521,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     const keepScroll = !first ? ($('.screen', ov) || {}).scrollTop : 0;
     ov.innerHTML = screens[name]();
     ov.classList.remove('hidden', 'clear', 'dim');
+    document.body.classList.add('ov');
     if (name === 'avatar') ov.classList.add('clear');
     if (name !== 'menu' && name !== 'avatar') ov.classList.add('dim');
     const sc = $('.screen', ov);
@@ -5302,7 +5540,7 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     UI.show(UI.current, UI.params);
     if (idx >= 0) { const l = $$('[tabindex], .btn, .mini', ov); l[idx] && l[idx].focus({ preventScroll: true }); }
   };
-  UI.hideOverlay = function () { els.overlay.classList.add('hidden'); els.overlay.innerHTML = ''; UI.current = null; };
+  UI.hideOverlay = function () { els.overlay.classList.add('hidden'); els.overlay.innerHTML = ''; UI.current = null; document.body.classList.remove('ov'); };
   UI.back = function (to) {
     A.ui('back');
     if (UI.current === 'avatar') G().setViewShift(0);
@@ -5323,6 +5561,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   };
   const launch = (cfg) => { UI.hideOverlay(); G().setViewShift(0); G().startFight(cfg); };
 
+  const armed = new WeakMap();
+  const confirmTap = (el, label, fn) => { const t = armed.get(el); if (t && Date.now() - t < 3500) { armed.delete(el); fn(); return; } armed.set(el, Date.now()); const old = el.textContent; el.textContent = label; el.classList.add('primary'); setTimeout(() => { if (armed.has(el)) { armed.delete(el); el.textContent = old; el.classList.remove('primary'); } }, 3500); };
   const ACTIONS = {
     go(el) { A.ui('select'); if (el.dataset.v === 'controls' || el.dataset.v === 'settings') opts.from = 'menu'; UI.show(el.dataset.v); },
     back(el) { UI.back(el.dataset.v); },
@@ -5414,19 +5654,21 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
       if (el.dataset.k === 'quality') G().resetPerf();
       G().saveSettings();
       G().applySettings();
-      if (el.dataset.k === 'touch') UI.updateTouchVisibility();
+      if (el.dataset.k === 'touch' || el.dataset.k === 'touchHand') UI.updateTouchVisibility();
       A.ui('tick');
       UI.refresh();
     },
-    resetCareer() { if (confirm('Reset your career progress? (Your boxer and upgrades are kept.)')) { P.resetCareer(); UI.refresh(); } },
-    resetAll() { if (confirm('Erase your boxer, career, settings and key bindings?')) { BX.store.remove('profile'); BX.store.remove('settings'); BX.store.remove('bindings'); location.reload(); } },
+    resetCareer(el) { confirmTap(el, 'Tap again to reset career', () => { P.resetCareer(); UI.refresh(); UI.toast('Career reset'); }); },
+    resetAll(el) { confirmTap(el, 'Tap again to ERASE everything', () => { BX.store.remove('profile'); BX.store.remove('settings'); BX.store.remove('bindings'); location.reload(); }); },
     fullscreen() { UI.toggleFullscreen(); },
     resume() { G().resume(); },
+    cycleCam() { G().cycleCamera(); UI.toast('Camera: ' + G().settings.camera); },
+    muteToggle() { UI.toggleMute(); },
     restart() { UI.hideOverlay(); G().restartFight(); },
     pauseTo(el) { opts.from = 'pause'; UI.show(el.dataset.v); },
     quit() { UI.hideOverlay(); G().quitToMenu(); UI.show('menu'); },
     quit2() { UI.hideOverlay(); G().quitToMenu(); UI.show('menu'); },
-    nextRound() { UI.hideOverlay(); els.hud.classList.remove('hidden'); G().continueFromRest(); },
+    nextRound() { UI.hideOverlay(); els.hud.classList.remove('hidden'); G().continueFromRest(); UI.updateTouchVisibility(); },
     rematch() { UI.hideOverlay(); G().startFight(G().cfg); },
   };
 
@@ -5447,7 +5689,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     els.touch.classList.add('hidden');
     els.banner.classList.add('hidden');
     els.intro.classList.add('hidden');
+    document.body.classList.remove('intro', 'touchui');
     els.floats.innerHTML = '';
+    if (G().applyView) G().applyView();
   };
   const setW = (el, v) => { const k = (v * 100).toFixed(1); if (UI.cache[el._id] !== k) { UI.cache[el._id] = k; el.style.width = k + '%'; } };
   let idc = 0;
@@ -5499,7 +5743,11 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     }
     els.fury0.classList.toggle('ready', g.fighters[0].fury >= 99.9);
   };
-  const taskText = (txt) => txt.replace(/\{(\w+)\}/g, (m, a) => `<kbd>${esc(kn('solo', a))}</kbd>`);
+  const TOUCH_LBL = { jab: 'JAB', cross: 'CROSS', leadHook: 'LEAD HOOK', rearHook: 'REAR HOOK', leadUpper: 'LEAD UPPER', rearUpper: 'REAR UPPER', crouch: 'DUCK', block: 'BLOCK', slipL: 'SLIP ◀', slipR: 'SLIP ▶', dodge: 'DASH', special: 'FURY' };
+  const taskText = (txt) => {
+    if (UI.isTouchUI()) return esc(txt.replace('({up} {left} {down} {right})', '(left thumb stick)').replace(/\{(\w+)\}/g, (m, a) => TOUCH_LBL[a] || a)).replace(/\b(JAB|CROSS|LEAD HOOK|REAR HOOK|LEAD UPPER|REAR UPPER|DUCK|BLOCK|SLIP ◀|SLIP ▶|DASH|FURY)\b/g, '<kbd>$1</kbd>');
+    return txt.replace(/\{(\w+)\}/g, (m, a) => `<kbd>${esc(kn('solo', a))}</kbd>`);
+  };
 
   UI.buildHints = function () {
     const g = G(), versus = g.cfg && g.cfg.mode === 'versus';
@@ -5525,12 +5773,13 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     const cfg = g.cfg, [a, b] = g.fighters;
     const m = cfg.meta || [{}, {}];
     const el = els.intro;
-    el.innerHTML = `<div class="ic"><div class="corner">${esc(m[0].corner || 'RED CORNER')}</div><div class="nm">${esc(a.look.name)}</div><div class="nk">${esc(m[0].nick || '')}</div></div><div class="vs">VS</div><div class="ic b"><div class="corner">${esc(m[1].corner || 'BLUE CORNER')}</div><div class="nm">${esc(b.look.name)}</div><div class="nk">${esc(m[1].nick || '')}</div></div><div class="skip">PRESS ANY KEY TO SKIP</div>`;
+    el.innerHTML = `<div class="ic"><div class="corner">${esc(m[0].corner || 'RED CORNER')}</div><div class="nm">${esc(a.look.name)}</div><div class="nk">${esc(m[0].nick || '')}</div></div><div class="vs">VS</div><div class="ic b"><div class="corner">${esc(m[1].corner || 'BLUE CORNER')}</div><div class="nm">${esc(b.look.name)}</div><div class="nk">${esc(m[1].nick || '')}</div></div><div class="skip">${UI.isTouchUI() ? 'TAP TO SKIP' : 'PRESS ANY KEY TO SKIP'}</div>`;
     el.classList.remove('hidden');
+    document.body.classList.add('intro');
     clearTimeout(introTimer);
-    introTimer = setTimeout(() => el.classList.add('hidden'), 3500);
+    introTimer = setTimeout(() => { el.classList.add('hidden'); document.body.classList.remove('intro'); }, 3500);
   };
-  UI.hideIntro = function () { clearTimeout(introTimer); els.intro.classList.add('hidden'); };
+  UI.hideIntro = function () { clearTimeout(introTimer); els.intro.classList.add('hidden'); document.body.classList.remove('intro'); };
   UI.float = function (text, pos, cls) {
     if (!pos || pos.behind) return;
     const f = els.floats;
@@ -5558,11 +5807,12 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     if (!f || f.isAI) { m.classList.add('hidden'); return; }
     m.classList.remove('hidden');
     m.classList.toggle('locked', !canRise);
-    m.querySelector('.mt').textContent = canRise ? 'GET UP! MASH THE PUNCH KEYS' : 'STAY DOWN… RECOVER';
+    m.querySelector('.mt').textContent = canRise ? (UI.isTouchUI() ? 'GET UP! TAP THE PUNCH BUTTONS' : 'GET UP! MASH THE PUNCH KEYS') : 'STAY DOWN… RECOVER';
     m.querySelector('.mb i').style.width = Math.min(100, frac * 100) + '%';
   };
   UI.combo = function () { /* handled in hud.update */ };
   UI.hitFlash = function (power) {
+    UI.buzz(power > 0.6 ? [35, 25, 45] : 28);
     const h = els.hitflash;
     h.style.transition = 'none';
     h.style.opacity = String(0.25 + power * 0.55);
@@ -5584,9 +5834,9 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     if (on) UI.show('pause');
     else UI.hideOverlay();
   };
-  UI.showRest = function () { els.hud.classList.add('hidden'); UI.show('rest'); };
+  UI.showRest = function () { els.hud.classList.add('hidden'); els.touch.classList.add('hidden'); UI.show('rest'); };
   UI.showResult = function (res) {
-    els.hud.classList.add('hidden');
+    els.hud.classList.add('hidden'); els.touch.classList.add('hidden');
     const reward = P.record(res);
     UI.show('result', { res, reward });
     G().setViewShift(0);
@@ -5644,8 +5894,8 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   const padPrev = {};
   UI.update = function (dt) {
     if (!overlayVisible() || I.active) return;
-    if (!navigator.getGamepads) return;
-    const p = Array.from(navigator.getGamepads() || []).find((x) => x && x.connected);
+    const pads = I.getPads(); if (!pads) return;
+    const p = Array.from(pads).find((x) => x && x.connected);
     if (!p) return;
     const edge = (k, c, fn) => { if (c && !padPrev[k]) fn(); padPrev[k] = c; };
     const ax = p.axes[0] || 0, ay = p.axes[1] || 0, b = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
@@ -5659,44 +5909,116 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   };
 
   /* ================================================================== touch controls */
+  const coarseMQ = window.matchMedia ? window.matchMedia('(pointer: coarse)') : { matches: false };
+  UI.touchOn = false;
+  UI.isTouchUI = () => { const p = G().settings.touch; return p === 'on' || (p === 'auto' && (coarseMQ.matches || UI._sawTouch)); };
+  UI._sawTouch = false;
   UI.updateTouchVisibility = function () {
     const g = G();
     const pref = g.settings.touch;
-    const touchy = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    const show = g.mode === 'fight' && g.cfg && g.cfg.mode !== 'versus' && (pref === 'on' || (pref === 'auto' && touchy));
+    const touchy = coarseMQ.matches || UI._sawTouch;
+    const live = g.mode === 'fight' && g.cfg && g.cfg.mode !== 'versus' && g.phase !== 'rest' && g.phase !== 'ended';
+    const show = live && (pref === 'on' || (pref === 'auto' && touchy));
+    UI.touchOn = show;
     els.touch.classList.toggle('hidden', !show);
+    els.touch.classList.toggle('lefty', g.settings.touchHand === 'left');
     els.hud.classList.toggle('touch', show);
+    document.body.classList.toggle('touchui', show);
+    if (g.applyView) g.applyView();
     els.hints.classList.toggle('hidden', !g.settings.hints || show);
+    if (show) UI.touchLabels();
   };
+  /* Lead / rear hand labels follow the boxer's stance (a southpaw leads with the right hand). */
+  UI.touchLabels = function () {
+    const south = (P.get().look.stance === 'southpaw');
+    $$('#tpunch i[data-side]', els.touch).forEach((i) => { const lead = i.dataset.side === 'lead'; i.textContent = (lead !== south) ? 'L' : 'R'; });
+  };
+  UI.buzz = function (pattern) {
+    try { if (G().settings.haptics !== false && I.lastDevice === 'touch' && navigator.vibrate) navigator.vibrate(pattern); } catch (e) { /* unsupported (iOS) */ }
+  };
+  UI.resetTouchVisuals = function () { /* installed by setupTouch */ };
 
   function setupTouch() {
-    $$('.tb', els.touch).forEach((b) => {
-      const a = b.dataset.a;
-      const down = (e) => { e.preventDefault(); b.setPointerCapture && b.setPointerCapture(e.pointerId); I.press(0, a, 'touch:' + e.pointerId); b.classList.add('on'); I.lastDevice = 'touch'; };
-      const up = (e) => { I.release(0, a, 'touch:' + e.pointerId); b.classList.remove('on'); };
+    const MIN_LIT = 90; // ms a tapped button stays lit so quick taps are visible
+    const btns = $$('.tb', els.touch);
+    const states = new Map();
+    btns.forEach((b) => {
+      const a = b.dataset.a, isBlock = a === 'block';
+      const st = { pid: null, t: 0, latched: false, skipUp: false, litTimer: 0 };
+      states.set(b, st);
+      const down = (e) => {
+        e.preventDefault();
+        I.lastDevice = 'touch'; UI._sawTouch = true;
+        if (st.pid !== null) return;
+        if (b.setPointerCapture) try { b.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        if (isBlock && st.latched) { // second tap drops a latched guard
+          st.latched = false; st.skipUp = true; st.pid = e.pointerId;
+          I.release(0, a, 'touch:latch'); b.classList.remove('latched', 'on'); return;
+        }
+        st.pid = e.pointerId; st.t = performance.now(); st.skipUp = false;
+        clearTimeout(st.litTimer);
+        I.press(0, a, 'touch:' + e.pointerId);
+        b.classList.add('on');
+        if (!b.classList.contains('hold')) UI.buzz(8);
+      };
+      const up = (e) => {
+        if (st.pid === null || e.pointerId !== st.pid) return;
+        st.pid = null;
+        if (isBlock && !st.skipUp && performance.now() - st.t < 260) { // tap = latch guard, hold = momentary
+          st.latched = true; I.press(0, a, 'touch:latch'); b.classList.add('latched');
+        }
+        I.release(0, a, 'touch:' + e.pointerId);
+        const left = Math.max(0, MIN_LIT - (performance.now() - st.t));
+        clearTimeout(st.litTimer);
+        if (left > 0 && !isBlock) st.litTimer = setTimeout(() => b.classList.remove('on'), left); else b.classList.remove('on');
+      };
       b.addEventListener('pointerdown', down);
       b.addEventListener('pointerup', up);
       b.addEventListener('pointercancel', up);
       b.addEventListener('lostpointercapture', up);
     });
-    const joy = $('#joy'), knob = $('#joyKnob');
-    let pid = null;
-    const R = 52;
-    const move = (e) => {
-      const r = joy.getBoundingClientRect();
-      let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
-      const l = Math.hypot(dx, dy);
-      if (l > R) { dx = (dx / l) * R; dy = (dy / l) * R; }
-      knob.style.transform = `translate(${dx}px, ${dy}px)`;
-      let x = dx / R, y = -dy / R;
-      if (Math.hypot(x, y) < 0.22) { x = 0; y = 0; }
-      I.analog[0].x = x; I.analog[0].y = y;
+
+    // ---- floating joystick: spawns under the thumb anywhere in the zone, follows if the thumb drifts
+    const zone = $('#joyZone'), ring = $('#joy'), knob = $('#joyKnob');
+    let jp = null, ox = 0, oy = 0;
+    const R = 46, DEAD = 0.14, FOLLOW = 1.5;
+    const idle = () => { jp = null; ring.classList.remove('active'); ring.style.left = ''; ring.style.top = ''; knob.style.transform = ''; I.analog[0].x = 0; I.analog[0].y = 0; };
+    const drive = (e) => {
+      let dx = e.clientX - ox, dy = e.clientY - oy;
+      let l = Math.hypot(dx, dy);
+      if (l > R * FOLLOW) { const k = (l - R * FOLLOW) / l; ox += dx * k; oy += dy * k; ring.style.left = ox + 'px'; ring.style.top = oy + 'px'; dx = e.clientX - ox; dy = e.clientY - oy; l = Math.hypot(dx, dy); }
+      const m = Math.min(1, l / R);
+      const kx = l > 0 ? dx / l : 0, ky = l > 0 ? dy / l : 0;
+      knob.style.transform = `translate(${kx * m * R}px, ${ky * m * R}px)`;
+      let v = m < DEAD ? 0 : (m - DEAD) / (1 - DEAD);   // dead-zone remap: no 0 -> 23% jump
+      if (v > 0.92) v = 1;                                // full speed without pushing to the very rim
+      I.analog[0].x = kx * v; I.analog[0].y = -ky * v;
     };
-    joy.addEventListener('pointerdown', (e) => { e.preventDefault(); pid = e.pointerId; joy.setPointerCapture(pid); move(e); });
-    joy.addEventListener('pointermove', (e) => { if (e.pointerId === pid) move(e); });
-    const end = (e) => { if (e.pointerId !== pid) return; pid = null; knob.style.transform = ''; I.analog[0].x = 0; I.analog[0].y = 0; };
-    joy.addEventListener('pointerup', end);
-    joy.addEventListener('pointercancel', end);
+    zone.addEventListener('pointerdown', (e) => {
+      if (jp !== null) return;
+      e.preventDefault();
+      I.lastDevice = 'touch'; UI._sawTouch = true;
+      jp = e.pointerId;
+      try { zone.setPointerCapture(jp); } catch (err) { /* ignore */ }
+      ox = Math.min(Math.max(e.clientX, 28), window.innerWidth - 28); oy = Math.min(Math.max(e.clientY, 28), window.innerHeight - 28);
+      ring.style.left = ox + 'px'; ring.style.top = oy + 'px'; ring.classList.add('active');
+      drive(e);
+    });
+    zone.addEventListener('pointermove', (e) => { if (e.pointerId === jp) drive(e); });
+    const end = (e) => { if (e.pointerId === jp) idle(); };
+    zone.addEventListener('pointerup', end);
+    zone.addEventListener('pointercancel', end);
+    zone.addEventListener('lostpointercapture', end);
+
+    // anything that wipes the Input state (pause, resume, blur, tab hidden, new fight) must also wipe the on-screen state
+    UI.resetTouchVisuals = function () {
+      idle();
+      states.forEach((st, b) => { st.pid = null; st.latched = false; st.skipUp = false; clearTimeout(st.litTimer); b.classList.remove('on', 'latched'); });
+    };
+    I.onReleaseAll = UI.resetTouchVisuals;
+    // never let the page zoom / select while fighting (Safari fires gesture events, others honour touch-action)
+    ['gesturestart', 'gesturechange'].forEach((n) => document.addEventListener(n, (e) => e.preventDefault(), { passive: false }));
+    document.addEventListener('touchstart', (e) => { if (e.touches.length > 1 && !overlayVisible()) e.preventDefault(); }, { passive: false });
   }
 
   /* ================================================================== init */
@@ -5728,26 +6050,37 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
         opts.versus.p2.name = (t.value.toUpperCase().trim() || 'PLAYER 2').slice(0, 10);
       }
     });
-    // drag to rotate the avatar preview
-    const canvas = $('#game');
+    // drag to rotate the avatar preview (the full-screen #overlay sits above the canvas, so listen on the overlay backdrop)
     let drag = null;
-    canvas.addEventListener('pointerdown', (e) => { if (UI.current === 'avatar') { drag = { x: e.clientX, a: G().userAngle }; G()._dragging = true; canvas.setPointerCapture(e.pointerId); } });
-    canvas.addEventListener('pointermove', (e) => { if (drag) G().userAngle = drag.a - (e.clientX - drag.x) * 0.012; });
+    const ovl = els.overlay;
+    ovl.addEventListener('pointerdown', (e) => {
+      if (UI.current !== 'avatar' || !(e.target === ovl || (e.target.classList && e.target.classList.contains('screen')))) return;
+      drag = { x: e.clientX, a: G().userAngle, id: e.pointerId }; G()._dragging = true; try { ovl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
+    ovl.addEventListener('pointermove', (e) => { if (drag && e.pointerId === drag.id) G().userAngle = drag.a - (e.clientX - drag.x) * 0.012; });
     const endDrag = () => { drag = null; G()._dragging = false; };
-    canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+    ovl.addEventListener('pointerup', endDrag); ovl.addEventListener('pointercancel', endDrag);
 
     window.addEventListener('keydown', UI.onKey);
-    // never leave a fight running in a background tab
-    document.addEventListener('visibilitychange', () => {
-      const g = G();
-      if (document.hidden && g.mode === 'fight' && !g.paused && ['fight', 'knockdown', 'ready'].includes(g.phase)) g.pause();
-    });
+    window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') UI._sawTouch = true; }, true);
+    // tap anywhere to skip the intro (touch has no "any key")
+    window.addEventListener('pointerdown', () => { const g = G(); if (g.mode === 'fight' && g.phase === 'intro' && !overlayVisible()) g.skipIntro = true; }, true);
+    // never leave a fight running when the page is hidden / blurred / frozen
+    const autoPause = () => { const g = G(); if (g.mode === 'fight' && !g.paused && ['intro', 'ready', 'fight', 'knockdown'].includes(g.phase)) g.pause(); };
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { autoPause(); A.suspendAudio(); } else A.resumeAudio(); });
+    window.addEventListener('pagehide', () => { autoPause(); A.suspendAudio(); });
+    window.addEventListener('pageshow', () => A.resumeAudio());
+    document.addEventListener('freeze', autoPause);
+    window.addEventListener('blur', () => { setTimeout(() => { if (!document.hasFocus()) autoPause(); }, 120); });
+    if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) $('#bFull').classList.add('hidden');
     $('#bPause').addEventListener('click', () => G().togglePause());
     $('#bCam').addEventListener('click', () => G().cycleCamera());
     $('#bMute').addEventListener('click', () => UI.toggleMute());
     $('#bHelp').addEventListener('click', () => UI.openHelp());
     $('#bFull').addEventListener('click', () => UI.toggleFullscreen());
+    $('#bFull').classList.toggle('hidden', !canFullscreen());
     setupTouch();
+    els.intro.addEventListener('pointerdown', () => { if (G().mode === 'fight' && G().phase === 'intro') G().skipIntro = true; });
     els.fps.classList.toggle('hidden', !G().settings.fps);
 
     I.onGlobal = (name) => {
@@ -5771,14 +6104,18 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     if (g.mode !== 'fight' || g.phase === 'ended') return;
     if (!g.paused) g.pause();
     opts.from = 'pause';
-    opts.ctlTab = g.cfg.mode === 'versus' ? 'p1' : 'solo';
+    opts.ctlTab = g.cfg.mode === 'versus' ? 'p1' : (UI.isTouchUI() ? 'touch' : 'solo');
     UI.show('controls');
   };
+  UI.fsSupported = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
   UI.toggleFullscreen = function () {
     try {
       const d = document, el = d.documentElement;
-      if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
-      else (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      const req = el.requestFullscreen || el.webkitRequestFullscreen, ex = d.exitFullscreen || d.webkitExitFullscreen;
+      if (!UI.fsSupported() || !req) { UI.toast('Fullscreen is not available here'); return; }
+      const on = d.fullscreenElement || d.webkitFullscreenElement;
+      const p = on ? ex.call(d) : req.call(el);
+      if (p && p.then) p.then(() => { if (!on) { try { const o = screen.orientation; o && o.lock && o.lock('landscape').catch(() => {}); } catch (e) {} } }, () => UI.toast('Fullscreen is not available here'));
     } catch (e) { UI.toast('Fullscreen is not available here'); }
   };
   UI.toggleMute = function () {
@@ -5809,8 +6146,13 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
     } catch (e) { return false; }
   }
 
+  function loadFonts() {
+    try { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@500;600;700&display=swap'; (document.head || document.body).appendChild(l); } catch (e) {}
+  }
+
   function boot() {
     const loading = document.getElementById('loading');
+    loadFonts();   // non-blocking: a slow or blocked font host must never delay the first frame
     if (!window.THREE || !hasWebGL()) {
       loading.classList.add('done');
       document.getElementById('nogl').classList.remove('hidden');

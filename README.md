@@ -62,7 +62,20 @@ Menus work with the D-pad, `A` and `B`. In versus mode controller 1 = Player 1, 
 
 ### Touch
 
-On phones and tablets an on-screen joystick and buttons appear automatically (force them on/off in Settings).
+On phones and tablets the touch controls appear automatically (force them on/off in Settings):
+
+* **Floating joystick** — put your left thumb anywhere in the left half of the screen; the stick appears under it. Pull back to retreat.
+* **Punch buttons** (right thumb): `JAB` and `CROSS` are the big buttons; hooks and uppercuts are labelled L/R by your stance. `SLIP ◀ ▶`, `DASH` and `FURY` sit above them.
+* **BLOCK** — tap once to latch the guard (tap again to drop it) or hold it; **DUCK** is hold-to-crouch.
+* Tap anywhere to skip the intro. Left-handed layout, haptics and the camera button are in Settings / the pause menu.
+* Taps on the empty arena never throw punches, and 2-finger gestures are ignored so the page never zooms mid-fight.
+
+### Mobile performance
+
+* **Quality: Auto** (default) starts at Medium on touch devices and High on desktop and then adapts: an adaptive governor walks a ladder of cheap steps — render resolution, flashes/light beams, shadows, crowd size, 30 fps cap — and remembers the result per device. Pick Low / Medium / High yourself, or enable **Battery saver (30 fps)**, in Settings.
+* The drawing buffer is held to a per-tier pixel budget (never above the device pixel ratio), MSAA is skipped on dense screens, and the page throttles itself to 30 fps in menus / pause and on 120 Hz screens.
+* Boxers and the hall are merged into a few dozen draw calls, the crowd is chunk-culled and low-poly, particles are instanced, and the WebGL context is restored if the browser drops it.
+* On touch the over-the-shoulder camera swings wider so the opponent is never hidden behind your own back, and the picture is shifted into the free space between the thumb controls.
 
 ## How the fighting works
 
@@ -89,7 +102,8 @@ js/input.js           keyboard (rebindable) / mouse / gamepad / touch -> one int
 js/profile.js         saved boxer, upgrades, career progress
 js/model.js           procedural 3D boxer + referee builder
 js/fighter.js         combat state machine + procedural animation (2-bone IK, foot planting)
-js/arena.js           ring, hall, lights, GPU-animated instanced crowd, jumbotron
+js/perf.js            quality tiers, pixel budget, adaptive performance governor
+js/arena.js           ring, hall, lights, chunked low-poly crowd, jumbotron
 js/fx.js              particles + camera director
 js/ai.js              AI controller (same intent interface as a human)
 js/game.js            fight flow, combat resolution, knockdowns, scoring, training
@@ -99,4 +113,4 @@ tools/build-single.js bundle everything into dist/knockout-arena.html (a prebuil
 ```
 
 Saved data (boxer, upgrades, career, settings, key bindings) lives in the browser's `localStorage`.
-Quality can be lowered in **Settings** for slower devices.
+Quality can be changed in **Settings** (Auto adapts by itself).
