@@ -7,7 +7,6 @@
   <title>Knockout Arena</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -60,24 +59,25 @@
 
   <!-- ===================== touch controls ===================== -->
   <div id="touch" class="hidden">
+    <div id="joyZone"></div>
     <div id="joy"><div id="joyKnob"></div></div>
     <div id="tdef">
-      <button class="tb hold" data-a="block">BLOCK</button>
-      <button class="tb hold" data-a="crouch">DUCK</button>
+      <button class="tb hold" data-a="block"><b>BLOCK</b></button>
+      <button class="tb hold" data-a="crouch"><b>DUCK</b></button>
     </div>
     <div id="tmove">
-      <button class="tb" data-a="slipL">◀ SLIP</button>
-      <button class="tb" data-a="slipR">SLIP ▶</button>
-      <button class="tb" data-a="dodge">DASH</button>
-      <button class="tb fury" data-a="special">FURY</button>
+      <button class="tb" data-a="slipL"><b>◀</b><i>SLIP</i></button>
+      <button class="tb" data-a="slipR"><b>▶</b><i>SLIP</i></button>
+      <button class="tb" data-a="dodge"><b>DASH</b></button>
+      <button class="tb fury" data-a="special"><b>FURY</b></button>
     </div>
     <div id="tpunch">
-      <button class="tb" data-a="jab">JAB</button>
-      <button class="tb" data-a="cross">CROSS</button>
-      <button class="tb" data-a="leadHook">L HOOK</button>
-      <button class="tb" data-a="rearHook">R HOOK</button>
-      <button class="tb" data-a="leadUpper">L UPPER</button>
-      <button class="tb" data-a="rearUpper">R UPPER</button>
+      <button class="tb" data-a="leadUpper"><b>UPPER</b><i data-side="lead">L</i></button>
+      <button class="tb" data-a="leadHook"><b>HOOK</b><i data-side="lead">L</i></button>
+      <button class="tb big" data-a="jab"><b>JAB</b></button>
+      <button class="tb" data-a="rearUpper"><b>UPPER</b><i data-side="rear">R</i></button>
+      <button class="tb" data-a="rearHook"><b>HOOK</b><i data-side="rear">R</i></button>
+      <button class="tb big" data-a="cross"><b>CROSS</b></button>
     </div>
   </div>
 

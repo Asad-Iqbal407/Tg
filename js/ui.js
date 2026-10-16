@@ -10,6 +10,8 @@
   const kn = (set, action, idx) => BX.keyName((I.bindings[set][action] || [])[idx || 0]);
   const DIFF_IDS = BX.DIFFICULTY.map((d) => d.id);
 
+  const canFullscreen = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  const touchOnly = () => !!(window.matchMedia && matchMedia('(any-hover: none) and (pointer: coarse)').matches);
   const els = {};
   let bannerTimer = 0, introTimer = 0, toastTimer = 0;
 
@@ -17,7 +19,7 @@
   const opts = {
     quick: { opp: 0, diff: 'auto', rounds: 3, time: 60, upgrades: true },
     versus: { rounds: 3, time: 60, p2: { name: 'PLAYER 2', skin: '#8d5a36', hair: 'buzz', hairColor: '#15110e', trunks: '#1e5fd6', trim: '#f4f4f4', gloves: '#1e5fd6', boots: '#171717', build: 'avg', stance: 'orthodox' } },
-    ctlTab: 'basics',
+    ctlTab: (window.matchMedia && matchMedia('(any-hover: none) and (pointer: coarse)').matches) ? 'touch' : 'basics',
     from: 'menu',
   };
 
@@ -67,9 +69,10 @@
         </div>
         <div class="card">
           <h3>${esc(p.look.name)} <span class="muted tiny">· Record ${p.record.wins}W – ${p.record.losses}L – ${p.record.draws}D · ${p.record.kos} KOs</span></h3>
-          <p><b class="gold">Move</b> <span class="kbd">${kn('solo', 'up')}</span><span class="kbd">${kn('solo', 'left')}</span><span class="kbd">${kn('solo', 'down')}</span><span class="kbd">${kn('solo', 'right')}</span>
+          <div class="kbhint"><p><b class="gold">Move</b> <span class="kbd">${kn('solo', 'up')}</span><span class="kbd">${kn('solo', 'left')}</span><span class="kbd">${kn('solo', 'down')}</span><span class="kbd">${kn('solo', 'right')}</span>
           &nbsp;<b class="gold">Punch</b> <span class="kbd">${kn('solo', 'jab')}</span><span class="kbd">${kn('solo', 'cross')}</span><span class="kbd">${kn('solo', 'leadHook')}</span><span class="kbd">${kn('solo', 'rearHook')}</span><span class="kbd">${kn('solo', 'leadUpper')}</span><span class="kbd">${kn('solo', 'rearUpper')}</span></p>
-          <p><b class="gold">Block</b> <span class="kbd">${kn('solo', 'block')}</span> &nbsp;<b class="gold">Duck</b> <span class="kbd">${kn('solo', 'crouch')}</span> &nbsp;<b class="gold">Slip</b> <span class="kbd">${kn('solo', 'slipL')}</span><span class="kbd">${kn('solo', 'slipR')}</span> &nbsp;<b class="gold">Dash</b> <span class="kbd">${kn('solo', 'dodge')}</span> &nbsp;<b class="gold">FURY</b> <span class="kbd">${kn('solo', 'special')}</span></p>
+          <p><b class="gold">Block</b> <span class="kbd">${kn('solo', 'block')}</span> &nbsp;<b class="gold">Duck</b> <span class="kbd">${kn('solo', 'crouch')}</span> &nbsp;<b class="gold">Slip</b> <span class="kbd">${kn('solo', 'slipL')}</span><span class="kbd">${kn('solo', 'slipR')}</span> &nbsp;<b class="gold">Dash</b> <span class="kbd">${kn('solo', 'dodge')}</span> &nbsp;<b class="gold">FURY</b> <span class="kbd">${kn('solo', 'special')}</span></p></div>
+          <p class="touchhint"><b class="gold">Touch</b> stick = move · right-hand buttons = punches · <b>BLOCK</b>/<b>DUCK</b> = hold · <b>FURY</b> glows when full.</p>
           <p class="tiny">Gamepad and touch controls are supported too — open <b>Controls</b> for the full list and key rebinding. New here? Try <b>Training</b> first.</p>
         </div>
       </div>`;
@@ -109,7 +112,7 @@
         <span class="badge ${BX.DIFFICULTY[o.diff].id}">${BX.DIFFICULTY[o.diff].name}</span></div>`).join('');
       return `<div class="screen">
         <div class="topbar"><h1 class="title">QUICK FIGHT<small>Pick an opponent and the rules</small></h1>${back('menu')}</div>
-        <div class="split" style="grid-template-columns:1fr minmax(260px,360px)">
+        <div class="split quick">
           <div class="stack">${list}</div>
           <div class="card stack">
             <h3>RULES</h3>
@@ -130,7 +133,7 @@
       return `<div class="screen">
         <div class="topbar"><h1 class="title">2-PLAYER VERSUS<small>Two boxers, one keyboard (or two gamepads)</small></h1>${back('menu')}</div>
         <div class="grid2">
-          <div class="card stack"><h3>PLAYER 1 — ${esc(P.get().look.name)}</h3><p>Uses your boxer from <b>My Boxer</b> (base stats).</p>${s('p1')}</div>
+          <div class="card stack"><p class="touchonly gold">2-player needs a keyboard or two gamepads — there are no touch controls in this mode.</p><h3>PLAYER 1 — ${esc(P.get().look.name)}</h3><p>Uses your boxer from <b>My Boxer</b> (base stats).</p>${s('p1')}</div>
           <div class="card stack"><h3>PLAYER 2</h3>
             <input type="text" maxlength="10" value="${esc(p2.name)}" data-input="p2name" aria-label="Player 2 name">
             <span class="lbl">SKIN</span><div class="row-wrap">${swatches(BX.SKINS, p2.skin, 'p2.skin')}</div>
@@ -151,8 +154,8 @@
     /* ---------------- avatar creator ---------------- */
     avatar() {
       const l = P.get().look;
-      return `<div class="screen" style="max-width:430px;margin:0">
-        <div class="topbar"><h1 class="title">MY BOXER<small>Drag the boxer to rotate</small></h1></div>
+      return `<div class="screen avatar">
+        <div class="topbar"><h1 class="title">MY BOXER<small>Drag the boxer to rotate</small></h1><button class="btn primary small avatar-done" data-act="back" data-v="menu">Done</button></div>
         <div class="card stack">
           <span class="lbl">NAME</span><input type="text" maxlength="10" value="${esc(l.name)}" data-input="name" aria-label="Boxer name">
           <span class="lbl">SKIN</span><div class="row-wrap">${swatches(BX.SKINS, l.skin, 'skin')}</div>
@@ -172,7 +175,7 @@
     /* ---------------- controls ---------------- */
     controls() {
       const tab = opts.ctlTab;
-      const tabs = [['basics', 'How to play'], ['solo', 'Keyboard'], ['p1', 'Versus P1'], ['p2', 'Versus P2'], ['pad', 'Gamepad'], ['touch', 'Mouse & touch']];
+      const tabs = [['basics', 'How to play'], ['solo', 'Keyboard', 1], ['p1', 'Versus P1', 1], ['p2', 'Versus P2', 1], ['pad', 'Gamepad'], ['touch', 'Mouse & touch']];
       let body = '';
       if (tab === 'basics') {
         body = `<div class="help-grid">
@@ -214,7 +217,7 @@
       }
       return `<div class="screen">
         <div class="topbar"><h1 class="title">CONTROLS<small>Keyboard · mouse · gamepad · touch</small></h1>${back(opts.from === 'pause' ? 'pause' : 'menu')}</div>
-        <div class="tabs">${tabs.map((t) => `<span class="tab${t[0] === tab ? ' on' : ''}" tabindex="0" role="button" data-act="tab" data-v="${t[0]}">${t[1]}</span>`).join('')}</div>
+        <div class="tabs">${tabs.map((t) => `<span class="tab${t[2] ? ' kbtab' : ''}${t[0] === tab ? ' on' : ''}" tabindex="0" role="button" data-act="tab" data-v="${t[0]}">${t[1]}</span>`).join('')}</div>
         <div class="stack">${body}</div>
       </div>`;
     },
@@ -234,12 +237,14 @@
             <p class="tiny">Auto adapts resolution and effects to your device while you fight. Low: no shadows, small crowd.</p>
             ${toggle('Battery saver (30 fps)', 'batterySaver', s.batterySaver, 'Halves the work — cooler phone, longer battery')}
             ${toggle('Camera shake', 'shake', s.shake)}${toggle('Show FPS', 'fps', s.fps)}
-            <div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>
+            ${canFullscreen() ? '<div class="row-wrap" style="margin-top:8px"><button class="btn small" data-act="fullscreen">⛶ Toggle fullscreen</button></div>' : ''}
           </div>
           <div class="card"><h3>Gameplay</h3>
             <span class="lbl">CAMERA (TAB TO CYCLE)</span><div class="row-wrap">${chips([['behind', 'Over shoulder'], ['side', 'Side'], ['high', 'High'], ['broadcast', 'Broadcast']], s.camera, 'setting', 'camera')}</div>
             ${toggle('Show key hints in fights', 'hints', s.hints)}
             <span class="lbl">TOUCH CONTROLS</span><div class="row-wrap">${chips([['auto', 'Auto'], ['on', 'Always on'], ['off', 'Off']], s.touch, 'setting', 'touch')}</div>
+            <span class="lbl">TOUCH LAYOUT</span><div class="row-wrap">${chips([['right', 'Right-handed'], ['left', 'Left-handed']], s.touchHand, 'setting', 'touchHand')}</div>
+            ${toggle('Vibration (haptics)', 'haptics', s.haptics)}
           </div>
           <div class="card"><h3>Data</h3>
             <p class="tiny">Your boxer, upgrades, career and key bindings are saved in this browser.</p>
@@ -251,13 +256,16 @@
 
     /* ---------------- pause ---------------- */
     pause() {
-      return `<div class="screen center" style="gap:12px;max-width:420px">
+      return `<div class="screen center pause">
         <h1 class="title">PAUSED</h1>
-        <button class="btn primary big" style="width:100%" data-act="resume">Resume</button>
-        <button class="btn big" style="width:100%" data-act="restart">Restart fight</button>
-        <button class="btn" style="width:100%" data-act="pauseTo" data-v="controls">Controls</button>
-        <button class="btn" style="width:100%" data-act="pauseTo" data-v="settings">Settings</button>
-        <button class="btn ghost" style="width:100%" data-act="quit">Quit to menu</button>
+        <div class="pause-btns">
+        <button class="btn primary big" data-act="resume">Resume</button>
+        <button class="btn big" data-act="restart">Restart fight</button>
+        <button class="btn" data-act="pauseTo" data-v="controls">Controls</button>
+        <button class="btn" data-act="pauseTo" data-v="settings">Settings</button>
+        ${UI.touchOn ? '<button class="btn" data-act="cycleCam">Camera</button><button class="btn" data-act="muteToggle">Sound</button>' : ''}
+        <button class="btn ghost" data-act="quit">Quit to menu</button>
+        </div>
       </div>`;
     },
 
@@ -277,7 +285,7 @@
           <tr><td>${a.kds}</td><td class="k">Knockdowns</td><td>${b.kds}</td></tr></table></div>
         <p class="muted">💡 ${esc(BX.pick(tips))}</p>
         <p class="tiny muted">Your corner patches you up: some health and most stamina are restored.</p>
-        <button class="btn primary big" data-act="nextRound">Ring the bell — Round ${g.round + 1}</button>
+        <div class="actions"><button class="btn primary big" data-act="nextRound">Ring the bell — Round ${g.round + 1}</button></div>
       </div>`;
     },
 
@@ -333,7 +341,7 @@
           ${row('Best combo', sa.bestCombo, sb.bestCombo, true)}
         </table></div>
         ${rewardHtml}
-        <div class="row-wrap" style="justify-content:center">${btns}</div>
+        <div class="row-wrap actions" style="justify-content:center">${btns}</div>
       </div>`;
     },
   };
@@ -347,6 +355,7 @@
     const keepScroll = !first ? ($('.screen', ov) || {}).scrollTop : 0;
     ov.innerHTML = screens[name]();
     ov.classList.remove('hidden', 'clear', 'dim');
+    document.body.classList.add('ov');
     if (name === 'avatar') ov.classList.add('clear');
     if (name !== 'menu' && name !== 'avatar') ov.classList.add('dim');
     const sc = $('.screen', ov);
@@ -365,7 +374,7 @@
     UI.show(UI.current, UI.params);
     if (idx >= 0) { const l = $$('[tabindex], .btn, .mini', ov); l[idx] && l[idx].focus({ preventScroll: true }); }
   };
-  UI.hideOverlay = function () { els.overlay.classList.add('hidden'); els.overlay.innerHTML = ''; UI.current = null; };
+  UI.hideOverlay = function () { els.overlay.classList.add('hidden'); els.overlay.innerHTML = ''; UI.current = null; document.body.classList.remove('ov'); };
   UI.back = function (to) {
     A.ui('back');
     if (UI.current === 'avatar') G().setViewShift(0);
@@ -386,6 +395,8 @@
   };
   const launch = (cfg) => { UI.hideOverlay(); G().setViewShift(0); G().startFight(cfg); };
 
+  const armed = new WeakMap();
+  const confirmTap = (el, label, fn) => { const t = armed.get(el); if (t && Date.now() - t < 3500) { armed.delete(el); fn(); return; } armed.set(el, Date.now()); const old = el.textContent; el.textContent = label; el.classList.add('primary'); setTimeout(() => { if (armed.has(el)) { armed.delete(el); el.textContent = old; el.classList.remove('primary'); } }, 3500); };
   const ACTIONS = {
     go(el) { A.ui('select'); if (el.dataset.v === 'controls' || el.dataset.v === 'settings') opts.from = 'menu'; UI.show(el.dataset.v); },
     back(el) { UI.back(el.dataset.v); },
@@ -477,19 +488,21 @@
       if (el.dataset.k === 'quality') G().resetPerf();
       G().saveSettings();
       G().applySettings();
-      if (el.dataset.k === 'touch') UI.updateTouchVisibility();
+      if (el.dataset.k === 'touch' || el.dataset.k === 'touchHand') UI.updateTouchVisibility();
       A.ui('tick');
       UI.refresh();
     },
-    resetCareer() { if (confirm('Reset your career progress? (Your boxer and upgrades are kept.)')) { P.resetCareer(); UI.refresh(); } },
-    resetAll() { if (confirm('Erase your boxer, career, settings and key bindings?')) { BX.store.remove('profile'); BX.store.remove('settings'); BX.store.remove('bindings'); location.reload(); } },
+    resetCareer(el) { confirmTap(el, 'Tap again to reset career', () => { P.resetCareer(); UI.refresh(); UI.toast('Career reset'); }); },
+    resetAll(el) { confirmTap(el, 'Tap again to ERASE everything', () => { BX.store.remove('profile'); BX.store.remove('settings'); BX.store.remove('bindings'); location.reload(); }); },
     fullscreen() { UI.toggleFullscreen(); },
     resume() { G().resume(); },
+    cycleCam() { G().cycleCamera(); UI.toast('Camera: ' + G().settings.camera); },
+    muteToggle() { UI.toggleMute(); },
     restart() { UI.hideOverlay(); G().restartFight(); },
     pauseTo(el) { opts.from = 'pause'; UI.show(el.dataset.v); },
     quit() { UI.hideOverlay(); G().quitToMenu(); UI.show('menu'); },
     quit2() { UI.hideOverlay(); G().quitToMenu(); UI.show('menu'); },
-    nextRound() { UI.hideOverlay(); els.hud.classList.remove('hidden'); G().continueFromRest(); },
+    nextRound() { UI.hideOverlay(); els.hud.classList.remove('hidden'); G().continueFromRest(); UI.updateTouchVisibility(); },
     rematch() { UI.hideOverlay(); G().startFight(G().cfg); },
   };
 
@@ -510,7 +523,9 @@
     els.touch.classList.add('hidden');
     els.banner.classList.add('hidden');
     els.intro.classList.add('hidden');
+    document.body.classList.remove('intro', 'touchui');
     els.floats.innerHTML = '';
+    if (G().applyView) G().applyView();
   };
   const setW = (el, v) => { const k = (v * 100).toFixed(1); if (UI.cache[el._id] !== k) { UI.cache[el._id] = k; el.style.width = k + '%'; } };
   let idc = 0;
@@ -562,7 +577,11 @@
     }
     els.fury0.classList.toggle('ready', g.fighters[0].fury >= 99.9);
   };
-  const taskText = (txt) => txt.replace(/\{(\w+)\}/g, (m, a) => `<kbd>${esc(kn('solo', a))}</kbd>`);
+  const TOUCH_LBL = { jab: 'JAB', cross: 'CROSS', leadHook: 'LEAD HOOK', rearHook: 'REAR HOOK', leadUpper: 'LEAD UPPER', rearUpper: 'REAR UPPER', crouch: 'DUCK', block: 'BLOCK', slipL: 'SLIP ◀', slipR: 'SLIP ▶', dodge: 'DASH', special: 'FURY' };
+  const taskText = (txt) => {
+    if (UI.isTouchUI()) return esc(txt.replace('({up} {left} {down} {right})', '(left thumb stick)').replace(/\{(\w+)\}/g, (m, a) => TOUCH_LBL[a] || a)).replace(/\b(JAB|CROSS|LEAD HOOK|REAR HOOK|LEAD UPPER|REAR UPPER|DUCK|BLOCK|SLIP ◀|SLIP ▶|DASH|FURY)\b/g, '<kbd>$1</kbd>');
+    return txt.replace(/\{(\w+)\}/g, (m, a) => `<kbd>${esc(kn('solo', a))}</kbd>`);
+  };
 
   UI.buildHints = function () {
     const g = G(), versus = g.cfg && g.cfg.mode === 'versus';
@@ -588,12 +607,13 @@
     const cfg = g.cfg, [a, b] = g.fighters;
     const m = cfg.meta || [{}, {}];
     const el = els.intro;
-    el.innerHTML = `<div class="ic"><div class="corner">${esc(m[0].corner || 'RED CORNER')}</div><div class="nm">${esc(a.look.name)}</div><div class="nk">${esc(m[0].nick || '')}</div></div><div class="vs">VS</div><div class="ic b"><div class="corner">${esc(m[1].corner || 'BLUE CORNER')}</div><div class="nm">${esc(b.look.name)}</div><div class="nk">${esc(m[1].nick || '')}</div></div><div class="skip">PRESS ANY KEY TO SKIP</div>`;
+    el.innerHTML = `<div class="ic"><div class="corner">${esc(m[0].corner || 'RED CORNER')}</div><div class="nm">${esc(a.look.name)}</div><div class="nk">${esc(m[0].nick || '')}</div></div><div class="vs">VS</div><div class="ic b"><div class="corner">${esc(m[1].corner || 'BLUE CORNER')}</div><div class="nm">${esc(b.look.name)}</div><div class="nk">${esc(m[1].nick || '')}</div></div><div class="skip">${UI.isTouchUI() ? 'TAP TO SKIP' : 'PRESS ANY KEY TO SKIP'}</div>`;
     el.classList.remove('hidden');
+    document.body.classList.add('intro');
     clearTimeout(introTimer);
-    introTimer = setTimeout(() => el.classList.add('hidden'), 3500);
+    introTimer = setTimeout(() => { el.classList.add('hidden'); document.body.classList.remove('intro'); }, 3500);
   };
-  UI.hideIntro = function () { clearTimeout(introTimer); els.intro.classList.add('hidden'); };
+  UI.hideIntro = function () { clearTimeout(introTimer); els.intro.classList.add('hidden'); document.body.classList.remove('intro'); };
   UI.float = function (text, pos, cls) {
     if (!pos || pos.behind) return;
     const f = els.floats;
@@ -621,11 +641,12 @@
     if (!f || f.isAI) { m.classList.add('hidden'); return; }
     m.classList.remove('hidden');
     m.classList.toggle('locked', !canRise);
-    m.querySelector('.mt').textContent = canRise ? 'GET UP! MASH THE PUNCH KEYS' : 'STAY DOWN… RECOVER';
+    m.querySelector('.mt').textContent = canRise ? (UI.isTouchUI() ? 'GET UP! TAP THE PUNCH BUTTONS' : 'GET UP! MASH THE PUNCH KEYS') : 'STAY DOWN… RECOVER';
     m.querySelector('.mb i').style.width = Math.min(100, frac * 100) + '%';
   };
   UI.combo = function () { /* handled in hud.update */ };
   UI.hitFlash = function (power) {
+    UI.buzz(power > 0.6 ? [35, 25, 45] : 28);
     const h = els.hitflash;
     h.style.transition = 'none';
     h.style.opacity = String(0.25 + power * 0.55);
@@ -647,9 +668,9 @@
     if (on) UI.show('pause');
     else UI.hideOverlay();
   };
-  UI.showRest = function () { els.hud.classList.add('hidden'); UI.show('rest'); };
+  UI.showRest = function () { els.hud.classList.add('hidden'); els.touch.classList.add('hidden'); UI.show('rest'); };
   UI.showResult = function (res) {
-    els.hud.classList.add('hidden');
+    els.hud.classList.add('hidden'); els.touch.classList.add('hidden');
     const reward = P.record(res);
     UI.show('result', { res, reward });
     G().setViewShift(0);
@@ -707,8 +728,8 @@
   const padPrev = {};
   UI.update = function (dt) {
     if (!overlayVisible() || I.active) return;
-    if (!navigator.getGamepads) return;
-    const p = Array.from(navigator.getGamepads() || []).find((x) => x && x.connected);
+    const pads = I.getPads(); if (!pads) return;
+    const p = Array.from(pads).find((x) => x && x.connected);
     if (!p) return;
     const edge = (k, c, fn) => { if (c && !padPrev[k]) fn(); padPrev[k] = c; };
     const ax = p.axes[0] || 0, ay = p.axes[1] || 0, b = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
@@ -722,44 +743,116 @@
   };
 
   /* ================================================================== touch controls */
+  const coarseMQ = window.matchMedia ? window.matchMedia('(pointer: coarse)') : { matches: false };
+  UI.touchOn = false;
+  UI.isTouchUI = () => { const p = G().settings.touch; return p === 'on' || (p === 'auto' && (coarseMQ.matches || UI._sawTouch)); };
+  UI._sawTouch = false;
   UI.updateTouchVisibility = function () {
     const g = G();
     const pref = g.settings.touch;
-    const touchy = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    const show = g.mode === 'fight' && g.cfg && g.cfg.mode !== 'versus' && (pref === 'on' || (pref === 'auto' && touchy));
+    const touchy = coarseMQ.matches || UI._sawTouch;
+    const live = g.mode === 'fight' && g.cfg && g.cfg.mode !== 'versus' && g.phase !== 'rest' && g.phase !== 'ended';
+    const show = live && (pref === 'on' || (pref === 'auto' && touchy));
+    UI.touchOn = show;
     els.touch.classList.toggle('hidden', !show);
+    els.touch.classList.toggle('lefty', g.settings.touchHand === 'left');
     els.hud.classList.toggle('touch', show);
+    document.body.classList.toggle('touchui', show);
+    if (g.applyView) g.applyView();
     els.hints.classList.toggle('hidden', !g.settings.hints || show);
+    if (show) UI.touchLabels();
   };
+  /* Lead / rear hand labels follow the boxer's stance (a southpaw leads with the right hand). */
+  UI.touchLabels = function () {
+    const south = (P.get().look.stance === 'southpaw');
+    $$('#tpunch i[data-side]', els.touch).forEach((i) => { const lead = i.dataset.side === 'lead'; i.textContent = (lead !== south) ? 'L' : 'R'; });
+  };
+  UI.buzz = function (pattern) {
+    try { if (G().settings.haptics !== false && I.lastDevice === 'touch' && navigator.vibrate) navigator.vibrate(pattern); } catch (e) { /* unsupported (iOS) */ }
+  };
+  UI.resetTouchVisuals = function () { /* installed by setupTouch */ };
 
   function setupTouch() {
-    $$('.tb', els.touch).forEach((b) => {
-      const a = b.dataset.a;
-      const down = (e) => { e.preventDefault(); b.setPointerCapture && b.setPointerCapture(e.pointerId); I.press(0, a, 'touch:' + e.pointerId); b.classList.add('on'); I.lastDevice = 'touch'; };
-      const up = (e) => { I.release(0, a, 'touch:' + e.pointerId); b.classList.remove('on'); };
+    const MIN_LIT = 90; // ms a tapped button stays lit so quick taps are visible
+    const btns = $$('.tb', els.touch);
+    const states = new Map();
+    btns.forEach((b) => {
+      const a = b.dataset.a, isBlock = a === 'block';
+      const st = { pid: null, t: 0, latched: false, skipUp: false, litTimer: 0 };
+      states.set(b, st);
+      const down = (e) => {
+        e.preventDefault();
+        I.lastDevice = 'touch'; UI._sawTouch = true;
+        if (st.pid !== null) return;
+        if (b.setPointerCapture) try { b.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        if (isBlock && st.latched) { // second tap drops a latched guard
+          st.latched = false; st.skipUp = true; st.pid = e.pointerId;
+          I.release(0, a, 'touch:latch'); b.classList.remove('latched', 'on'); return;
+        }
+        st.pid = e.pointerId; st.t = performance.now(); st.skipUp = false;
+        clearTimeout(st.litTimer);
+        I.press(0, a, 'touch:' + e.pointerId);
+        b.classList.add('on');
+        if (!b.classList.contains('hold')) UI.buzz(8);
+      };
+      const up = (e) => {
+        if (st.pid === null || e.pointerId !== st.pid) return;
+        st.pid = null;
+        if (isBlock && !st.skipUp && performance.now() - st.t < 260) { // tap = latch guard, hold = momentary
+          st.latched = true; I.press(0, a, 'touch:latch'); b.classList.add('latched');
+        }
+        I.release(0, a, 'touch:' + e.pointerId);
+        const left = Math.max(0, MIN_LIT - (performance.now() - st.t));
+        clearTimeout(st.litTimer);
+        if (left > 0 && !isBlock) st.litTimer = setTimeout(() => b.classList.remove('on'), left); else b.classList.remove('on');
+      };
       b.addEventListener('pointerdown', down);
       b.addEventListener('pointerup', up);
       b.addEventListener('pointercancel', up);
       b.addEventListener('lostpointercapture', up);
     });
-    const joy = $('#joy'), knob = $('#joyKnob');
-    let pid = null;
-    const R = 52;
-    const move = (e) => {
-      const r = joy.getBoundingClientRect();
-      let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
-      const l = Math.hypot(dx, dy);
-      if (l > R) { dx = (dx / l) * R; dy = (dy / l) * R; }
-      knob.style.transform = `translate(${dx}px, ${dy}px)`;
-      let x = dx / R, y = -dy / R;
-      if (Math.hypot(x, y) < 0.22) { x = 0; y = 0; }
-      I.analog[0].x = x; I.analog[0].y = y;
+
+    // ---- floating joystick: spawns under the thumb anywhere in the zone, follows if the thumb drifts
+    const zone = $('#joyZone'), ring = $('#joy'), knob = $('#joyKnob');
+    let jp = null, ox = 0, oy = 0;
+    const R = 46, DEAD = 0.14, FOLLOW = 1.5;
+    const idle = () => { jp = null; ring.classList.remove('active'); ring.style.left = ''; ring.style.top = ''; knob.style.transform = ''; I.analog[0].x = 0; I.analog[0].y = 0; };
+    const drive = (e) => {
+      let dx = e.clientX - ox, dy = e.clientY - oy;
+      let l = Math.hypot(dx, dy);
+      if (l > R * FOLLOW) { const k = (l - R * FOLLOW) / l; ox += dx * k; oy += dy * k; ring.style.left = ox + 'px'; ring.style.top = oy + 'px'; dx = e.clientX - ox; dy = e.clientY - oy; l = Math.hypot(dx, dy); }
+      const m = Math.min(1, l / R);
+      const kx = l > 0 ? dx / l : 0, ky = l > 0 ? dy / l : 0;
+      knob.style.transform = `translate(${kx * m * R}px, ${ky * m * R}px)`;
+      let v = m < DEAD ? 0 : (m - DEAD) / (1 - DEAD);   // dead-zone remap: no 0 -> 23% jump
+      if (v > 0.92) v = 1;                                // full speed without pushing to the very rim
+      I.analog[0].x = kx * v; I.analog[0].y = -ky * v;
     };
-    joy.addEventListener('pointerdown', (e) => { e.preventDefault(); pid = e.pointerId; joy.setPointerCapture(pid); move(e); });
-    joy.addEventListener('pointermove', (e) => { if (e.pointerId === pid) move(e); });
-    const end = (e) => { if (e.pointerId !== pid) return; pid = null; knob.style.transform = ''; I.analog[0].x = 0; I.analog[0].y = 0; };
-    joy.addEventListener('pointerup', end);
-    joy.addEventListener('pointercancel', end);
+    zone.addEventListener('pointerdown', (e) => {
+      if (jp !== null) return;
+      e.preventDefault();
+      I.lastDevice = 'touch'; UI._sawTouch = true;
+      jp = e.pointerId;
+      try { zone.setPointerCapture(jp); } catch (err) { /* ignore */ }
+      ox = Math.min(Math.max(e.clientX, 28), window.innerWidth - 28); oy = Math.min(Math.max(e.clientY, 28), window.innerHeight - 28);
+      ring.style.left = ox + 'px'; ring.style.top = oy + 'px'; ring.classList.add('active');
+      drive(e);
+    });
+    zone.addEventListener('pointermove', (e) => { if (e.pointerId === jp) drive(e); });
+    const end = (e) => { if (e.pointerId === jp) idle(); };
+    zone.addEventListener('pointerup', end);
+    zone.addEventListener('pointercancel', end);
+    zone.addEventListener('lostpointercapture', end);
+
+    // anything that wipes the Input state (pause, resume, blur, tab hidden, new fight) must also wipe the on-screen state
+    UI.resetTouchVisuals = function () {
+      idle();
+      states.forEach((st, b) => { st.pid = null; st.latched = false; st.skipUp = false; clearTimeout(st.litTimer); b.classList.remove('on', 'latched'); });
+    };
+    I.onReleaseAll = UI.resetTouchVisuals;
+    // never let the page zoom / select while fighting (Safari fires gesture events, others honour touch-action)
+    ['gesturestart', 'gesturechange'].forEach((n) => document.addEventListener(n, (e) => e.preventDefault(), { passive: false }));
+    document.addEventListener('touchstart', (e) => { if (e.touches.length > 1 && !overlayVisible()) e.preventDefault(); }, { passive: false });
   }
 
   /* ================================================================== init */
@@ -791,26 +884,37 @@
         opts.versus.p2.name = (t.value.toUpperCase().trim() || 'PLAYER 2').slice(0, 10);
       }
     });
-    // drag to rotate the avatar preview
-    const canvas = $('#game');
+    // drag to rotate the avatar preview (the full-screen #overlay sits above the canvas, so listen on the overlay backdrop)
     let drag = null;
-    canvas.addEventListener('pointerdown', (e) => { if (UI.current === 'avatar') { drag = { x: e.clientX, a: G().userAngle }; G()._dragging = true; canvas.setPointerCapture(e.pointerId); } });
-    canvas.addEventListener('pointermove', (e) => { if (drag) G().userAngle = drag.a - (e.clientX - drag.x) * 0.012; });
+    const ovl = els.overlay;
+    ovl.addEventListener('pointerdown', (e) => {
+      if (UI.current !== 'avatar' || !(e.target === ovl || (e.target.classList && e.target.classList.contains('screen')))) return;
+      drag = { x: e.clientX, a: G().userAngle, id: e.pointerId }; G()._dragging = true; try { ovl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
+    ovl.addEventListener('pointermove', (e) => { if (drag && e.pointerId === drag.id) G().userAngle = drag.a - (e.clientX - drag.x) * 0.012; });
     const endDrag = () => { drag = null; G()._dragging = false; };
-    canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+    ovl.addEventListener('pointerup', endDrag); ovl.addEventListener('pointercancel', endDrag);
 
     window.addEventListener('keydown', UI.onKey);
-    // never leave a fight running in a background tab
-    document.addEventListener('visibilitychange', () => {
-      const g = G();
-      if (document.hidden && g.mode === 'fight' && !g.paused && ['fight', 'knockdown', 'ready'].includes(g.phase)) g.pause();
-    });
+    window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') UI._sawTouch = true; }, true);
+    // tap anywhere to skip the intro (touch has no "any key")
+    window.addEventListener('pointerdown', () => { const g = G(); if (g.mode === 'fight' && g.phase === 'intro' && !overlayVisible()) g.skipIntro = true; }, true);
+    // never leave a fight running when the page is hidden / blurred / frozen
+    const autoPause = () => { const g = G(); if (g.mode === 'fight' && !g.paused && ['intro', 'ready', 'fight', 'knockdown'].includes(g.phase)) g.pause(); };
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { autoPause(); A.suspendAudio(); } else A.resumeAudio(); });
+    window.addEventListener('pagehide', () => { autoPause(); A.suspendAudio(); });
+    window.addEventListener('pageshow', () => A.resumeAudio());
+    document.addEventListener('freeze', autoPause);
+    window.addEventListener('blur', () => { setTimeout(() => { if (!document.hasFocus()) autoPause(); }, 120); });
+    if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) $('#bFull').classList.add('hidden');
     $('#bPause').addEventListener('click', () => G().togglePause());
     $('#bCam').addEventListener('click', () => G().cycleCamera());
     $('#bMute').addEventListener('click', () => UI.toggleMute());
     $('#bHelp').addEventListener('click', () => UI.openHelp());
     $('#bFull').addEventListener('click', () => UI.toggleFullscreen());
+    $('#bFull').classList.toggle('hidden', !canFullscreen());
     setupTouch();
+    els.intro.addEventListener('pointerdown', () => { if (G().mode === 'fight' && G().phase === 'intro') G().skipIntro = true; });
     els.fps.classList.toggle('hidden', !G().settings.fps);
 
     I.onGlobal = (name) => {
@@ -834,14 +938,18 @@
     if (g.mode !== 'fight' || g.phase === 'ended') return;
     if (!g.paused) g.pause();
     opts.from = 'pause';
-    opts.ctlTab = g.cfg.mode === 'versus' ? 'p1' : 'solo';
+    opts.ctlTab = g.cfg.mode === 'versus' ? 'p1' : (UI.isTouchUI() ? 'touch' : 'solo');
     UI.show('controls');
   };
+  UI.fsSupported = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
   UI.toggleFullscreen = function () {
     try {
       const d = document, el = d.documentElement;
-      if (!d.fullscreenElement && !d.webkitFullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
-      else (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      const req = el.requestFullscreen || el.webkitRequestFullscreen, ex = d.exitFullscreen || d.webkitExitFullscreen;
+      if (!UI.fsSupported() || !req) { UI.toast('Fullscreen is not available here'); return; }
+      const on = d.fullscreenElement || d.webkitFullscreenElement;
+      const p = on ? ex.call(d) : req.call(el);
+      if (p && p.then) p.then(() => { if (!on) { try { const o = screen.orientation; o && o.lock && o.lock('landscape').catch(() => {}); } catch (e) {} } }, () => UI.toast('Fullscreen is not available here'));
     } catch (e) { UI.toast('Fullscreen is not available here'); }
   };
   UI.toggleMute = function () {

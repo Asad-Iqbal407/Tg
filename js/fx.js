@@ -143,6 +143,7 @@
   BX.FX = FX;
 
   /* ------------------------------------------------------------------ camera director */
+  const COMPACT = { phiP: 25, phiL: 36, ph1P: 45, ph1L: 30, kdP: 3.2, kdL: 2.2, RP: 4.2, RL: 4.1, HP: 2.6, HL: 2.3, fovP: 58, fovL: 50, a0: 0.55, a1: 1.35 };
   class CameraRig {
     constructor(camera) {
       this.cam = camera;
@@ -158,6 +159,8 @@
       this._p = new T.Vector3(); this._l = new T.Vector3();
       this.shakeEnabled = true;
       this.aspect = 16 / 9;
+      this.compact = false;   // touch controls on screen: wider over-the-shoulder angle so the opponent is not hidden behind the player's back
+      this.camScale = 1;      // distance multiplier for the cinematic cameras (narrow screens need more room)
     }
     setOverride(fn, dur, smooth) { this.override = { fn, dur: dur == null ? Infinity : dur, t: 0, smooth: smooth || 4 }; }
     clearOverride() { this.override = null; }
@@ -165,8 +168,28 @@
     kickFov(d) { this.fovKick = Math.min(18, this.fovKick + d); }
     snap(pos, look) { this.pos.copy(pos); this.look.copy(look); }
 
+    /** Over-the-shoulder framing for phones/tablets. Blends between a portrait and a landscape parameter set by aspect ratio;
+     *  the camera swings further to the side the closer the fighters are, so the opponent stays visible past the player's shoulder. */
+    frameCompact(a, b, outPos, outLook) {
+      const c = COMPACT, t = BX.clamp((this.aspect - c.a0) / (c.a1 - c.a0), 0, 1), mix = (p, l) => p + (l - p) * t;
+      const d = this._d.set(b.pos.x - a.pos.x, 0, b.pos.z - a.pos.z);
+      const dist = Math.max(0.5, d.length());
+      d.multiplyScalar(1 / dist);
+      const r = this._r.set(-d.z, 0, d.x);
+      const mid = this._mid.set((a.pos.x + b.pos.x) / 2, 0, (a.pos.z + b.pos.z) / 2);
+      const kd0 = mix(c.kdP, c.kdL), k = BX.clamp((kd0 - dist) / (kd0 - 0.9), 0, 1);
+      const phi = (mix(c.phiP, c.phiL) + mix(c.ph1P, c.ph1L) * k) * Math.PI / 180;
+      const R = mix(c.RP, c.RL) + 0.25 * dist, H = mix(c.HP, c.HL) + 0.1 * dist;
+      outPos.set(mid.x + (-d.x * Math.cos(phi) + r.x * Math.sin(phi)) * R, H, mid.z + (-d.z * Math.cos(phi) + r.z * Math.sin(phi)) * R);
+      outLook.set(mid.x, 1.2, mid.z);
+      outPos.x = BX.clamp(outPos.x, -6.3, 6.3);
+      outPos.z = BX.clamp(outPos.z, -6.3, 6.3);
+      return mix(c.fovP, c.fovL);
+    }
+
     /** Desired framing for the current gameplay camera mode. */
     frame(a, b, mode, outPos, outLook) {
+      if (mode === 'behind' && (this.compact || this.aspect < 1.25)) return this.frameCompact(a, b, outPos, outLook);
       const d = this._d.set(b.pos.x - a.pos.x, 0, b.pos.z - a.pos.z);
       const dist = Math.max(0.5, d.length());
       d.multiplyScalar(1 / dist);

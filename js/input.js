@@ -19,6 +19,8 @@
     onAnyKey: null,
     padState: [{}, {}],
     lastDevice: 'keyboard',
+    ptrType: 'mouse',   // pointerType of the most recent pointerdown (compat mouse events from touch must not punch)
+    onReleaseAll: null,
 
     loadBindings() {
       const saved = BX.store.get('bindings', null);
@@ -91,6 +93,7 @@
       I.queue = [[], []];
       I.analog = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
       I.padState = [{}, {}];
+      if (I.onReleaseAll) I.onReleaseAll();
     },
 
     /** Build the intent object a Fighter consumes this frame. */
@@ -146,20 +149,28 @@
     /* ------------ mouse (single player: left = jab, right = cross) ------------ */
     _mousedown(e) {
       if (!I.active || I.mode !== 'solo') return;
-      if (e.target && e.target.closest && e.target.closest('.hud-btn, #touch, #overlay, .panel')) return;
+      if (I.ptrType !== 'mouse') return; // compat mouse event synthesised from a touch / pen tap
+      if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
+      if (e.target && e.target.closest && e.target.closest('.hud-btn, .hud-btns, #hud button, #touch, #overlay, .panel')) return;
       I.lastDevice = 'keyboard';
       if (e.button === 0) I.press(0, 'jab', 'm:0');
       else if (e.button === 2) I.press(0, 'cross', 'm:2');
     },
     _mouseup(e) {
+      if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
+      if (performance.now() - (I._touchT || -1e9) < 900) return;
       if (e.button === 0) I.release(0, 'jab', 'm:0');
       else if (e.button === 2) I.release(0, 'cross', 'm:2');
     },
 
     /* ------------ gamepad ------------ */
+    /** navigator.getGamepads() throws SecurityError under a restrictive permissions policy: never let that reach the frame loop. */
+    getPads() {
+      if (I._padsBroken || !navigator.getGamepads) return null;
+      try { return navigator.getGamepads(); } catch (e) { I._padsBroken = true; return null; }
+    },
     pollPads() {
-      if (!navigator.getGamepads) return;
-      const pads = navigator.getGamepads();
+      const pads = I.getPads();
       if (!pads) return;
       const connected = [];
       for (const p of pads) if (p && p.connected) connected.push(p);
@@ -208,7 +219,10 @@
       I.loadBindings();
       window.addEventListener('keydown', I._keydown, { passive: false });
       window.addEventListener('keyup', I._keyup, { passive: false });
+      window.addEventListener('touchstart', () => { I._touchT = performance.now(); }, { passive: true, capture: true });
+      window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' || e.pointerType === 'pen') I._touchT = performance.now(); }, { passive: true, capture: true });
       window.addEventListener('blur', () => I.releaseAll());
+      window.addEventListener('pointerdown', (e) => { I.ptrType = e.pointerType || 'mouse'; }, true);
       window.addEventListener('mousedown', I._mousedown);
       window.addEventListener('mouseup', I._mouseup);
       window.addEventListener('contextmenu', (e) => { if (I.active) e.preventDefault(); });

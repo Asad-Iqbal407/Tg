@@ -127,15 +127,14 @@
         lastRender = now;
         // a stalled frame (tab restore, shader compile, GC) must not burn through hit-stop and ready timers
         const dt = dtMs > 250 ? 0 : Math.min(0.05, dtMs / 1000);
-        try {
-          BX.Input.pollPads();
-          BX.UI.update && BX.UI.update(dt);
-          if (!Game.contextLost) {
-            Game.tick(dt);
-            Game.render();
-            Game.governorFrame(now);
-          }
-        } catch (e) { console.error(e); }
+        // each stage has its own guard so one throwing stage can neither freeze the loop nor starve the others
+        try { BX.Input.pollPads(); } catch (e) { Game._err(e); }
+        try { BX.UI.update && BX.UI.update(dt); } catch (e) { Game._err(e); }
+        if (!Game.contextLost) {
+          try { Game.tick(dt); } catch (e) { Game._err(e); }
+          try { Game.render(); } catch (e) { Game._err(e); }
+          try { Game.governorFrame(now); } catch (e) { Game._err(e); }
+        }
         if (Game.settings.fps) {
           fpsT += dt; fpsN++;
           if (fpsT > 0.5) {
@@ -145,6 +144,12 @@
         }
       };
       Game._raf = requestAnimationFrame(loop);
+    },
+
+    _err(e) {
+      Game._errN = (Game._errN || 0) + 1;
+      if (Game._errN <= 3 || Game._errN % 300 === 0) console.error(e);
+      if (Game._errN === 120 && Game.mode === 'fight') { try { BX.UI.toast('Something went wrong - back to the menu'); Game.quitToMenu(); BX.UI.show('menu'); } catch (_) {} }
     },
 
     saveSettings() { BX.store.set('settings', Game.settings); },
@@ -271,9 +276,10 @@
     },
 
     cycleCamera() {
-      const order = ['behind', 'side', 'high', 'broadcast'];
+      const touch = document.body.classList.contains('touchui');
+      const order = touch ? (Game.camera.aspect < 1 ? ['behind', 'high'] : ['behind', 'side']) : ['behind', 'side', 'high', 'broadcast'];
       const cur = Game.settings.camera;
-      const nxt = order[(order.indexOf(cur) + 1) % order.length];
+      const nxt = order[(order.indexOf(cur) + 1) % order.length];   // an unlisted current mode (e.g. broadcast set on desktop) falls back to the first
       Game.settings.camera = nxt;
       Game.saveSettings();
       Game.rig.mode = Game.cameraMode();
@@ -302,12 +308,36 @@
 
     /** Shift the rendered scene sideways (used by the avatar creator so the boxer sits beside the panel). */
     setViewShift(f, fy) { Game.viewShift = f; Game.viewShiftY = fy || 0; Game.applyView(); },
+    /** Pixel offset that moves the middle of the screen to the middle of the area not covered by the touch controls. */
+    touchShift(w, h) {
+      const rect = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 ? r : null; };
+      const left = ['#tdef', '#joy'].map(rect).filter(Boolean), right = ['#tmove', '#tpunch'].map(rect).filter(Boolean);
+      if (!left.length || !right.length) return { x: 0, y: 0 };
+      if (w > h) {
+        const x0 = Math.max.apply(null, left.map((r) => r.right)), x1 = Math.min.apply(null, right.map((r) => r.left));
+        return { x: x1 > x0 ? BX.clamp(w / 2 - (x0 + x1) / 2, 0, 0.12 * w) : 0, y: 0 };
+      }
+      const top = Math.min.apply(null, left.concat(right).map((r) => r.top));
+      return { x: 0, y: BX.clamp(h / 2 - (110 + top) / 2, 0, 0.12 * h) };
+    },
     applyView() {
       const c = Game.canvas, cam = Game.camera;
       const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
-      const narrow = w < 760;
-      if (Game.viewShift && !narrow) cam.setViewOffset(w, h, -Game.viewShift * w, (Game.viewShiftY || 0) * h, w, h);
-      else cam.clearViewOffset();
+      Game.rig.compact = document.body.classList.contains('touchui');
+      Game.rig.camScale = 1 + BX.clamp((1.1 - w / h) * 0.45, 0, 0.3);
+      const sc = document.querySelector('#overlay.clear .screen.avatar');
+      if (Game.viewShift && sc && h > w * 1.05 && w < 760) {
+        // portrait phone: boxer lives in the top preview window above the form panel
+        const ph = Math.max(0.3, 1 - sc.offsetHeight / h), s = Math.min(0.62, ph * 0.9), cy = ph * 0.52;
+        cam.setViewOffset(w * s, h * s, -(1 - s) * w / 2, (s / 2 - cy) * h, w, h);
+      } else if (Game.viewShift && (w >= 760 || sc)) {
+        const f = sc ? sc.offsetWidth / (2 * w) : Game.viewShift;
+        cam.setViewOffset(w, h, -f * w, (Game.viewShiftY || 0) * h, w, h);
+      } else if (Game.rig.compact) {
+        // keep the action centred in the free area between the thumb controls
+        const s = Game.touchShift(w, h);
+        if (s.x || s.y) cam.setViewOffset(w, h, s.x, s.y, w, h); else cam.clearViewOffset();
+      } else cam.clearViewOffset();
       cam.updateProjectionMatrix();
     },
 
@@ -535,7 +565,7 @@
     tickFight(sdt, dt) {
       const fs = Game.fighters;
       const [a, b] = fs;
-      Game.phaseT += dt;
+      if (!Game.paused) Game.phaseT += dt;
       const phase = Game.phase;
 
       // ----- phase machine
@@ -884,7 +914,7 @@
       Game.kd = { f, att, count: 0, timer: -1.2, landed: false, mash: 0, rising: false, upDone: false, number: kdThisRound, resumeT: 0, tko: kdThisRound >= 3, ending: false };
       Game.combo[0].n = 0; Game.combo[1].n = 0;
       const rig = Game.rig;
-      BX.UI.banner('KNOCKDOWN!', '', 1700, 'kd');
+      BX.UI.banner('KNOCKDOWN!', '', 950, 'kd');
       A.gasp(); A.cheer(0.9);
       Game.arena.strobe = 1;
       Game.excitePulse(0.6);
@@ -896,7 +926,8 @@
       rig.setOverride((t, dt, P, L) => {
         const k = BX.ease.outCubic(Math.min(1, t / 1.4));
         const base = f.pos;
-        P.set(base.x + toCam.x * (3.4 - k * 0.5) + side.x * (1.6 - 1.6 * k), 0.9 + k * 0.9, base.z + toCam.z * (3.4 - k * 0.5) + side.z * (1.6 - 1.6 * k));
+        const cs = rig.camScale;
+        P.set(base.x + toCam.x * (3.4 - k * 0.5) * cs + side.x * (1.6 - 1.6 * k), 0.9 + k * 0.9, base.z + toCam.z * (3.4 - k * 0.5) * cs + side.z * (1.6 - 1.6 * k));
         L.set(base.x - Math.sin(f.yaw) * 0.5, 0.35, base.z - Math.cos(f.yaw) * 0.5);
         return 50;
       }, Infinity, 3.5);
@@ -941,7 +972,7 @@
           Game.endFight('KO', att.slot);
           kd.ending = true;
         }
-        BX.UI.mash(f, kd.mash / 100, kd.count >= 3);
+        if (!kd.ending) BX.UI.mash(f, kd.mash / 100, kd.count >= 3);   // endFight('KO') above already hid the prompt
       } else {
         BX.UI.mash(null);
         if (kd.upDone) {
@@ -997,6 +1028,7 @@
     afterRound() {
       if (Game.cfg.mode === 'training') { Game.beginPhase('ready'); return; }
       if (Game.round >= Game.totalRounds) { Game.decision(); return; }
+      Game.paused = false;
       Game.phase = 'rest';
       Game.phaseT = 0;
       for (const f of Game.fighters) { f.locked = true; f.forcedPose = 'corner'; }
@@ -1011,6 +1043,7 @@
 
     continueFromRest() {
       if (Game.phase !== 'rest') return;
+      Game.paused = false;
       Game.round++;
       Game.startRoundRecords();
       const [a, b] = Game.fighters;
@@ -1077,13 +1110,15 @@
         if (ko && lose) {
           const ang = 0.6 + t * 0.35;
           const cx = lose.pos.x, cz = lose.pos.z;
-          P.set(cx + Math.sin(ang) * 3.4, 1.4, cz + Math.cos(ang) * 3.4);
+          const cs = Game.rig.camScale;
+          P.set(cx + Math.sin(ang) * 3.4 * cs, 1.4, cz + Math.cos(ang) * 3.4 * cs);
           L.set(cx, 0.5, cz);
           return 48;
         }
         const f = tgt;
         const fx = Math.sin(f.yaw), fz = Math.cos(f.yaw);
-        P.set(f.pos.x + fx * 2.5 + -fz * 0.4, 1.55, f.pos.z + fz * 2.5 + fx * 0.4);
+        const cs = Game.rig.camScale;
+        P.set(f.pos.x + fx * 2.5 * cs + -fz * 0.4, 1.55, f.pos.z + fz * 2.5 * cs + fx * 0.4);
         L.set(f.pos.x, 1.45, f.pos.z);
         return 46;
       }, Infinity, 3);
@@ -1112,7 +1147,7 @@
 
     /* =================================================================== pause / quit */
     pause() {
-      if (Game.mode !== 'fight' || Game.phase === 'ended') return;
+      if (Game.mode !== 'fight' || Game.phase === 'ended' || Game.phase === 'rest' || Game.phase === 'roundEnd') return;
       Game.paused = true;
       BX.Input.releaseAll();
       BX.UI.showPause(true);
@@ -1124,7 +1159,7 @@
     },
     togglePause() {
       if (Game.mode !== 'fight') return;
-      if (Game.phase === 'rest' || Game.phase === 'ended') return;
+      if (Game.phase === 'rest' || Game.phase === 'ended' || Game.phase === 'roundEnd') return;
       Game.paused ? Game.resume() : Game.pause();
     },
     quitToMenu() {

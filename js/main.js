@@ -14,8 +14,13 @@
     } catch (e) { return false; }
   }
 
+  function loadFonts() {
+    try { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@500;600;700&display=swap'; (document.head || document.body).appendChild(l); } catch (e) {}
+  }
+
   function boot() {
     const loading = document.getElementById('loading');
+    loadFonts();   // non-blocking: a slow or blocked font host must never delay the first frame
     if (!window.THREE || !hasWebGL()) {
       loading.classList.add('done');
       document.getElementById('nogl').classList.remove('hidden');

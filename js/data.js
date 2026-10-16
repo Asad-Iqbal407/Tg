@@ -88,7 +88,7 @@
   BX.DEFAULT_SETTINGS = {
     volume: 0.8, sfx: true, music: true, shake: true, hints: true,
     camera: 'behind', quality: 'auto', batterySaver: false, rounds: 3, roundTime: 60, difficulty: 1,
-    touch: 'auto', fps: false, speech: true,
+    touch: 'auto', touchHand: 'right', haptics: true, fps: false, speech: true,
   };
 
   /** Rebindable actions (label shown in the controls screen). */

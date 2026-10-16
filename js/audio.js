@@ -6,7 +6,7 @@
   let ctx = null, master = null, sfxBus = null, musicBus = null, crowdGain = null, crowdFilter = null, noiseBuf = null;
   const st = { vol: 0.8, sfx: true, music: true, speech: true, crowdTarget: 0.12 };
   let musicTimer = null, musicStep = 0, musicNext = 0, musicMode = null;
-  let crowdLast = -1, unlockArmed = false;
+  let crowdLast = -1, unlockArmed = false, speechPrimed = false;
   const runningCbs = [];
 
   function init() {
@@ -34,6 +34,7 @@
     crowdGain = ctx.createGain(); crowdGain.gain.value = 0;
     src.connect(crowdFilter); crowdFilter.connect(crowdGain); crowdGain.connect(sfxBus);
     src.start();
+    ctx.onstatechange = () => { if (ctx.state === 'running') onRunning(); };
     return true;
   }
 
@@ -50,6 +51,11 @@
       } catch (e) { /* ignore */ }
       const p = ctx.resume && ctx.resume();
       if (p && p.then) p.then(onRunning, () => {});
+      // iOS also gates speech synthesis behind a user gesture: prime it once with a silent utterance
+      if (!speechPrimed) {
+        speechPrimed = true;
+        try { const ss = window.speechSynthesis; if (ss && typeof SpeechSynthesisUtterance !== 'undefined') { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; ss.speak(u); } } catch (e) { /* ignore */ }
+      }
     }
     onRunning();
   }
@@ -116,6 +122,9 @@
     state: st,
     init, unlock, armUnlock,
     get ready() { return !!ctx; },
+    get running() { return !!ctx && ctx.state === 'running'; },
+    suspendAudio() { if (ctx && ctx.state === 'running') { try { ctx.suspend().catch(() => {}); } catch (e) {} } try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {} },
+    resumeAudio() { if (ctx && ctx.state !== 'running') { try { ctx.resume().catch(() => {}); } catch (e) {} } if (ctx && musicTimer) musicNext = ctx.currentTime + 0.1; },
 
     setVolume(v) { st.vol = v; if (master) master.gain.value = v; },
     setSfx(on) { st.sfx = on; if (sfxBus) sfxBus.gain.value = on ? 1 : 0; },
@@ -242,9 +251,11 @@
     if (!ctx) return;
     const bpm = musicMode === 'fight' ? 118 : 98;
     const stepDur = 60 / bpm / 2; // 8th notes
-    while (musicNext < ctx.currentTime + 0.4) {
+    const now = ctx.currentTime;
+    if (musicNext < now - 0.05) musicNext = now + 0.05;   // after a stall, restart the grid instead of bursting
+    while (musicNext < now + 0.4) {
       const i = musicStep % 16;
-      const t = musicNext - ctx.currentTime;
+      const t = musicNext - now;
       if (i % 4 === 0) tone(120, 0.2, { type: 'sine', freqEnd: 40, gain: 0.55, bus: musicBus, delay: t });
       if (i % 4 === 2) noise(0.06, { type: 'highpass', freq: 6000, gain: 0.12, bus: musicBus, delay: t });
       if (i % 8 === 4) noise(0.14, { type: 'bandpass', freq: 1800, q: 0.8, gain: 0.3, bus: musicBus, delay: t });
