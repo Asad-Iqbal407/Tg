@@ -8,6 +8,8 @@ An animated Hindi short film (about 9 minutes) of the final duel between Karna a
 
 Open `index.html` in a modern browser and press **फ़िल्म देखें**. Keys: `Space` play/pause · `←` `→` 5 seconds · `F` fullscreen.
 
+A ready-made video is in `film/karna-arjun-yuddh-720p.mp4` (1280×720, 9 minutes, with voices, music and Hindi subtitles).
+
 ## What is in the film
 
 - **Characters:** Karna, Arjuna, Shri Krishna, Shalya, the serpent Ashvasena and Parashurama, painted in colour with lip movement that follows their recorded voices.
