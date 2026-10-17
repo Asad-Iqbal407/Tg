@@ -9,6 +9,8 @@ const PANEL_CELLS = 4.5;
 /** Height of the strip above the well when there is no room for a side panel. */
 const STRIP_PX = 104;
 const LABEL_PX = 18;
+/** Label room in a compact panel (under touch controls), where the labels are set larger. */
+const LABEL_PX_COMPACT = 24;
 /** Shortest stat box that still has room for its name above its value. */
 const STAT_TALL_PX = 36;
 /** Narrowest logical width that leaves a side panel room beside a well of usable size. */
@@ -34,6 +36,11 @@ export interface Panel {
   readonly h: number;
   /** True beside the well; false above it. */
   readonly side: boolean;
+  /**
+   * Under touch controls on a phone the game is drawn small, so a side panel sets its labels and stat names larger
+   * (at least 12 CSS px). Desktop keeps the smaller text.
+   */
+  readonly compact: boolean;
 }
 
 export interface TetrisLayout {
@@ -68,7 +75,7 @@ export function layoutTetris(W: number, H: number, bottom: number, withPanel: bo
       const y = centred(availH, ROWS * cell);
       return {
         well: { x, y, cell },
-        panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true },
+        panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true, compact: bottom > 0 },
       };
     }
   }
@@ -78,7 +85,7 @@ export function layoutTetris(W: number, H: number, bottom: number, withPanel: bo
   const x = centred(availW, boardW);
   return {
     well: { x, y: top + STRIP_PX + GAP, cell },
-    panel: { x, y: top, w: boardW, h: STRIP_PX, side: false },
+    panel: { x, y: top, w: boardW, h: STRIP_PX, side: false, compact: false },
   };
 }
 
@@ -239,6 +246,8 @@ interface Rect {
 
 /** Where each box and label of a panel goes. It only changes with the layout, so it is built once per layout. */
 export interface PanelSlots {
+  /** The labels and stat names are set at the compact size (see Panel.compact). */
+  readonly compact: boolean;
   readonly holdLabel: { readonly x: number; readonly y: number };
   readonly hold: Rect;
   readonly nextLabel: { readonly x: number; readonly y: number };
@@ -261,23 +270,27 @@ function sideSlots(p: Panel): PanelSlots {
   const pad = Math.max(6, Math.round(cellPx * 0.25));
   const x = p.x + pad;
   const w = p.w - 2 * pad;
+  const labelPx = p.compact ? LABEL_PX_COMPACT : LABEL_PX;
+  // How far a label's centre sits above the box it names: its text is half as tall again when compact.
+  const labelDy = p.compact ? 12 : 9;
   const nextGap = 8;
   const statH = Math.max(STAT_TALL_PX, Math.round(cellPx * 1.6));
   const statGap = 8;
   const statsH = 3 * statH + 2 * statGap;
-  const room = Math.max(0, p.h - 2 * LABEL_PX - 2 * GAP - 2 * nextGap - statsH);
+  const room = Math.max(0, p.h - 2 * labelPx - 2 * GAP - 2 * nextGap - statsH);
   const holdNatural = Math.round(w * 0.95);
   const nextNatural = Math.round(w * 0.8);
   const fit = Math.min(1, room / (holdNatural + 3 * nextNatural));
   const holdH = Math.floor(holdNatural * fit);
   const nextH = Math.floor(nextNatural * fit);
-  const holdY = p.y + LABEL_PX;
-  const nextY = holdY + holdH + LABEL_PX + GAP;
+  const holdY = p.y + labelPx;
+  const nextY = holdY + holdH + labelPx + GAP;
   const statsY = p.y + p.h - statsH;
   return {
-    holdLabel: { x, y: holdY - 9 },
+    compact: p.compact,
+    holdLabel: { x, y: holdY - labelDy },
     hold: { x, y: holdY, w, h: holdH },
-    nextLabel: { x, y: nextY - 9 },
+    nextLabel: { x, y: nextY - labelDy },
     next: [0, 1, 2].map((i) => ({ x, y: nextY + i * (nextH + nextGap), w, h: nextH })),
     stats: [0, 1, 2].map((i) => ({ x, y: statsY + i * (statH + statGap), w, h: statH })),
   };
@@ -294,6 +307,8 @@ function stripSlots(p: Panel): PanelSlots {
   const nextX = (i: number) => p.x + boxW + gap + i * (boxW + gap);
   const statsX = p.x + p.w - statsW;
   return {
+    // The strip's labels sit in its own top band and keep the small text.
+    compact: false,
     holdLabel: { x: p.x, y: p.y + 8 },
     hold: { x: p.x, y: boxY, w: boxW, h: boxH },
     nextLabel: { x: nextX(0), y: p.y + 8 },
@@ -318,9 +333,14 @@ const NAME_SHORT_TEXT: TextOpts = { size: 9, weight: 800, color: '#d8b4fe', stro
 const VALUE_SHORT_TEXT: TextOpts = { size: 13, align: 'right', stroke: null };
 /** The tall stat value. Its size is set just before each value is drawn, so one object serves every stat. */
 const VALUE_TEXT: TextOpts = { stroke: null };
+/** Compact panel (under touch controls): the same text, set so a phone's small scale still reads at 12 CSS px. */
+const LABEL_TEXT_COMPACT: TextOpts = { size: 18, weight: 800, color: '#d8b4fe', stroke: null };
+const NAME_TEXT_COMPACT: TextOpts = { size: 18, weight: 800, color: '#d8b4fe', stroke: null };
+const VALUE_MAX_PX = 18;
+const VALUE_MAX_PX_COMPACT = 20;
 
-function label(ctx: CanvasRenderingContext2D, value: string, at: { x: number; y: number }): void {
-  text(ctx, value, at.x, at.y, LABEL_TEXT);
+function label(ctx: CanvasRenderingContext2D, value: string, at: { x: number; y: number }, compact: boolean): void {
+  text(ctx, value, at.x, at.y, compact ? LABEL_TEXT_COMPACT : LABEL_TEXT);
 }
 
 /** A piece centred in a box, at the largest size that fits it. */
@@ -339,12 +359,13 @@ function drawPreview(ctx: CanvasRenderingContext2D, kind: Kind, r: Rect, look: L
 }
 
 /** One stat: the name above its value in a tall box, the name beside the value in a short one. */
-function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rect): void {
+function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rect, compact: boolean): void {
   const pad = Math.min(10, Math.round(r.w * 0.12));
   if (r.h >= STAT_TALL_PX) {
     // The value shrinks in a narrow box rather than spilling out of it (a digit is about 0.62 em wide).
-    VALUE_TEXT.size = Math.min(18, Math.floor((r.w - 2 * pad) / (0.62 * value.length)));
-    text(ctx, name, r.x + pad, r.y + 11, NAME_TEXT);
+    const max = compact ? VALUE_MAX_PX_COMPACT : VALUE_MAX_PX;
+    VALUE_TEXT.size = Math.min(max, Math.floor((r.w - 2 * pad) / (0.62 * value.length)));
+    text(ctx, name, r.x + pad, r.y + 11, compact ? NAME_TEXT_COMPACT : NAME_TEXT);
     text(ctx, value, r.x + pad, r.y + r.h - 12, VALUE_TEXT);
     return;
   }
@@ -355,10 +376,10 @@ function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rec
 
 /** Hold box, the next three pieces, and the stat lines. Works from slots built once, so it allocates nothing. */
 export function drawPanel(ctx: CanvasRenderingContext2D, slots: PanelSlots, look: Look, s: PanelState): void {
-  label(ctx, 'HOLD', slots.holdLabel);
+  label(ctx, 'HOLD', slots.holdLabel, slots.compact);
   box(ctx, slots.hold);
   if (s.hold) drawPreview(ctx, s.hold, slots.hold, look, s.holdLocked ? 0.4 : 1);
-  label(ctx, 'NEXT', slots.nextLabel);
+  label(ctx, 'NEXT', slots.nextLabel, slots.compact);
   for (let i = 0; i < slots.next.length; i++) {
     const r = slots.next[i];
     if (!r) continue;
@@ -371,6 +392,6 @@ export function drawPanel(ctx: CanvasRenderingContext2D, slots: PanelSlots, look
     if (!r) continue;
     box(ctx, r);
     const v = s.stats[i];
-    if (v) stat(ctx, v[0], v[1], r);
+    if (v) stat(ctx, v[0], v[1], r, slots.compact);
   }
 }

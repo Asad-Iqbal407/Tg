@@ -12,6 +12,8 @@ export const tetrisGame: GameDefinition = {
   width: 540,
   height: 960,
   viewport: { minWidth: 480, maxWidth: 900, minHeight: 800, maxHeight: 1100 },
+  // A stack that is tall and narrow: held sideways, a phone would show a short, narrow well.
+  orientation: 'portrait',
   accent: '#a855f7',
   gradient: ['#a855f7', '#1e1b4b'],
   controls: [
