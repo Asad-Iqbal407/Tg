@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>कर्ण अर्जुन युद्ध</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="कुरुक्षेत्र के सत्रहवें दिन कर्ण और अर्जुन का महासंग्राम — दिव्यास्त्र, हिंदी संवाद और पार्श्व-संगीत के साथ एक एनिमेटेड फ़िल्म।">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;700&family=Rozha+One&family=Tiro+Devanagari+Hindi&display=swap">
+<style>
+  /* Layout: a dark cinema hall — the film frame up top, the chapter strip under it, then the reference pages like a printed programme. */
+  :root {
+    --night: #0b0c13;      /* hall */
+    --panel: #141623;      /* raised surfaces */
+    --ink: #ece3cf;        /* parchment text */
+    --ash: #a29cab;        /* secondary text */
+    --brass: #d9a449;      /* accent: temple brass */
+    --sindoor: #d0582f;    /* warning / emphasis */
+    --line: rgba(217, 164, 73, .24);
+    --display: "Rozha One", "Tiro Devanagari Hindi", "Noto Serif Devanagari", serif;
+    --serif: "Tiro Devanagari Hindi", "Noto Serif Devanagari", "Nirmala UI", serif;
+    --sans: "Mukta", "Noto Sans Devanagari", "Nirmala UI", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { background: var(--night); }
+  body {
+    margin: 0; background: var(--night); color: var(--ink);
+    font: 400 17px/1.65 var(--sans);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 48px;
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  .masthead { max-width: 1180px; margin: 0 auto; padding-block: 28px 18px; display: grid; gap: 6px; }
+  .eyebrow { margin: 0; font: 500 14px/1.4 var(--sans); letter-spacing: .08em; color: var(--brass); }
+  h1 { margin: 0; font: 400 clamp(40px, 7vw, 76px)/1.05 var(--display); text-wrap: balance;
+       background: linear-gradient(180deg, #fff3d0 10%, #e7ac4c 60%, #9a5a1c); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { margin: 0; max-width: 62ch; color: var(--ash); font: 400 18px/1.6 var(--serif); }
+
+  /* ----- theatre ----- */
+  .theatre { max-width: 1180px; margin: 0 auto; }
+  .frame { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; container-type: inline-size; border-radius: 4px; box-shadow: 0 30px 80px -30px rgba(0,0,0,.9), 0 0 0 1px rgba(217,164,73,.12); }
+  #film { display: block; width: 100%; height: 100%; cursor: pointer; }
+  .ov { position: absolute; pointer-events: none; opacity: 0; will-change: opacity, transform; }
+  .chapter { top: 2.1cqw; left: 3cqw; display: flex; gap: 1cqw; align-items: baseline; font-family: var(--sans); }
+  .chapter .n { font-size: clamp(9px, 1.15cqw, 22px); letter-spacing: .14em; color: var(--brass); }
+  .chapter .t { font: 400 clamp(11px, 1.8cqw, 34px)/1 var(--serif); color: #f3e8d2; }
+  .sub { left: 7%; right: 7%; bottom: 1.3cqw; display: flex; flex-direction: column; align-items: center; gap: .25cqw; text-align: center; }
+  .sub .who { font: 500 clamp(10px, 1.3cqw, 25px)/1.2 var(--sans); letter-spacing: .08em; text-shadow: 0 0 .5cqw #000; }
+  .sub .line { font: 400 clamp(13px, 2.4cqw, 46px)/1.38 var(--serif); color: #fff7e8; text-wrap: balance; text-shadow: 0 0 .7cqw #000, 0 .12cqw .3cqw #000, 0 0 1.6cqw rgba(0,0,0,.8); }
+  .sub[data-who="KR"] .line { font-style: normal; }
+  .caption { left: 3cqw; bottom: 9cqw; font: 500 clamp(10px, 1.5cqw, 28px)/1.3 var(--sans); color: #ffe2b0; letter-spacing: .03em; text-shadow: 0 0 .6cqw #000; border-left: .25cqw solid var(--brass); padding-left: 1cqw; }
+  .card { top: 9.4cqw; width: min(38cqw, 520px); display: grid; gap: .35cqw; --acc: var(--brass); text-shadow: 0 0 .8cqw rgba(0,0,0,.9), 0 0 .2cqw #000; }
+  .card.left { left: 4.5cqw; } .card.right { right: 4.5cqw; text-align: right; }
+  .card .kicker { font: 500 clamp(9px, 1.2cqw, 23px)/1 var(--sans); letter-spacing: .2em; color: var(--acc); }
+  .card .title { font: 400 clamp(20px, 5.2cqw, 100px)/1.05 var(--display); color: #fff6df; text-shadow: 0 0 2.5cqw var(--acc), 0 0 .6cqw rgba(0,0,0,.8); }
+  .card .roman { font: 400 clamp(9px, 1.35cqw, 26px)/1.2 var(--sans); color: #e6d6b8; letter-spacing: .05em; padding-bottom: .5cqw; border-bottom: .12cqw solid var(--acc); }
+  .card .rows { margin: .4cqw 0 0; display: grid; grid-template-columns: auto 1fr; gap: .25cqw 1.1cqw; font: 400 clamp(9px, 1.5cqw, 29px)/1.35 var(--sans); }
+  .card.right .rows { grid-template-columns: 1fr auto; }
+  .card dt { color: var(--acc); } .card dd { margin: 0; color: #f6ecd8; }
+  @container (max-width: 520px) { .card .rows dt { display: none; } .card .rows, .card.right .rows { grid-template-columns: 1fr; } }
+
+  .start { position: absolute; inset: 0; display: grid; place-content: end center; justify-items: center; gap: 8px; text-align: center; padding-bottom: 8.5cqw;
+           background: linear-gradient(180deg, rgba(5,4,8,0) 40%, rgba(5,4,8,.78)); }
+  .bigplay { display: inline-flex; align-items: center; gap: 14px; padding: 12px 26px 12px 14px; border-radius: 999px; cursor: pointer;
+             background: rgba(14,12,18,.72); border: 1px solid rgba(217,164,73,.65); font: 500 clamp(17px, 2.4cqw, 26px)/1 var(--sans); color: #fff1d6; backdrop-filter: blur(6px); }
+  .bigplay:hover { background: rgba(40,28,14,.82); }
+  .bigplay .disc { width: clamp(38px, 6cqw, 64px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(180deg, #f4c66e, #b26b22); color: #1a0f05; }
+  .bigplay svg { width: 42%; margin-left: 8%; }
+  .hint { margin: 0; font: 400 clamp(12px, 1.6cqw, 16px)/1.4 var(--sans); color: #e3d6bd; text-shadow: 0 0 6px #000; max-width: 46ch; padding-inline: 12px; }
+
+  .controls { display: grid; grid-template-columns: auto auto auto 1fr auto auto auto auto auto; align-items: center; gap: 6px 10px; padding: 10px 2px 4px; }
+  .ctl { display: inline-grid; place-items: center; min-width: 40px; height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; color: var(--ink); gap: 6px; grid-auto-flow: column; font: 500 14px/1 var(--sans); }
+  .ctl:hover { background: var(--panel); border-color: var(--line); }
+  .ctl svg { width: 20px; height: 20px; }
+  .ctl[aria-pressed="true"] { color: var(--brass); border-color: var(--line); }
+  .ctl:disabled { opacity: .4; cursor: not-allowed; }
+  #btnPlay .i-pause { display: none; } #btnPlay[data-state="pause"] .i-pause { display: block; } #btnPlay[data-state="pause"] .i-play { display: none; }
+  .track { position: relative; min-width: 0; height: 40px; display: flex; align-items: center; }
+  #seek { width: 100%; margin: 0; appearance: none; -webkit-appearance: none; background: transparent; height: 40px; cursor: pointer; --p: 0%; }
+  #seek::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--brass) var(--p), rgba(236,227,207,.18) var(--p)); }
+  #seek::-moz-range-track { height: 4px; border-radius: 2px; background: rgba(236,227,207,.18); }
+  #seek::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--brass); }
+  #seek::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; background: #fff1d6; border: 2px solid var(--brass); }
+  #seek::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff1d6; border: 2px solid var(--brass); }
+  .marks { position: absolute; left: 7px; right: 7px; top: 50%; height: 0; pointer-events: none; }
+  .mark { position: absolute; top: -6px; width: 2px; height: 12px; background: rgba(236,227,207,.45); border-radius: 1px; }
+  .time { font: 500 14px/1 var(--sans); color: var(--ash); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #vol { width: 84px; accent-color: var(--brass); }
+  @media (max-width: 720px) {
+    .controls { grid-template-columns: auto auto auto 1fr auto auto auto; }
+    .track { grid-column: 1 / -1; grid-row: 1; }
+    #vol { display: none; }
+    .ctl .lbl { display: none; }
+  }
+  .theatre:fullscreen { background: #000; display: flex; flex-direction: column; justify-content: center; padding: 0 16px; }
+  .theatre:fullscreen .frame { width: min(100%, calc((100vh - 70px) * 16 / 9)); margin: 0 auto; border-radius: 0; }
+  .theatre:fullscreen .controls { width: min(100%, calc((100vh - 70px) * 16 / 9)); margin: 0 auto; }
+
+  /* ----- chapters ----- */
+  .chapters { max-width: 1180px; margin: 6px auto 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 6px; }
+  .chap { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 6px; background: transparent; border: 1px solid rgba(236,227,207,.08); cursor: pointer; }
+  .chap:hover { border-color: var(--line); background: var(--panel); }
+  .chap[aria-current="true"] { border-color: rgba(217,164,73,.6); background: linear-gradient(90deg, rgba(217,164,73,.12), transparent); }
+  .chap .cn { font: 400 20px/1 var(--display); color: var(--brass); }
+  .chap .ct { font: 500 15px/1.3 var(--sans); min-width: 0; }
+  .chap .ctime { font: 400 13px/1 var(--sans); color: var(--ash); font-variant-numeric: tabular-nums; }
+
+  /* ----- programme pages ----- */
+  main { max-width: 1180px; margin: 56px auto 0; display: grid; gap: 64px; }
+  section.page > header { display: grid; gap: 4px; margin-bottom: 22px; }
+  .page h2 { margin: 0; font: 400 clamp(30px, 4.5vw, 44px)/1.15 var(--display); color: #f4e6c6; text-wrap: balance; }
+  .page .sub-h { margin: 0; color: var(--ash); max-width: 64ch; font: 400 17px/1.6 var(--serif); }
+  .kosh { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 34px 40px; }
+  .astra { display: grid; gap: 6px; padding-top: 14px; border-top: 2px solid var(--c); min-width: 0; }
+  .astra .nm { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .astra h3 { margin: 0; font: 400 32px/1.1 var(--display); color: #fff3da; }
+  .astra .rm { font: 500 13px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--c); }
+  .astra .meta { margin: 0; font: 500 14px/1.4 var(--sans); color: var(--ash); }
+  .astra .meta b { color: var(--ink); font-weight: 500; }
+  .astra p { margin: 0; max-width: 62ch; }
+  .astra .here { color: #d8cdb7; font-family: var(--serif); font-size: 16px; }
+  .astra .here::before { content: "इस युद्ध में — "; color: var(--c); font-family: var(--sans); font-weight: 500; }
+  .astra.unused { --c: #6f6a78; }
+  .subgroup { margin: 40px 0 16px; font: 500 15px/1.3 var(--sans); letter-spacing: .1em; color: var(--brass); }
+  .arms { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 0 40px; margin: 0; }
+  .arms > div { padding: 14px 0; border-bottom: 1px solid rgba(236,227,207,.1); min-width: 0; }
+  .arms dt { font: 400 24px/1.2 var(--display); color: #f6e7c8; }
+  .arms dt small { font: 500 13px/1 var(--sans); color: var(--ash); letter-spacing: .06em; margin-left: 8px; }
+  .arms dd { margin: 4px 0 0; color: #d8cdb7; }
+  .truth { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 28px 40px; }
+  .truth h3 { margin: 0 0 8px; font: 500 17px/1.3 var(--sans); color: var(--brass); }
+  .truth ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; color: #d8cdb7; }
+  .truth .verse { font-family: var(--serif); color: #f3e3bf; }
+  footer { max-width: 1180px; margin: 64px auto 0; padding-top: 18px; border-top: 1px solid rgba(236,227,207,.1); color: var(--ash); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
+  kbd { font: 500 12px/1 var(--sans); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(236,227,207,.25); }
+
+  /* ----- offline renderer (MP4) ----- */
+  body.render { padding: 0; margin: 0; overflow: hidden; background: #000; }
+  body.render > :not(.theatre), body.render .controls, body.render .start, body.render script { display: none !important; }
+  body.render .theatre { max-width: none; width: 1920px; margin: 0; }
+  body.render .frame { width: 1920px; height: 1080px; border-radius: 0; box-shadow: none; }
+  @media (prefers-reduced-motion: reduce) { .chap, .ctl { transition: none; } }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <p class="eyebrow">महाभारत · कर्ण पर्व · युद्ध का सत्रहवाँ दिन</p>
+  <h1>कर्ण अर्जुन युद्ध</h1>
+  <p class="lede">सूर्यपुत्र कर्ण और इन्द्रपुत्र अर्जुन का अंतिम महासंग्राम — दिव्यास्त्र, हिंदी संवाद और पार्श्व-संगीत के साथ एक एनिमेटेड फ़िल्म।</p>
+</header>
+
+<section class="theatre" id="theatre" aria-label="फ़िल्म">
+  <div class="frame" id="frame">
+    <canvas id="film" width="1920" height="1080" aria-label="कर्ण अर्जुन युद्ध — एनिमेटेड फ़िल्म"></canvas>
+    <div class="ov chapter" id="ovChapter"><span class="n"></span><span class="t"></span></div>
+    <div class="ov card left" id="ovCard"><div class="kicker"></div><div class="title"></div><div class="roman"></div><dl class="rows"></dl></div>
+    <div class="ov caption" id="ovCap"></div>
+    <div class="ov sub" id="ovSub" aria-live="polite"><span class="who" id="ovWho"></span><span class="line" id="ovLine"></span></div>
+    <div class="start" id="start">
+      <button id="btnStart" class="bigplay" type="button">
+        <span class="disc"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.5v17l14-8.5z"/></svg></span>
+        <span id="startLabel">फ़िल्म देखें</span>
+      </button>
+      <p class="hint"><span id="dur">९ मिनट</span> · हेडफ़ोन के साथ देखें</p>
+      <p class="hint" id="voiceNote"></p>
+    </div>
+  </div>
+  <div class="controls">
+    <button class="ctl" id="btnPlay" type="button" data-state="play" aria-label="चलाएँ" title="चलाएँ / रोकें (Space)">
+      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 4v16l13-8z"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+    </button>
+    <button class="ctl" id="btnBack" type="button" aria-label="१० सेकंड पीछे" title="१० सेकंड पीछे (←)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></svg>
+    </button>
+    <button class="ctl" id="btnFwd" type="button" aria-label="१० सेकंड आगे" title="१० सेकंड आगे (→)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M20 12a8 8 0 1 1-2.4-5.7M20 4v4h-4"/></svg>
+    </button>
+    <div class="track"><input id="seek" type="range" min="0" max="400" step="0.1" value="0" aria-label="फ़िल्म में समय"><div class="marks" id="marks"></div></div>
+    <span class="time" id="time">0:00 / 0:00</span>
+    <button class="ctl" id="btnVoice" type="button" aria-pressed="false" title="हिंदी आवाज़ (V)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9h4l5-4v14l-5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+      <span class="lbl">आवाज़</span>
+    </button>
+    <button class="ctl" id="btnSubs" type="button" aria-pressed="true" title="उपशीर्षक (C)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 14h4M13 14h4M7 10h10"/></svg>
+      <span class="lbl">उपशीर्षक</span>
+    </button>
+    <input id="vol" type="range" min="0" max="1" step="0.05" value="0.9" aria-label="संगीत की आवाज़" title="संगीत की आवाज़">
+    <button class="ctl" id="btnFs" type="button" aria-label="पूर्ण स्क्रीन" title="पूर्ण स्क्रीन (F)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+  </div>
+</section>
+
+<nav class="chapters" id="chapters" aria-label="अध्याय"></nav>
+
+<main>
+  <section class="page" id="astra-kosh" aria-labelledby="h-kosh">
+    <header>
+      <h2 id="h-kosh">अस्त्र-कोश</h2>
+      <p class="sub-h">इस युद्ध में चले दिव्यास्त्र — उनके देवता, उनकी शक्ति, और कुरुक्षेत्र में उनका परिणाम। हर अस्त्र का रंग वही है जो फ़िल्म में दिखता है।</p>
+    </header>
+    <div class="kosh">
+      <article class="astra" style="--c:#ff6e1e">
+        <div class="nm"><h3>आग्नेयास्त्र</h3><span class="rm">Agneyastra</span></div>
+        <p class="meta">देवता <b>अग्निदेव</b> · चलाया <b>अर्जुन</b></p>
+        <p>मंत्र से अभिमंत्रित बाण आकाश में अग्नि बनकर बरसता है और शत्रु-सेना को भस्म करने लगता है।</p>
+        <p class="here">अर्जुन का पहला दिव्यास्त्र; कौरव सेना के बीच आग फैल गई।</p>
+      </article>
+      <article class="astra" style="--c:#50b6ff">
+        <div class="nm"><h3>वरुणास्त्र</h3><span class="rm">Varunastra</span></div>
+        <p class="meta">देवता <b>वरुणदेव</b> · चलाया <b>कर्ण</b></p>
+        <p>जल और मेघों का अस्त्र — आग्नेयास्त्र की स्वाभाविक काट।</p>
+        <p class="here">कर्ण ने घनघोर बादल और जलधारा से अर्जुन की आग बुझा दी।</p>
+      </article>
+      <article class="astra" style="--c:#c8f4ff">
+        <div class="nm"><h3>वायव्यास्त्र</h3><span class="rm">Vayavyastra</span></div>
+        <p class="meta">देवता <b>वायुदेव</b> · चलाया <b>अर्जुन</b></p>
+        <p>प्रचंड आँधी उठाने वाला अस्त्र, जो मेघ और धुआँ उड़ा देता है।</p>
+        <p class="here">अर्जुन ने कर्ण के बादल छिन्न-भिन्न कर आकाश फिर खोल दिया।</p>
+      </article>
+      <article class="astra" style="--c:#ffe26a">
+        <div class="nm"><h3>ऐन्द्रास्त्र</h3><span class="rm">Aindrastra</span></div>
+        <p class="meta">देवता <b>देवराज इन्द्र</b> · चलाया <b>अर्जुन</b></p>
+        <p>वज्र-सी गर्जना के साथ आकाश से सहस्रों बाणों की बौछार।</p>
+        <p class="here">कर्ण और कौरव सेना पर बाणों का मेघ बरस पड़ा।</p>
+      </article>
+      <article class="astra" style="--c:#d46bff">
+        <div class="nm"><h3>भार्गवास्त्र</h3><span class="rm">Bhargavastra</span></div>
+        <p class="meta">गुरु <b>भृगुवंशी परशुराम</b> · चलाया <b>कर्ण</b></p>
+        <p>परशुराम से मिली विद्या — ऐन्द्रास्त्र को निष्फल करने वाला महान अस्त्र।</p>
+        <p class="here">अर्जुन के बाण कट गए और पांचाल सेना में हाहाकार मच गया।</p>
+      </article>
+      <article class="astra" style="--c:#7dff6a">
+        <div class="nm"><h3>नागास्त्र</h3><span class="rm">Sarpamukha Bana</span></div>
+        <p class="meta">बाण में <b>नाग अश्वसेन</b> · चलाया <b>कर्ण</b></p>
+        <p>सर्पमुख बाण, जिसे कर्ण वर्षों से चंदन के चूर्ण में रखकर पूजता था। उसमें तक्षक का पुत्र अश्वसेन छिपा था, जिसकी माता खांडव-दहन में अर्जुन के हाथों मरी थी।</p>
+        <p class="here">श्रीकृष्ण ने रथ धरती में दबा दिया; बाण अर्जुन का सिर नहीं, इन्द्र का दिया किरीट ले गया। कर्ण ने इसे दोबारा चलाने से मना कर दिया।</p>
+      </article>
+      <article class="astra" style="--c:#fff3c0">
+        <div class="nm"><h3>ब्रह्मास्त्र</h3><span class="rm">Brahmastra</span></div>
+        <p class="meta">देवता <b>ब्रह्मा</b> · प्रयास <b>कर्ण</b></p>
+        <p>सबसे विनाशक अस्त्रों में एक, जिसकी विद्या कर्ण ने परशुराम से पाई थी।</p>
+        <p class="here">परशुराम के शाप से ठीक उसी घड़ी कर्ण मंत्र भूल गया।</p>
+      </article>
+      <article class="astra" style="--c:#ffd54a">
+        <div class="nm"><h3>अंजलिकास्त्र</h3><span class="rm">Anjalikastra</span></div>
+        <p class="meta">अंजलि-आकार का फलक · चलाया <b>अर्जुन</b></p>
+        <p>इन्द्र के वज्र और यम के दण्ड-सा तेजस्वी बाण, जिसे अर्जुन ने अपने तप और सत्य की शपथ के साथ छोड़ा।</p>
+        <p class="here">इसी बाण से कर्ण का वध हुआ — युद्ध का अंतिम प्रहार।</p>
+      </article>
+    </div>
+
+    <p class="subgroup">जो इस युद्ध में नहीं चले</p>
+    <div class="kosh">
+      <article class="astra unused">
+        <div class="nm"><h3>वासवी शक्ति</h3><span class="rm">Vasavi Shakti</span></div>
+        <p class="meta">इन्द्र से प्राप्त · <b>कर्ण</b></p>
+        <p>कवच-कुंडल के दान के बदले इन्द्र ने कर्ण को दी — केवल एक बार चल सकती थी।</p>
+        <p class="here">यह चौदहवें दिन की रात घटोत्कच पर चल चुकी थी, इसलिए अर्जुन के लिए शेष नहीं रही।</p>
+      </article>
+      <article class="astra unused">
+        <div class="nm"><h3>पाशुपतास्त्र</h3><span class="rm">Pashupatastra</span></div>
+        <p class="meta">भगवान शिव से प्राप्त · <b>अर्जुन</b></p>
+        <p>किरात-रूपी शिव से युद्ध के बाद अर्जुन को मिला परम अस्त्र।</p>
+        <p class="here">अर्जुन ने इसे पूरे महाभारत युद्ध में कभी नहीं चलाया।</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="page" id="ayudh" aria-labelledby="h-ayudh">
+    <header>
+      <h2 id="h-ayudh">धनुष, रथ और ध्वज</h2>
+      <p class="sub-h">फ़िल्म में हर रथ, ध्वजा और धनुष महाभारत के वर्णन के अनुसार बनाया गया है।</p>
+    </header>
+    <dl class="arms">
+      <div><dt>गांडीव <small>अर्जुन का धनुष</small></dt><dd>वरुण का धनुष, जो खांडव-दहन के समय अग्निदेव ने अर्जुन को दिलवाया; साथ में दो अक्षय तूणीर जिनके बाण कभी समाप्त नहीं होते।</dd></div>
+      <div><dt>विजय <small>कर्ण का धनुष</small></dt><dd>विश्वकर्मा ने इन्द्र के लिए बनाया; भृगुवंशी परशुराम ने इसे अपने शिष्य कर्ण को दिया।</dd></div>
+      <div><dt>कपिध्वज <small>अर्जुन की ध्वजा</small></dt><dd>ध्वजा पर स्वयं हनुमान विराजमान; रथ में श्वेत अश्व और सारथी श्रीकृष्ण।</dd></div>
+      <div><dt>हस्तिकक्ष्या <small>कर्ण की ध्वजा</small></dt><dd>हाथी बाँधने की रस्सी का चिह्न; सारथी मद्रराज शल्य, जो नकुल-सहदेव के मामा थे।</dd></div>
+      <div><dt>पाञ्चजन्य, देवदत्त <small>शंख</small></dt><dd>श्रीकृष्ण और अर्जुन के शंख, जिनकी ध्वनि से सत्रहवें दिन का युद्ध आरंभ होता है।</dd></div>
+      <div><dt>कवच-कुंडल <small>कर्ण का जन्मजात कवच</small></dt><dd>कर्ण ने इन्हें ब्राह्मण-वेश में आए इन्द्र को दान कर दिया — इसीलिए फ़िल्म में कर्ण के कानों में कुंडल नहीं हैं।</dd></div>
+    </dl>
+  </section>
+
+  <section class="page" id="pramanikta" aria-labelledby="h-truth">
+    <header>
+      <h2 id="h-truth">प्रामाणिकता</h2>
+      <p class="sub-h">कथा वेदव्यास के महाभारत (कर्ण पर्व) पर आधारित है। जहाँ लोक-परंपरा या नाटकीय स्वतंत्रता ली गई है, वह यहाँ लिखी है।</p>
+    </header>
+    <div class="truth">
+      <div>
+        <h3>व्यास महाभारत से</h3>
+        <ul>
+          <li>शल्य का सारथी बनना और उसकी हंस-कौए वाली कटु कथा</li>
+          <li>आग्नेय, वारुण, वायव्य, ऐन्द्र और भार्गव अस्त्रों की भिड़ंत</li>
+          <li>अश्वसेन वाला सर्पमुख बाण, श्रीकृष्ण का रथ दबाना और किरीट गिरना</li>
+          <li>पहिया धँसना (ब्राह्मण का शाप) और ब्रह्मास्त्र भूलना (परशुराम का शाप)</li>
+          <li>श्रीकृष्ण का उत्तर — <span class="verse">“क्व ते धर्मस्तदा गतः”</span></li>
+          <li>ध्वजा कटना, अंजलिकास्त्र, और कर्ण का तेज सूर्य में समाना</li>
+        </ul>
+      </div>
+      <div>
+        <h3>लोक-परंपरा से</h3>
+        <ul>
+          <li>“वाह कर्ण, वाह!” — कर्ण के बाणों से रथ पीछे खिसकने पर श्रीकृष्ण की प्रशंसा। यह प्रसंग व्यास के मूल पाठ में नहीं मिलता, पर कथा-वाचन और रूपांतरणों में प्रसिद्ध है।</li>
+        </ul>
+        <h3 style="margin-top:22px">नाटकीय स्वतंत्रता</h3>
+        <ul>
+          <li>संवाद हिंदी में नाट्य-रूपांतरण हैं, शब्दशः अनुवाद नहीं।</li>
+          <li>घटनाओं का क्रम कुछ मिनटों में समेटने के लिए संक्षिप्त किया गया है।</li>
+          <li>अस्त्रों के रंग और प्रभाव कलात्मक चित्रण हैं।</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>संगीत और ध्वनि ब्राउज़र में वेब ऑडियो से रचित · हिंदी आवाज़ आपके डिवाइस के वाचन-इंजन से</span>
+  <span><kbd>Space</kbd> चलाएँ/रोकें · <kbd>←</kbd><kbd>→</kbd> ५ सेकंड · <kbd>F</kbd> पूर्ण स्क्रीन · <kbd>V</kbd> आवाज़</span>
+</footer>
+
+<script src="js/engine.js"></script>
+<script src="js/script.js"></script>
+<script src="js/shots.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/player.js"></script>
+</body>
+</html>
