@@ -3,6 +3,8 @@ name: Android APK
 # Builds a debug APK of the web app inside the Capacitor Android shell and publishes it as a
 # pre-release named android-latest, so it can be downloaded straight to a phone.
 on:
+  push:
+    branches: [claude/upbeat-cray-fudovj]
   workflow_dispatch:
 
 permissions:
