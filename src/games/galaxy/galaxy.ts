@@ -1434,23 +1434,27 @@ export class GalaxyGame extends BaseGame {
     const ctx = this.ctx;
     const W = this.W;
     const { top, right, bottom, left } = this.insets;
+    const k = this.hudScale();
     // Bottom row sits above touch controls; the top row starts below them.
-    const row = this.H - 31 - bottom;
+    const row = this.H - 31 * k - bottom;
 
-    hudPill(ctx, 12 + left, 12 + top, 220, 40);
-    text(ctx, Math.floor(this.score).toLocaleString('en-US'), 30 + left, 33 + top, { size: 22 });
-    hudPill(ctx, W - 132 - right, 12 + top, 120, 40);
-    drawCoin(ctx, W - 108 - right, 32 + top, 11);
-    text(ctx, `${this.coins}`, W - 90 - right, 33 + top, { size: 20 });
-    if (this.chain >= 2) this.drawChain(12 + left, 60 + top);
+    hudPill(ctx, 12 + left, 12 + top, 220 * k, 40 * k);
+    text(ctx, Math.floor(this.score).toLocaleString('en-US'), 12 + left + 18 * k, 12 + top + 21 * k, {
+      size: 22 * k,
+    });
+    const coinX = W - 12 - right - 120 * k;
+    hudPill(ctx, coinX, 12 + top, 120 * k, 40 * k);
+    drawCoin(ctx, coinX + 24 * k, 12 + top + 20 * k, 11 * k);
+    text(ctx, `${this.coins}`, coinX + 42 * k, 12 + top + 21 * k, { size: 20 * k });
+    if (this.chain >= 2) this.drawChain(12 + left, 12 + top + 48 * k, k);
 
     if (this.boss) {
       progressBar(
         ctx,
         12 + left,
-        96 + top,
+        12 + top + 84 * k,
         W - 24 - left - right,
-        10,
+        10 * k,
         this.boss.hp / this.boss.maxHp,
         '#ff4dd2',
       );
@@ -1459,8 +1463,8 @@ export class GalaxyGame extends BaseGame {
     // Lives (bottom left)
     for (let i = 0; i < Math.max(0, this.lives); i++) {
       ctx.save();
-      ctx.translate(26 + left + i * 28, row);
-      ctx.scale(0.5, 0.5);
+      ctx.translate(26 * k + left + i * 28 * k, row);
+      ctx.scale(0.5 * k, 0.5 * k);
       ctx.fillStyle = this.skinColor('body', '#4dd9ff');
       ctx.beginPath();
       ctx.moveTo(0, -24);
@@ -1473,30 +1477,30 @@ export class GalaxyGame extends BaseGame {
     }
     // Bombs (bottom right)
     for (let i = 0; i < this.bombs; i++) {
-      const bx = W - 26 - right - i * 26;
+      const bx = W - (26 + i * 26) * k - right;
       ctx.fillStyle = '#ff9f1c';
       ctx.beginPath();
-      ctx.arc(bx, row, 9, 0, TAU);
+      ctx.arc(bx, row, 9 * k, 0, TAU);
       ctx.fill();
-      text(ctx, 'B', bx, row + 1, { size: 11, align: 'center', color: '#3a1a00', stroke: null });
+      text(ctx, 'B', bx, row + k, { size: 14 * k, align: 'center', color: '#3a1a00', stroke: null });
     }
     // Weapon level (bottom centre)
-    hudPill(ctx, W / 2 - 70, row - 17, 140, 34);
-    text(ctx, 'PWR', W / 2 - 54, row, { size: 13, color: '#9ff' });
+    hudPill(ctx, W / 2 - 70 * k, row - 17 * k, 140 * k, 34 * k);
+    text(ctx, 'PWR', W / 2 - 54 * k, row, { size: 14 * k, color: '#9ff' });
     for (let i = 0; i < MAX_WEAPON; i++) {
       fillRoundRect(
         ctx,
-        W / 2 - 18 + i * 16,
-        row - 7,
-        12,
-        14,
-        3,
+        W / 2 - (18 - i * 16) * k,
+        row - 7 * k,
+        12 * k,
+        14 * k,
+        3 * k,
         i < this.weapon ? '#4dd9ff' : 'rgba(255,255,255,0.15)',
       );
     }
     if (this.overdriveT > 0) {
-      text(ctx, 'OVERDRIVE', W / 2, row - 34, { size: 12, align: 'center', color: '#ffd23f' });
-      progressBar(ctx, W / 2 - 70, row - 28, 140, 6, this.overdriveT / this.overdriveMax, '#ffd23f');
+      text(ctx, 'OVERDRIVE', W / 2, row - 34 * k, { size: 14 * k, align: 'center', color: '#ffd23f' });
+      progressBar(ctx, W / 2 - 70 * k, row - 28 * k, 140 * k, 6 * k, this.overdriveT / this.overdriveMax, '#ffd23f');
     }
     if (this.waveBannerT < 2.2 && this.wave > 0) {
       const isBoss = this.wave % 5 === 0;
