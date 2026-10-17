@@ -12,7 +12,7 @@ export const snakeGame: GameDefinition = {
   width: 600,
   height: 800,
   // Phones in portrait get a board about as tall as the design (800 px), so their cells stay near
-  // their desktop size; landscape keeps the desktop 900 x 640 board, which is what the desktop sizes.
+  // their desktop size. Landscape stays at the desktop 900 x 640 size.
   viewport: { minWidth: 380, maxWidth: 900, minHeight: 640, maxHeight: 800 },
   orientation: 'any',
   accent: '#4ade80',

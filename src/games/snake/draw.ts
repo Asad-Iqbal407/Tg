@@ -303,7 +303,7 @@ interface TouchHudSize {
  * Phones show a portrait board at about 1x, but a landscape one (the same 900 x 640 canvas as the
  * desktop) at about 0.6x, so the landscape type is larger to keep it at 12 CSS px or more.
  */
-function touchHudSize(W: number, H: number): TouchHudSize {
+export function touchHudSize(W: number, H: number): TouchHudSize {
   return W > H
     ? { label: 22, value: 26, y: 6, h: 58, widths: [200, 150, 170], barY: 67, barH: 4 }
     : { label: 14, value: 20, y: 8, h: 50, widths: [118, 96, 110], barY: 62, barH: 6 };

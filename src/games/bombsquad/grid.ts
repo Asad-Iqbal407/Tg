@@ -53,9 +53,10 @@ export class Arena {
   private readonly queue: Int32Array;
   private stamp = 0;
 
-  constructor(width: number, height: number, rng: Rng) {
-    this.cols = oddAtLeast5(Math.floor((width - 32) / TILE));
-    this.rows = oddAtLeast5(Math.floor((height - 72) / TILE));
+  /** `tile` is the logical size of a tile: TILE for the design grid, larger where a phone needs bigger tiles. */
+  constructor(width: number, height: number, rng: Rng, tile = TILE) {
+    this.cols = oddAtLeast5(Math.floor((width - 32) / tile));
+    this.rows = oddAtLeast5(Math.floor((height - 72) / tile));
     const n = this.cols * this.rows;
     this.tiles = new Uint8Array(n);
     this.dist = new Int32Array(n);

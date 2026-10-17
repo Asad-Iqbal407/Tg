@@ -2,7 +2,7 @@ import { lerp, TAU } from '../../core/math';
 import { BaseGame } from '../base';
 import type { GameResult, GameServices } from '../types';
 import { type BotEnv, stepBot } from './bots';
-import { type Cell, Arena, BORDER, CRATE, DIRECTIONS, manhattan, MIN_BOT_SPAWN_DIST, PILLAR } from './grid';
+import { type Cell, Arena, BORDER, CRATE, DIRECTIONS, manhattan, MIN_BOT_SPAWN_DIST, PILLAR, TILE } from './grid';
 import { drawScene, type Layout, type Palette, type SceneView } from './render';
 import {
   type Bomb,
@@ -53,6 +53,11 @@ const ITEM_LABEL: Record<ItemKind, string> = {
   speed: 'SPEED UP',
   shield: 'SHIELD',
 };
+/**
+ * Rows of tiles that fit above the touch controls. A phone is short, so under the controls the arena keeps seven rows
+ * of larger tiles rather than eleven small ones: the characters stay a readable share of the screen.
+ */
+const TOUCH_ROWS = 7;
 const FIRE_COLORS = ['#fff7ed', '#fde047', '#fb923c', '#ef4444', '#7c2d12'];
 const WOOD_COLORS = ['#a16207', '#facc15', '#78350f'];
 const NO_VECTOR = { x: 0, y: 0 };
@@ -88,7 +93,12 @@ export class BombSquadGame extends BaseGame {
 
   constructor(services: GameServices) {
     super(services);
-    this.arena = new Arena(this.W, this.H, this.rng);
+    // The arena is built once, so its size is fixed by the touch controls present when the run starts.
+    const bottom = this.insets.bottom;
+    this.arena =
+      bottom > 0
+        ? new Arena(this.W, this.H - bottom, this.rng, Math.floor((this.H - 72 - bottom) / TOUCH_ROWS))
+        : new Arena(this.W, this.H, this.rng, TILE);
     const cells = this.arena.cols * this.arena.rows;
     this.occupied = new Uint8Array(cells);
     this.blastMark = new Uint32Array(cells);
@@ -181,6 +191,7 @@ export class BombSquadGame extends BaseGame {
       score: this.score,
       ammo: this.player.ammo,
       ammoMax: this.player.ammoMax,
+      compact: this.insets.bottom > 0,
     };
   }
 
@@ -189,13 +200,15 @@ export class BombSquadGame extends BaseGame {
     const key = this.insets.bottom;
     if (key !== this.layoutKey) {
       this.layoutKey = key;
+      // Under touch controls the HUD is taller (its score pill has two lines), so the arena starts lower.
+      const top = key > 0 ? 64 : 56;
       const rectW = this.W - 32;
-      const rectH = this.H - 64 - key;
+      const rectH = this.H - top - 8 - key;
       const ts = Math.max(4, Math.floor(Math.min(rectW / this.arena.cols, rectH / this.arena.rows)));
       this.lay = {
         ts,
         ox: 16 + (rectW - this.arena.cols * ts) / 2,
-        oy: 56 + (rectH - this.arena.rows * ts) / 2,
+        oy: top + (rectH - this.arena.rows * ts) / 2,
       };
     }
     return this.lay;

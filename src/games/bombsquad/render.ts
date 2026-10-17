@@ -53,9 +53,13 @@ export interface SceneView {
   score: number;
   ammo: number;
   ammoMax: number;
+  /** Touch controls are on: the game is drawn small on a phone, so the HUD text is set larger. */
+  compact: boolean;
 }
 
 const BG = '#0b1020';
+/** HUD text size under touch controls (logical px): at a phone's scale it stays at least 12 CSS px. */
+const COMPACT_HUD_PX = 20;
 /** The sprite's feet sit this far below the player's tile centre, in tile units. */
 const FEET_DROP = 0.16;
 const WALKER_BODY = '#f87171';
@@ -484,6 +488,7 @@ function drawPlayer(ctx: CanvasRenderingContext2D, v: SceneView): void {
 
 function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
   const p = v.player;
+  const big = v.compact;
   hudPill(ctx, 8, 6, 176, 44);
   for (let i = 0; i < LIVES; i++) drawHeart(ctx, 26 + i * 26, 22, 18, i < v.lives);
   // Ammo: small bombs (up to ten shown, then a count).
@@ -511,20 +516,25 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
     }
   }
   if (v.ammoMax > shown)
-    text(ctx, `+${v.ammoMax - shown}`, 24 + shown * 15, 41, { size: 11, color: '#e2e8f0' });
+    text(ctx, `+${v.ammoMax - shown}`, 24 + shown * 15, 41, { size: big ? COMPACT_HUD_PX : 11, color: '#e2e8f0' });
 
   hudPill(ctx, v.W / 2 - 62, 6, 124, 36);
-  text(ctx, `WAVE ${v.wave}`, v.W / 2, 24, { size: 18, align: 'center', color: '#fde68a' });
+  text(ctx, `WAVE ${v.wave}`, v.W / 2, 24, {
+    size: big ? COMPACT_HUD_PX : 18,
+    align: 'center',
+    color: '#fde68a',
+  });
 
-  hudPill(ctx, v.W - 196, 6, 188, 44);
-  text(ctx, formatNumber(v.score), v.W - 14, 22, { size: 20, align: 'right', color: '#ffffff' });
+  // Under touch controls the score pill has two lines (score, then power-ups), each at the larger text size.
+  hudPill(ctx, v.W - 196, 6, 188, big ? 50 : 44);
+  text(ctx, formatNumber(v.score), v.W - 14, big ? 20 : 22, { size: 20, align: 'right', color: '#ffffff' });
   const chips: string[] = [];
   if (p.blastUps > 0) chips.push(`F${p.blastUps}`);
   if (p.bombUps > 0) chips.push(`B${p.bombUps}`);
   if (p.speedUps > 0) chips.push(`S${p.speedUps}`);
   if (p.shielded) chips.push('SH');
-  text(ctx, chips.length > 0 ? chips.join('  ') : 'no power-ups', v.W - 14, 41, {
-    size: 12,
+  text(ctx, chips.length > 0 ? chips.join('  ') : 'no power-ups', v.W - 14, big ? 42 : 41, {
+    size: big ? COMPACT_HUD_PX : 12,
     align: 'right',
     weight: 700,
     color: chips.length > 0 ? '#bae6fd' : 'rgba(255,255,255,0.45)',

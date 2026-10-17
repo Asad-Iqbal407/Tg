@@ -11,7 +11,9 @@ export const bombsquadGame: GameDefinition = {
   inspiredBy: 'BombSquad',
   width: 960,
   height: 600,
-  viewport: { minWidth: 800, maxWidth: 1280, minHeight: 540, maxHeight: 760 },
+  viewport: { minWidth: 800, maxWidth: 1280, minHeight: 360, maxHeight: 760 },
+  // The arena is wider than it is tall, and a portrait phone would only show a small strip of it.
+  orientation: 'landscape',
   pointerArea: 'stage',
   accent: '#fb923c',
   gradient: ['#fb923c', '#7c2d12'],
