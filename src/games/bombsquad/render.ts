@@ -60,6 +60,11 @@ export interface SceneView {
 const BG = '#0b1020';
 /** HUD text size under touch controls (logical px): at a phone's scale it stays at least 12 CSS px. */
 const COMPACT_HUD_PX = 20;
+/**
+ * Bots are drawn this much larger under touch controls, so a walker is about 8% of a phone's short side (the bots'
+ * collision size is unchanged).
+ */
+const COMPACT_BOT_SCALE = 1.45;
 /** The sprite's feet sit this far below the player's tile centre, in tile units. */
 const FEET_DROP = 0.16;
 const WALKER_BODY = '#f87171';
@@ -383,7 +388,8 @@ function drawBot(ctx: CanvasRenderingContext2D, v: SceneView, bot: Bot): void {
   const bob = (moving ? Math.abs(Math.sin(v.time * 12 + bot.phase)) : 0) * ts * 0.06;
   const spawn = bot.wait > 0 ? Math.max(0, 1 - bot.wait / 0.5) : 1;
   const bomber = bot.kind === 'bomber';
-  const r = ts * (bomber ? 0.36 : 0.3) * (0.4 + 0.6 * spawn);
+  const size = v.compact ? COMPACT_BOT_SCALE : 1;
+  const r = ts * (bomber ? 0.36 : 0.3) * size * (0.4 + 0.6 * spawn);
   const cy = oy + bot.y * ts - bob - r * 0.2;
   const flashing = bot.flash > 0;
   const base = bomber ? BOMBER_BODY : WALKER_BODY;
