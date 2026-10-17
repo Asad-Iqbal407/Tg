@@ -339,7 +339,12 @@ const NAME_TEXT_COMPACT: TextOpts = { size: 18, weight: 800, color: '#d8b4fe', s
 const VALUE_MAX_PX = 18;
 const VALUE_MAX_PX_COMPACT = 20;
 
-function label(ctx: CanvasRenderingContext2D, value: string, at: { x: number; y: number }, compact: boolean): void {
+function label(
+  ctx: CanvasRenderingContext2D,
+  value: string,
+  at: { x: number; y: number },
+  compact: boolean,
+): void {
   text(ctx, value, at.x, at.y, compact ? LABEL_TEXT_COMPACT : LABEL_TEXT);
 }
 

@@ -2,7 +2,17 @@ import { lerp, TAU } from '../../core/math';
 import { BaseGame } from '../base';
 import type { GameResult, GameServices } from '../types';
 import { type BotEnv, stepBot } from './bots';
-import { type Cell, Arena, BORDER, CRATE, DIRECTIONS, manhattan, MIN_BOT_SPAWN_DIST, PILLAR, TILE } from './grid';
+import {
+  type Cell,
+  Arena,
+  BORDER,
+  CRATE,
+  DIRECTIONS,
+  manhattan,
+  MIN_BOT_SPAWN_DIST,
+  PILLAR,
+  TILE,
+} from './grid';
 import { drawScene, type Layout, type Palette, type SceneView } from './render';
 import {
   type Bomb,

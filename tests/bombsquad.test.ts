@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NullAudio } from '../src/core/audio';
+import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import type { Action } from '../src/core/input';
@@ -488,6 +489,7 @@ describe('rendering', () => {
       score: 0,
       ammo: 0,
       ammoMax: 1,
+      compact: false,
     };
     drawScene(ctx, view);
     return fills;
@@ -801,5 +803,62 @@ describe('robustness', () => {
         }
       }
     }
+  });
+});
+
+/**
+ * The phone test matrix as browser viewports, in CSS px. A short landscape phone keeps a 52 px rail on its left;
+ * every other size has the 56 px header on top.
+ */
+const PHONE_MATRIX: readonly [string, number, number][] = [
+  ['P1', 360, 740],
+  ['P2', 390, 844],
+  ['P3', 430, 932],
+  ['L1', 740, 360],
+  ['L2', 844, 390],
+  ['L3', 932, 430],
+  ['T1', 768, 1024],
+  ['T2', 1024, 768],
+  ['D1', 1280, 800],
+];
+
+/** The play stage (CSS px) that a browser viewport leaves for the canvas. */
+function stageOf(width: number, height: number): { w: number; h: number } {
+  return height <= 520 ? { w: width - 52, h: height } : { w: width, h: height - 56 };
+}
+
+describe('phone layout', () => {
+  const def = gameById('bombsquad');
+
+  it('is played in landscape, and its range fills a landscape stage at every size in the phone matrix', () => {
+    expect(def.orientation).toBe('landscape');
+    const range = def.viewport ?? {};
+    for (const [name, width, height] of PHONE_MATRIX) {
+      const stage = stageOf(width, height);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      expect(size.width, name).toBeGreaterThanOrEqual(range.minWidth ?? def.width);
+      expect(size.width, name).toBeLessThanOrEqual(range.maxWidth ?? def.width);
+      expect(size.height, name).toBeGreaterThanOrEqual(range.minHeight ?? def.height);
+      expect(size.height, name).toBeLessThanOrEqual(range.maxHeight ?? def.height);
+      if (width > height) {
+        expect(fittedArea(size, stage.w, stage.h) / (stage.w * stage.h), name).toBeGreaterThanOrEqual(0.85);
+      }
+    }
+  });
+
+  it('keeps seven rows of large tiles above the touch controls, so a character stays readable on a phone', () => {
+    // L2 is an 844 x 390 phone: its canvas is 1218 x 600 logical px, and the BOMB and PUNCH band reaches 118 px up it.
+    const bottom = 118;
+    const { game } = createGame(def, {
+      width: 1218,
+      height: 600,
+      insets: { top: 0, right: 0, bottom, left: 0 },
+    });
+    const i = internals(game);
+    const lay = i.layout();
+    expect(i.arena.rows).toBe(7);
+    expect(lay.oy + i.arena.rows * lay.ts).toBeLessThanOrEqual(600 - bottom);
+    // A character is about 0.9 of a tile tall. At this canvas scale (390 / 600) it must be 8% of the short side.
+    expect(0.9 * lay.ts * (390 / 600)).toBeGreaterThanOrEqual(0.08 * 390);
   });
 });

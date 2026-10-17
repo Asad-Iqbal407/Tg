@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type Action, Input, type PointerState, type SwipeDir } from '../src/core/input';
 import { NullAudio } from '../src/core/audio';
+import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
 import { Board, COLS, HIDDEN_ROWS, ROWS } from '../src/games/tetris/board';
 import { layoutTetris, panelSlots } from '../src/games/tetris/draw';
@@ -1180,6 +1181,64 @@ describe('layout and rendering', () => {
         if (i % 20 === 0) game.render();
       }
       expect(() => game.render()).not.toThrow();
+    }
+  });
+});
+
+/**
+ * The phone test matrix as browser viewports, in CSS px. A short landscape phone keeps a 52 px rail on its left;
+ * every other size has the 56 px header on top.
+ */
+const PHONE_MATRIX: readonly [string, number, number][] = [
+  ['P1', 360, 740],
+  ['P2', 390, 844],
+  ['P3', 430, 932],
+  ['L1', 740, 360],
+  ['L2', 844, 390],
+  ['L3', 932, 430],
+  ['T1', 768, 1024],
+  ['T2', 1024, 768],
+  ['D1', 1280, 800],
+];
+
+/** The play stage (CSS px) that a browser viewport leaves for the canvas. */
+function stageOf(width: number, height: number): { w: number; h: number } {
+  return height <= 520 ? { w: width - 52, h: height } : { w: width, h: height - 56 };
+}
+
+describe('phone layout', () => {
+  it('is played in portrait, and its range fills a portrait stage at every size in the phone matrix', () => {
+    expect(tetrisGame.orientation).toBe('portrait');
+    const range = tetrisGame.viewport ?? {};
+    for (const [name, width, height] of PHONE_MATRIX) {
+      const stage = stageOf(width, height);
+      const size = chooseLogicalSize(tetrisGame, stage.w, stage.h);
+      expect(size.width, name).toBeGreaterThanOrEqual(range.minWidth ?? tetrisGame.width);
+      expect(size.width, name).toBeLessThanOrEqual(range.maxWidth ?? tetrisGame.width);
+      expect(size.height, name).toBeGreaterThanOrEqual(range.minHeight ?? tetrisGame.height);
+      expect(size.height, name).toBeLessThanOrEqual(range.maxHeight ?? tetrisGame.height);
+      if (height > width) {
+        expect(fittedArea(size, stage.w, stage.h) / (stage.w * stage.h), name).toBeGreaterThanOrEqual(0.85);
+      }
+    }
+  });
+
+  it('keeps the side panel beside the well, clear of the touch controls, at P1 and P2', () => {
+    // The canvas of a 360 or 390 px phone is 540 logical px wide. The bottom inset is the touch band the shell reports.
+    const cases: [number, number, number][] = [
+      [540, 1036, 111],
+      [540, 1100, 109],
+    ];
+    for (const [width, height, bottom] of cases) {
+      const { well, panel } = layoutTetris(width, height, bottom, true);
+      if (!panel) throw new Error('no panel');
+      expect(panel.side).toBe(true);
+      expect(panelSlots(panel).compact).toBe(true);
+      // The stat strip is beside the well, not over it, and both sit above the control band.
+      expect(panel.x).toBeGreaterThanOrEqual(well.x + COLS * well.cell);
+      expect(panel.x + panel.w).toBeLessThanOrEqual(width - 16);
+      expect(well.y + ROWS * well.cell).toBeLessThanOrEqual(height - bottom);
+      expect(panel.y + panel.h).toBeLessThanOrEqual(height - bottom);
     }
   });
 });

@@ -516,7 +516,10 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
     }
   }
   if (v.ammoMax > shown)
-    text(ctx, `+${v.ammoMax - shown}`, 24 + shown * 15, 41, { size: big ? COMPACT_HUD_PX : 11, color: '#e2e8f0' });
+    text(ctx, `+${v.ammoMax - shown}`, 24 + shown * 15, 41, {
+      size: big ? COMPACT_HUD_PX : 11,
+      color: '#e2e8f0',
+    });
 
   hudPill(ctx, v.W / 2 - 62, 6, 124, 36);
   text(ctx, `WAVE ${v.wave}`, v.W / 2, 24, {
@@ -526,7 +529,8 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
   });
 
   // Under touch controls the score pill has two lines (score, then power-ups), each at the larger text size.
-  hudPill(ctx, v.W - 196, 6, 188, big ? 50 : 44);
+  const pillW = big ? 212 : 188;
+  hudPill(ctx, v.W - pillW - 8, 6, pillW, big ? 50 : 44);
   text(ctx, formatNumber(v.score), v.W - 14, big ? 20 : 22, { size: 20, align: 'right', color: '#ffffff' });
   const chips: string[] = [];
   if (p.blastUps > 0) chips.push(`F${p.blastUps}`);
