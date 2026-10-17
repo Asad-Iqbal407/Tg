@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AudioLike, PlayOptions, SfxName } from '../src/core/audio';
+import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import { BALLOON_DY, sceneFor } from '../src/games/duck/art';
@@ -271,12 +272,13 @@ function playBot(seed: number, seconds: number, bot: BotOptions): BotRun {
 }
 
 describe('Duck Season viewport and layout', () => {
-  it('declares the agreed flexible width at a fixed height', () => {
-    expect(def.viewport).toEqual({ minWidth: 800, maxWidth: 1280 });
+  it('declares the flexible width at a fixed height, for landscape play', () => {
+    expect(def.viewport).toEqual({ minWidth: 640, maxWidth: 1280 });
     expect(def.height).toBe(540);
+    expect(def.orientation).toBe('landscape');
   });
 
-  it.each([800, 960, 1280])('keeps ducks inside the screen and spreads them over %i px', (width) => {
+  it.each([640, 800, 960, 1280])('keeps ducks inside the screen and spreads them over %i px', (width) => {
     let maxX = 0;
     for (const seed of [1, 2, 3]) {
       const { g, input } = make({ seed, width });
@@ -805,5 +807,65 @@ describe('Duck Season HUD on small screens', () => {
 
     expect(make({ width: 800, height: 540 }).g.layoutBar().s).toBe(1);
     expect(make({ width: 1280, height: 540 }).g.layoutBar().s).toBe(1);
+  });
+});
+
+/** The play stage (CSS px) inside a browser window, as the shell lays it out. */
+function stageFor(w: number, h: number): { w: number; h: number } {
+  if (w > h && h <= 520) return { w: w - 52, h };
+  return { w, h: h - (w <= 720 ? 50 : 56) };
+}
+
+/** A context stand-in on a canvas drawn `cssWidth` px wide; records the font size of each fillText. */
+function textRecorder(cssWidth: number): { ctx: CanvasRenderingContext2D; sizes: number[] } {
+  const sizes: number[] = [];
+  const base = mockCtx();
+  (base as unknown as { canvas: unknown }).canvas = { clientWidth: cssWidth };
+  const ctx = new Proxy(base, {
+    get(target, key) {
+      if (key !== 'fillText') return Reflect.get(target, key);
+      return () => {
+        const m = /(\d+(?:\.\d+)?)px/.exec(target.font);
+        if (m) sizes.push(Number(m[1]));
+      };
+    },
+  });
+  return { ctx, sizes };
+}
+
+describe('Duck Season phone layout', () => {
+  it('fills the landscape phone and tablet sizes inside its viewport range', () => {
+    const v = def.viewport ?? {};
+    for (const [name, [w, h]] of Object.entries({
+      L1: [740, 360],
+      L2: [844, 390],
+      L3: [932, 430],
+      T2: [1024, 768],
+    })) {
+      const stage = stageFor(w!, h!);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      expect(size.width, name).toBeGreaterThanOrEqual(v.minWidth ?? def.width);
+      expect(size.width, name).toBeLessThanOrEqual(v.maxWidth ?? def.width);
+      expect(fittedArea(size, stage.w, stage.h) / (stage.w * stage.h), name).toBeGreaterThanOrEqual(0.85);
+    }
+  });
+
+  it('keeps the first-frame HUD and round banner text at least 12 CSS px on every phone size', () => {
+    for (const [w, h] of [
+      [360, 740],
+      [390, 844],
+      [430, 932],
+      [740, 360],
+      [844, 390],
+      [932, 430],
+    ] as const) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const { ctx, sizes } = textRecorder(size.width * scale);
+      make({ ctx, width: size.width, height: size.height }).g.render();
+      expect(sizes.length, `${w}x${h}`).toBeGreaterThan(0);
+      expect(Math.min(...sizes) * scale, `${w}x${h}`).toBeGreaterThanOrEqual(12);
+    }
   });
 });

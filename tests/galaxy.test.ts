@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NullAudio } from '../src/core/audio';
+import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import { type GameInstance, type GameResult, type Insets, NO_INSETS } from '../src/games/types';
@@ -11,6 +12,8 @@ const DT = 1 / 60;
 /** The slice of GalaxyGame's private state these regression tests inspect or drive. */
 interface ProbeEnemy {
   kind: string;
+  behavior: string;
+  r: number;
   x: number;
   y: number;
   vx: number;
@@ -60,6 +63,7 @@ interface Probe {
   damage(e: ProbeEnemy, amount: number): void;
   collect(kind: string): void;
   hpScale(): number;
+  groupHover(): void;
 }
 
 function probe(game: GameInstance): Probe {
@@ -381,5 +385,98 @@ describe('Galaxy War layout', () => {
       game.render();
       expect(game.isOver()).toBe(false);
     }
+  });
+});
+
+/** The play stage (CSS px) inside a browser window, as the shell lays it out. */
+function stageFor(w: number, h: number): { w: number; h: number } {
+  if (w > h && h <= 520) return { w: w - 52, h };
+  return { w, h: h - (w <= 720 ? 50 : 56) };
+}
+
+/** A context stand-in on a canvas drawn `cssWidth` px wide; records the font size of each fillText. */
+function textRecorder(cssWidth: number): { ctx: CanvasRenderingContext2D; sizes: number[] } {
+  const sizes: number[] = [];
+  const base = mockCtx();
+  (base as unknown as { canvas: unknown }).canvas = { clientWidth: cssWidth };
+  const ctx = new Proxy(base, {
+    get(target, key) {
+      if (key !== 'fillText') return Reflect.get(target, key);
+      return () => {
+        const m = /(\d+(?:\.\d+)?)px/.exec(target.font);
+        if (m) sizes.push(Number(m[1]));
+      };
+    },
+  });
+  return { ctx, sizes };
+}
+
+describe('Galaxy War phone layout', () => {
+  const def = gameById('galaxy');
+
+  it('is a portrait game that fills the portrait phone and tablet sizes', () => {
+    expect(def.orientation).toBe('portrait');
+    const v = def.viewport ?? {};
+    for (const [name, [w, h]] of Object.entries({
+      P1: [360, 740],
+      P2: [390, 844],
+      P3: [430, 932],
+      T1: [768, 1024],
+    })) {
+      const stage = stageFor(w!, h!);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      expect(size.width, name).toBeGreaterThanOrEqual(v.minWidth ?? def.width);
+      expect(size.width, name).toBeLessThanOrEqual(v.maxWidth ?? def.width);
+      expect(size.height, name).toBeGreaterThanOrEqual(v.minHeight ?? def.height);
+      expect(size.height, name).toBeLessThanOrEqual(v.maxHeight ?? def.height);
+      expect(fittedArea(size, stage.w, stage.h) / (stage.w * stage.h), name).toBeGreaterThanOrEqual(0.85);
+    }
+  });
+
+  it('keeps the first-frame HUD text at least 12 CSS px on every phone size', () => {
+    for (const [w, h] of [
+      [360, 740],
+      [390, 844],
+      [430, 932],
+    ] as const) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const { ctx, sizes } = textRecorder(size.width * scale);
+      const game = def.create({
+        ctx,
+        width: size.width,
+        height: size.height,
+        input: new Input(),
+        audio: new NullAudio(),
+        rng: new Rng(1),
+        loadout: { skin: toSkinData(defaultSkin('galaxy')), boosts: new Set(), powerDuration: 1 },
+        insets: NO_INSETS,
+        reducedMotion: false,
+        haptic: () => undefined,
+      });
+      game.render();
+      expect(sizes.length, `${w}x${h}`).toBeGreaterThan(0);
+      expect(Math.min(...sizes) * scale, `${w}x${h}`).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('keeps a full line of hover ships inside the screen at the narrowest phone width', () => {
+    const size = chooseLogicalSize(def, 360, 690);
+    const { game, input, g } = fresh({ width: size.width, height: size.height });
+    // Nine waves in, a hover line has six ships in it.
+    g.wave = 9;
+    g.groupHover();
+    let checked = 0;
+    for (let i = 0; i < 8 * 60; i++) {
+      step(game, input, 1);
+      for (const e of g.enemies) {
+        if (!e.alive || e.behavior !== 'hover') continue;
+        checked++;
+        expect(e.x - e.r, `ship at x=${e.x}`).toBeGreaterThanOrEqual(0);
+        expect(e.x + e.r, `ship at x=${e.x}`).toBeLessThanOrEqual(size.width);
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
   });
 });

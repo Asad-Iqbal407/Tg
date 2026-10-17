@@ -1486,13 +1486,13 @@ export class GalaxyGame extends BaseGame {
     }
     // Weapon level (bottom centre)
     hudPill(ctx, W / 2 - 70 * k, row - 17 * k, 140 * k, 34 * k);
-    text(ctx, 'PWR', W / 2 - 54 * k, row, { size: 14 * k, color: '#9ff' });
+    text(ctx, 'PWR', W / 2 - 62 * k, row, { size: 14 * k, color: '#9ff' });
     for (let i = 0; i < MAX_WEAPON; i++) {
       fillRoundRect(
         ctx,
-        W / 2 - (18 - i * 16) * k,
+        W / 2 - (14 - i * 15) * k,
         row - 7 * k,
-        12 * k,
+        11 * k,
         14 * k,
         3 * k,
         i < this.weapon ? '#4dd9ff' : 'rgba(255,255,255,0.15)',
@@ -1500,7 +1500,15 @@ export class GalaxyGame extends BaseGame {
     }
     if (this.overdriveT > 0) {
       text(ctx, 'OVERDRIVE', W / 2, row - 34 * k, { size: 14 * k, align: 'center', color: '#ffd23f' });
-      progressBar(ctx, W / 2 - 70 * k, row - 28 * k, 140 * k, 6 * k, this.overdriveT / this.overdriveMax, '#ffd23f');
+      progressBar(
+        ctx,
+        W / 2 - 70 * k,
+        row - 28 * k,
+        140 * k,
+        6 * k,
+        this.overdriveT / this.overdriveMax,
+        '#ffd23f',
+      );
     }
     if (this.waveBannerT < 2.2 && this.wave > 0) {
       const isBoss = this.wave % 5 === 0;
@@ -1517,13 +1525,24 @@ export class GalaxyGame extends BaseGame {
   }
 
   /** Chain meter under the score: the count, a bar that drains until the chain breaks, and the multiplier. */
-  private drawChain(x: number, y: number): void {
+  private drawChain(x: number, y: number, k: number): void {
     const ctx = this.ctx;
     const mult = this.multiplier();
     const hot = mult > 1;
-    hudPill(ctx, x, y, 220, 26);
-    text(ctx, `CHAIN ${this.chain}`, x + 12, y + 13, { size: 13, color: hot ? '#ffd23f' : '#cfe8ff' });
-    progressBar(ctx, x + 104, y + 10, 84, 6, this.chainT / CHAIN_SEC, hot ? '#ffd23f' : '#9ff');
-    text(ctx, `x${mult}`, x + 208, y + 13, { size: 15, align: 'right', color: '#ffd23f' });
+    hudPill(ctx, x, y, 220 * k, 26 * k);
+    text(ctx, `CHAIN ${this.chain}`, x + 12 * k, y + 13 * k, {
+      size: 14 * k,
+      color: hot ? '#ffd23f' : '#cfe8ff',
+    });
+    progressBar(
+      ctx,
+      x + 104 * k,
+      y + 10 * k,
+      84 * k,
+      6 * k,
+      this.chainT / CHAIN_SEC,
+      hot ? '#ffd23f' : '#9ff',
+    );
+    text(ctx, `x${mult}`, x + 208 * k, y + 13 * k, { size: 15 * k, align: 'right', color: '#ffd23f' });
   }
 }
