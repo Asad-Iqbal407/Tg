@@ -94,7 +94,7 @@ interface HudLayout {
 }
 
 /** Layout for a canvas `W` wide: one row of pills when they fit, two rows when they do not. */
-function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: number): HudLayout {
+export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: number): HudLayout {
   const s = touch ? TOUCH_TEXT : 1;
   const k = touch ? TOUCH_PILLS : 1;
   const ph = 44 * s;
@@ -604,10 +604,11 @@ export class HillGame extends BaseGame {
 
   // ------------------------------------------------------------------ camera & effects
 
-  /** Top of the playfield, below the HUD. Desktop keeps its original 80 px. */
+  /** Top of the playfield, below the HUD. A one-row desktop HUD keeps its original 80 px. */
   private hudTop(): number {
-    if (!this.touchUi) return this.insets.top + 80;
-    return hudLayout(this.W, true, this.shield, this.insets.top).bottom + 8;
+    const lay = hudLayout(this.W, this.touchUi, this.shield, this.insets.top);
+    if (!this.touchUi && !lay.stacked) return this.insets.top + 80;
+    return lay.bottom + 8;
   }
 
   private snapCamera(): void {

@@ -80,9 +80,12 @@ export class SnakeGame extends BaseGame {
   /** Scratch buffers reused by every spawn and level-up. */
   private readonly busy: Uint8Array;
   private readonly free: Int32Array;
+  /** Coarse pointer at the start of the run: selects the larger touch HUD. Drawing only. */
+  private readonly touch: boolean;
 
   constructor(services: GameServices) {
     super(services);
+    this.touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     const { cols, rows } = gridSize(this.W, this.H);
     this.grid = new Grid(cols, rows);
     this.busy = new Uint8Array(this.grid.size);
@@ -163,12 +166,20 @@ export class SnakeGame extends BaseGame {
     this.texts.render(ctx);
     ctx.restore();
     if (!this.services.preview) {
-      drawHud(ctx, this.W, this.insets, pal, {
-        score: this.score,
-        level: this.level,
-        length: this.body.length,
-        slow: this.slowT / SLOW_SEC,
-      });
+      drawHud(
+        ctx,
+        this.W,
+        this.H,
+        this.insets,
+        pal,
+        {
+          score: this.score,
+          level: this.level,
+          length: this.body.length,
+          slow: this.slowT / SLOW_SEC,
+        },
+        this.touch,
+      );
       if (this.bannerT > 0) {
         banner(
           ctx,

@@ -285,14 +285,73 @@ export interface HudValues {
   slow: number;
 }
 
-/** Top strip: score, level and length pills, with the slow-motion meter under them. */
-export function drawHud(
+/** Touch HUD: a label over a value in each pill. Sizes depend on the canvas shape (see touchHudSize). */
+interface TouchHudSize {
+  label: number;
+  value: number;
+  /** Top of the pills and their height. */
+  y: number;
+  h: number;
+  /** Widths of the score, level and length pills. */
+  widths: readonly [number, number, number];
+  /** Top and height of the slow-motion meter. */
+  barY: number;
+  barH: number;
+}
+
+/**
+ * Phones show a portrait board at about 1x, but a landscape one (the same 900 x 640 canvas as the
+ * desktop) at about 0.6x, so the landscape type is larger to keep it at 12 CSS px or more.
+ */
+function touchHudSize(W: number, H: number): TouchHudSize {
+  return W > H
+    ? { label: 22, value: 26, y: 6, h: 58, widths: [200, 150, 170], barY: 67, barH: 4 }
+    : { label: 14, value: 20, y: 8, h: 50, widths: [118, 96, 110], barY: 62, barH: 6 };
+}
+
+function drawTouchHud(
   ctx: CanvasRenderingContext2D,
   W: number,
+  H: number,
   insets: Readonly<Insets>,
   pal: Palette,
   v: HudValues,
 ): void {
+  const z = touchHudSize(W, H);
+  const y = z.y + insets.top;
+  const [wScore, wLevel, wLength] = z.widths;
+  const left = 10 + insets.left;
+  const right = W - 10 - insets.right;
+  const pills = [
+    { x: left, w: wScore, label: 'SCORE', value: v.score.toLocaleString('en-US') },
+    { x: W / 2 - wLevel / 2, w: wLevel, label: 'LEVEL', value: `${v.level}` },
+    { x: right - wLength, w: wLength, label: 'LENGTH', value: `${v.length}` },
+  ];
+  for (const p of pills) {
+    hudPill(ctx, p.x, y, p.w, z.h);
+    text(ctx, p.label, p.x + p.w / 2, y + z.h * 0.28, { size: z.label, align: 'center', color: '#d1fae5' });
+    text(ctx, p.value, p.x + p.w / 2, y + z.h * 0.74, { size: z.value, align: 'center' });
+  }
+  progressBar(ctx, left, z.barY + insets.top, W - 20 - insets.left - insets.right, z.barH, v.slow, pal.gold);
+}
+
+/**
+ * Top strip: score, level and length pills, with the slow-motion meter under them. `touch` selects the
+ * larger touch layout; desktop keeps its single-line pills.
+ */
+export function drawHud(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  insets: Readonly<Insets>,
+  pal: Palette,
+  v: HudValues,
+  touch = false,
+): void {
+  if (touch) {
+    drawTouchHud(ctx, W, H, insets, pal, v);
+    return;
+  }
   const y = 10 + insets.top;
   hudPill(ctx, 12 + insets.left, y, 164, 34);
   text(ctx, 'SCORE', 24 + insets.left, y + 17, { size: 11, color: '#d1fae5' });

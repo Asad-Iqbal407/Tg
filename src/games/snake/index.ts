@@ -11,7 +11,10 @@ export const snakeGame: GameDefinition = {
   inspiredBy: 'Nokia Snake',
   width: 600,
   height: 800,
-  viewport: { minWidth: 480, maxWidth: 900, minHeight: 640, maxHeight: 1100 },
+  // Phones in portrait get a board about as tall as the design (800 px), so their cells stay near
+  // their desktop size; landscape keeps the desktop 900 x 640 board, which is what the desktop sizes.
+  viewport: { minWidth: 380, maxWidth: 900, minHeight: 640, maxHeight: 800 },
+  orientation: 'any',
   accent: '#4ade80',
   gradient: ['#4ade80', '#14532d'],
   controls: [
