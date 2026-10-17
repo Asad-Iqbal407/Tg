@@ -19,6 +19,8 @@ const PREVIEW: Record<string, { seed: number; seconds: number; focus: number }> 
   duck: { seed: 3, seconds: 2.4, focus: 0.5 },
   hill: { seed: 5, seconds: 2.8, focus: 0.5 },
   galaxy: { seed: 2, seconds: 7.5, focus: 0.3 },
+  bubble: { seed: 5, seconds: 1.2, focus: 0.5 },
+  pong: { seed: 7, seconds: 3.2, focus: 0.5 },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -331,6 +333,100 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
       ctx.beginPath();
       ctx.ellipse(0, -6, 6, 12, 0, 0, TAU);
       ctx.fill();
+      break;
+    }
+    case 'bubble': {
+      // Coloured bubbles hanging over a loaded shooter, with a dashed aim line. Drawn a little smaller and
+      // down and right, so the rarity tag in the corner of the card does not cover the top row.
+      ctx.save();
+      ctx.translate(8, 6);
+      ctx.scale(0.8, 0.8);
+      const board = ctx.createLinearGradient(0, -46, 0, 46);
+      board.addColorStop(0, p.top ?? '#1e3a8a');
+      board.addColorStop(1, p.bottom ?? '#0b1530');
+      fillRoundRect(ctx, -50, -46, 100, 92, 10, board);
+      ctx.strokeStyle = p.rail ?? '#67e8f9';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, 14);
+      ctx.lineTo(-16, -14);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const colours = [
+        p.c1 ?? '#38bdf8',
+        p.c2 ?? '#f472b6',
+        p.c3 ?? '#facc15',
+        p.c4 ?? '#4ade80',
+        p.c5 ?? '#a78bfa',
+        p.c6 ?? '#fb923c',
+      ];
+      // [x, y, colour index] for each hanging bubble.
+      const cells: [number, number, number][] = [
+        [-36, -34, 0],
+        [-18, -34, 1],
+        [0, -34, 2],
+        [18, -34, 3],
+        [36, -34, 4],
+        [-27, -17, 5],
+        [-9, -17, 0],
+        [9, -17, 1],
+        [27, -17, 2],
+        [-36, 0, 3],
+        [-18, 0, 4],
+        [0, 0, 5],
+        [18, 0, 0],
+        [36, 0, 1],
+      ];
+      for (const [x, y, i] of cells) {
+        ctx.fillStyle = colours[i] ?? '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x, y, 8.5, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.beginPath();
+        ctx.arc(x - 3, y - 3, 2.2, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = colours[2] ?? '#facc15';
+      ctx.beginPath();
+      ctx.arc(0, 24, 8.5, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.gun ?? '#e0f2fe';
+      ctx.beginPath();
+      ctx.arc(0, 44, 12, Math.PI, 0);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'pong': {
+      // A table from above, with the centre line, both paddles and the ball in play. Offset and a little
+      // smaller, like the bubble card, so the rarity tag stays clear.
+      ctx.save();
+      ctx.translate(8, 8);
+      ctx.scale(0.85, 0.85);
+      const table = ctx.createLinearGradient(0, -36, 0, 36);
+      table.addColorStop(0, p.table1 ?? '#0f3d2e');
+      table.addColorStop(1, p.table2 ?? '#0b2456');
+      fillRoundRect(ctx, -56, -38, 112, 76, 8, table);
+      ctx.fillStyle = p.rail ?? '#e2e8f0';
+      ctx.fillRect(-56, -38, 112, 2.5);
+      ctx.fillRect(-56, 35.5, 112, 2.5);
+      ctx.strokeStyle = p.line ?? 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(0, -36);
+      ctx.lineTo(0, 36);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      fillRoundRect(ctx, -50, -12, 5, 24, 2.5, p.player ?? '#fb923c');
+      fillRoundRect(ctx, 45, -18, 5, 24, 2.5, p.rival ?? '#60a5fa');
+      ctx.fillStyle = p.ball ?? '#fef9c3';
+      ctx.beginPath();
+      ctx.arc(14, -8, 4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
       break;
     }
   }

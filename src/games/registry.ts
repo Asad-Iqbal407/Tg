@@ -1,8 +1,10 @@
 import { bombsquadGame } from './bombsquad';
+import { bubbleGame } from './bubble/index';
 import { duckGame } from './duck';
 import { galaxyGame } from './galaxy';
 import { hillGame } from './hill';
 import { platformerGame } from './platformer';
+import { pongGame } from './pong/index';
 import { runnerGame } from './runner';
 import { snakeGame } from './snake';
 import { tetrisGame } from './tetris';
@@ -17,6 +19,8 @@ export const GAMES: readonly GameDefinition[] = [
   snakeGame,
   bombsquadGame,
   tetrisGame,
+  bubbleGame,
+  pongGame,
 ];
 
 const BY_ID = new Map<string, GameDefinition>(GAMES.map((g) => [g.id, g]));

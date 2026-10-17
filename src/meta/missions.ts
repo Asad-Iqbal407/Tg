@@ -174,6 +174,38 @@ export const MISSION_TEMPLATES: readonly MissionTemplate[] = [
     targets: [3, 5, 8],
     label: (n) => `Reach level ${n} in Block Drop`,
   },
+  {
+    id: 'bubble-pops',
+    gameId: 'bubble',
+    kind: 'total',
+    stat: 'pops',
+    targets: [20, 50, 100],
+    label: (n) => `Pop ${n} bubbles in Bubble Shooter`,
+  },
+  {
+    id: 'bubble-combo',
+    gameId: 'bubble',
+    kind: 'best',
+    stat: 'combo',
+    targets: [2, 3, 4],
+    label: (n) => `Reach a x${n} combo in Bubble Shooter`,
+  },
+  {
+    id: 'pong-rally',
+    gameId: 'pong',
+    kind: 'best',
+    stat: 'longestRally',
+    targets: [6, 10, 15],
+    label: (n) => `Keep a rally going for ${n} shots in Ping Pong`,
+  },
+  {
+    id: 'pong-wins',
+    gameId: 'pong',
+    kind: 'total',
+    stat: 'wins',
+    targets: [1, 2, 3],
+    label: (n) => `Win ${n} Ping Pong match${n > 1 ? 'es' : ''}`,
+  },
 ];
 
 const TIER_REWARDS = [

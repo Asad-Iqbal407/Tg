@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GAMES } from '../src/games/registry';
 import { GAME_IDS } from '../src/games/types';
 import { ACHIEVEMENTS, achievementProgress, newlyCompleted } from '../src/meta/achievements';
 import { BOOSTS, SKINS, UPGRADES } from '../src/meta/catalog';
@@ -240,6 +241,29 @@ describe('catalog and achievements', () => {
     }
     for (const u of UPGRADES)
       for (let i = 1; i < u.costs.length; i++) expect(u.costs[i]).toBeGreaterThan(u.costs[i - 1] as number);
+  });
+
+  it('gives every game achievements and mission templates', () => {
+    for (const g of GAME_IDS) {
+      const hasAchievement = ACHIEVEMENTS.some((a) => a.gameId === g);
+      const hasMission = MISSION_TEMPLATES.some((t) => t.gameId === g);
+      expect(hasAchievement, `${g} achievements`).toBe(true);
+      expect(hasMission, `${g} missions`).toBe(true);
+    }
+  });
+
+  it('tracks only the per-run stats that each game labels', () => {
+    for (const def of GAMES) {
+      for (const a of ACHIEVEMENTS) {
+        if (a.gameId !== def.id || (a.goal.type !== 'total' && a.goal.type !== 'best')) continue;
+        expect(def.statLabels, a.id).toHaveProperty([a.goal.key.slice(def.id.length + 1)]);
+      }
+      for (const t of MISSION_TEMPLATES) {
+        if (t.gameId !== def.id || t.kind === 'plays') continue;
+        // Every run reports its coins, so that stat needs no label of its own.
+        if (t.stat !== 'coins') expect(def.statLabels, t.id).toHaveProperty([t.stat]);
+      }
+    }
   });
 
   it('reports progress and completion', () => {
