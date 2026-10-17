@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import { NullAudio } from '../src/core/audio';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
-import type { Input } from '../src/core/input';
+import { Input } from '../src/core/input';
+import { Rng } from '../src/core/rng';
 import { pongGame } from '../src/games/pong';
-import { BALL_R, DESIGN_H, headHeight, paddleHalf, type Table, tableFor } from '../src/games/pong/geometry';
-import { type BoostId, type GameInstance, NO_INSETS, type SkinData } from '../src/games/types';
-import { cornerSizes, createGame } from './helpers';
+import {
+  BALL_R,
+  DESIGN_H,
+  frontRight,
+  headHeight,
+  paddleHalf,
+  speedScale,
+  type Table,
+  tableFor,
+} from '../src/games/pong/geometry';
+import { Rival } from '../src/games/pong/rival';
+import { type BoostId, type GameInstance, type Insets, NO_INSETS, type SkinData } from '../src/games/types';
+import { cornerSizes, createGame, mockCtx } from './helpers';
 
 const DT = 1 / 60;
 const MAX_ANGLE = Math.PI / 3;
@@ -89,9 +101,21 @@ function trackerStep(game: GameInstance, input: Input, history: number[], delayF
   input.setVirtual('down', want > g.playerY + 3, 'script');
 }
 
-/** Plays one whole match with the tracking script. Returns the final counts and the frames it took. */
-function trackedMatch(seed: number, delaySec: number, maxSec = 900) {
-  const { game, input } = fresh(seed, [], undefined, undefined, NO_INSETS);
+/** A canvas size to check the computer on: the design canvas, and a landscape phone with touch controls below. */
+interface Layout {
+  name: string;
+  width: number;
+  height: number;
+  insets: Insets;
+}
+const LAYOUTS: Layout[] = [
+  { name: 'design', width: 960, height: 600, insets: NO_INSETS },
+  { name: 'phone L2', width: 1200, height: 590, insets: { top: 0, right: 0, bottom: 116, left: 0 } },
+];
+
+/** Plays one whole match with the tracking script at a layout. Returns the final counts and the frames it took. */
+function trackedMatch(seed: number, delaySec: number, layout: Layout, maxSec = 900) {
+  const { game, input } = fresh(seed, [], layout.width, layout.height, layout.insets);
   const g = peek(game);
   const delayFrames = Math.round(delaySec * 60);
   const history: number[] = [];
@@ -240,13 +264,13 @@ describe('Ping Pong rules', () => {
   it('speeds the ball up on each hit, up to the cap', () => {
     const { game } = fresh();
     const g = peek(game);
-    const u = g.H / DESIGN_H;
+    const k = speedScale(g.table());
     g.ball.y = (g.table().top + g.table().bottom) / 2;
     const before = g.ball.speed;
     g.contact('player', g.table().left + 100);
     expect(g.ball.speed).toBeGreaterThan(before);
     for (let i = 0; i < 200; i++) g.contact('computer', g.table().right - 100);
-    expect(g.ball.speed).toBeCloseTo(780 * u, 6);
+    expect(g.ball.speed).toBeCloseTo(780 * k, 6);
   });
 
   it('bounces off the top and bottom walls without losing speed', () => {
@@ -313,6 +337,27 @@ describe('Ping Pong controls', () => {
     expect(g.playerY - start).toBeGreaterThan(200 * u);
   });
 
+  it('crosses the table in the same time on a phone as on the design canvas', () => {
+    const crossSec = (width: number, height: number, insets: Insets) => {
+      const { game, input } = fresh(1, [], width, height, insets);
+      const g = peek(game);
+      const t = g.table();
+      const half = paddleHalf(t);
+      g.playerY = t.top + half;
+      input.setVirtual('down', true, 'test');
+      let frames = 0;
+      while (g.playerY < t.bottom - half - 1e-6 && frames < 60 * 10) {
+        step(game, input);
+        frames++;
+      }
+      input.setVirtual('down', false, 'test');
+      return frames * DT;
+    };
+    const design = crossSec(960, 600, NO_INSETS);
+    const phone = crossSec(1200, 590, { top: 0, right: 0, bottom: 116, left: 0 });
+    expect(phone).toBeCloseTo(design, 6);
+  });
+
   it('follows a press and drag on the stage to the pointer height', () => {
     const { game, input } = fresh();
     const g = peek(game);
@@ -365,7 +410,7 @@ describe('Ping Pong computer', () => {
   it('moves no faster than its top speed, which is below the player keyboard speed', () => {
     const { game, input } = fresh(3);
     const g = peek(game);
-    const u = g.H / DESIGN_H;
+    const k = speedScale(g.table());
     const history: number[] = [];
     let fastest = 0;
     let last = g.rival.y;
@@ -375,21 +420,42 @@ describe('Ping Pong computer', () => {
       fastest = Math.max(fastest, Math.abs(g.rival.y - last) / DT);
       last = g.rival.y;
     }
-    expect(fastest).toBeLessThanOrEqual(470 * u + 1e-6);
+    expect(fastest).toBeLessThanOrEqual(470 * k + 1e-6);
   });
 
-  it('loses a meaningful share of points to a player who tracks the ball', () => {
-    let playerPts = 0;
-    let rivalPts = 0;
-    for (let seed = 1; seed <= 12; seed++) {
-      const m = trackedMatch(seed, 0.2);
-      expect(m.over, `seed ${seed} finishes`).toBe(true);
-      playerPts += m.playerPts;
-      rivalPts += m.rivalPts;
+  it('loses a meaningful share of points to a player who tracks the ball, on the design and phone canvases', () => {
+    for (const layout of LAYOUTS) {
+      let playerPts = 0;
+      let rivalPts = 0;
+      for (let seed = 1; seed <= 12; seed++) {
+        const m = trackedMatch(seed, 0.2, layout);
+        expect(m.over, `${layout.name} seed ${seed} finishes`).toBe(true);
+        playerPts += m.playerPts;
+        rivalPts += m.rivalPts;
+      }
+      const share = playerPts / (playerPts + rivalPts);
+      expect(share, layout.name).toBeGreaterThanOrEqual(0.5);
+      expect(share, layout.name).toBeLessThanOrEqual(0.85);
     }
-    const share = playerPts / (playerPts + rivalPts);
-    expect(share).toBeGreaterThanOrEqual(0.4);
-    expect(share).toBeLessThanOrEqual(0.85);
+  });
+
+  it('keeps a planned miss a miss when the shot arrives at a wall', () => {
+    const t = tableFor(960, 600, NO_INSETS);
+    const half = paddleHalf(t);
+    const r = BALL_R;
+    const centre = (t.top + t.bottom) / 2;
+    for (let seed = 1; seed <= 150; seed++) {
+      for (const y of [t.top + r, t.bottom - r]) {
+        const rival = new Rival(new Rng(seed), centre);
+        rival.aim(half);
+        // A planned miss aims past the paddle's edge.
+        if (Math.abs((rival as unknown as { offset: number }).offset) <= half) continue;
+        // A ball that has no vertical speed arrives at the height it is at now, next to a wall.
+        const ball = { x: frontRight(t, 1) - r - 150, y, vx: 400, vy: 0, speed: 400 };
+        for (let i = 0; i < 180; i++) rival.update(DT, ball, true, t, half, 1, 1);
+        expect(Math.abs(y - rival.y), `seed ${seed} wall ${y}`).toBeGreaterThan(half + r);
+      }
+    }
   });
 
   it('ends the match when the player stops playing', () => {
@@ -418,6 +484,39 @@ describe('Ping Pong rendering and layout', () => {
     }
     expect(Number.isFinite(g.ball.x)).toBe(true);
     expect(Number.isFinite(g.playerY)).toBe(true);
+  });
+
+  it('draws the YOU and CPU labels at a legible size on an L1 phone', () => {
+    const w = 740;
+    const h = 360;
+    const size = chooseLogicalSize(pongGame, w, h);
+    const scale = Math.min(w / size.width, h / size.height);
+    const drawn: { value: string; font: string }[] = [];
+    const base = mockCtx();
+    const ctx = new Proxy(base, {
+      get(target, key) {
+        if (key === 'fillText') return (value: string) => drawn.push({ value, font: String(target.font) });
+        return Reflect.get(target, key);
+      },
+    });
+    const game = pongGame.create({
+      ctx,
+      width: size.width,
+      height: size.height,
+      input: new Input(),
+      audio: new NullAudio(),
+      rng: new Rng(1),
+      loadout: { skin: SKIN, boosts: new Set(), powerDuration: 1 },
+      insets: { top: 0, right: 0, bottom: Math.ceil(76 * (size.height / h)), left: 0 },
+      reducedMotion: false,
+      haptic: () => undefined,
+    });
+    game.render();
+    for (const label of ['YOU', 'CPU']) {
+      const font = drawn.find((d) => d.value === label)?.font ?? '';
+      const px = Number(/(\d+)px/.exec(font)?.[1]);
+      expect(px * scale, label).toBeGreaterThanOrEqual(11);
+    }
   });
 
   it('keeps the score band above the table, so the centre line never reaches it', () => {

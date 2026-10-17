@@ -2,7 +2,7 @@
   "name": "neon-arcade",
   "private": true,
   "version": "1.0.0",
-  "description": "A production-grade web arcade with five canvas games and a shared reward system.",
+  "description": "A production-grade web arcade with ten canvas games and a shared reward system.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {

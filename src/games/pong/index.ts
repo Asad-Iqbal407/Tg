@@ -24,8 +24,8 @@ export const pongGame: GameDefinition = {
   ],
   touchHint: 'Hold UP or DOWN, or drag up and down.',
   touchButtons: [
-    { action: 'up', label: 'UP', side: 'left' },
-    { action: 'down', label: 'DOWN', side: 'right' },
+    { action: 'up', label: 'UP', side: 'left', wide: true },
+    { action: 'down', label: 'DOWN', side: 'right', wide: true },
   ],
   scorePerCoin: 200,
   scorePerXp: 60,

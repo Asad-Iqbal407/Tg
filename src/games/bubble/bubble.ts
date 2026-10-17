@@ -73,7 +73,10 @@ export function coloursFor(level: number): number {
   return level <= 1 ? 5 : 6;
 }
 
-/** Score multiplier for a shot that removed `removed` bubbles (popped or dropped): x2 from 5, then +x1 per two more. */
+/**
+ * Score multiplier for a shot that removed `removed` bubbles (popped or dropped): x2 from 5, then +x1 per two
+ * more.
+ */
 export function comboFor(removed: number): number {
   return Math.min(MAX_COMBO, 1 + Math.floor(Math.max(0, removed - MIN_GROUP) / 2));
 }
@@ -99,6 +102,11 @@ export class BubbleGame extends BaseGame {
   private loaded = 1;
   private upcoming = 1;
   private shot: Shot | null = null;
+  /**
+   * Aim of a fire request made while a shot was flying or the level was clearing. It goes off once the board
+   * is free.
+   */
+  private queuedAim: number | null = null;
   /** Seconds left in the level-clear pause; the next level starts when it runs out. */
   private clearT = 0;
   private bannerT = 0;
@@ -124,12 +132,14 @@ export class BubbleGame extends BaseGame {
     this.animate(dt);
     if (this.clearT > 0) {
       this.clearT -= dt;
+      this.askToFire();
       if (this.clearT <= 0) this.startLevel(this.level + 1);
       return;
     }
     if (this.isEnding) return;
     this.steerAim(dt);
-    if (!this.shot && (this.input.wasPressed('primary') || this.input.pointer.released)) this.fire();
+    this.askToFire();
+    this.fireQueued();
     if (this.shot) this.fly(dt);
   }
 
@@ -269,13 +279,28 @@ export class BubbleGame extends BaseGame {
     return clampAim(Math.atan2(this.layout.shooterY - y, x - this.layout.shooterX));
   }
 
-  private fire(): void {
+  /** Notes a fire request: a release fires at the spot the pointer let go, a fire key at the aim as it is. */
+  private askToFire(): void {
+    const ptr = this.input.pointer;
+    if (ptr.released) this.queuedAim = this.angleTo(ptr.x, ptr.y);
+    else if (this.input.wasPressed('primary')) this.queuedAim = this.aim;
+  }
+
+  /** Fires the queued shot as soon as the board is free, so a fire made mid-flight is not lost. */
+  private fireQueued(): void {
+    if (this.shot || this.queuedAim === null) return;
+    const aim = this.queuedAim;
+    this.queuedAim = null;
+    this.fire(aim);
+  }
+
+  private fire(aim: number): void {
     const L = this.layout;
     this.shot = {
       x: L.shooterX,
       y: L.shooterY,
-      vx: Math.cos(this.aim) * FLY_SPEED,
-      vy: -Math.sin(this.aim) * FLY_SPEED,
+      vx: Math.cos(aim) * FLY_SPEED,
+      vy: -Math.sin(aim) * FLY_SPEED,
       colour: this.loaded,
     };
     this.loaded = this.upcoming;

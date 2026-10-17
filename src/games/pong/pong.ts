@@ -9,6 +9,7 @@ import {
   frontRight,
   headHeight,
   paddleHalf,
+  speedScale,
   type Table,
   tableFor,
 } from './geometry';
@@ -23,7 +24,10 @@ const HEAD_START_POINTS = 2;
 const POINT_SCORE = 100;
 const LONG_RALLY_SHOTS = 10;
 const LONG_RALLY_SCORE = 50;
-/** Ball speeds in design px/s. The ball gains SPEEDUP on every paddle hit until it reaches MAX_SPEED. */
+/**
+ * Ball and paddle speeds in design px/s, scaled to the table (speedScale). The ball gains SPEEDUP on every paddle
+ * hit until it reaches MAX_SPEED.
+ */
 const SERVE_SPEED = 420;
 const SPEEDUP = 18;
 const MAX_SPEED = 780;
@@ -41,7 +45,7 @@ const LOSS_SEC = 2;
 
 /** The match: a rally-based table tennis game against the computer. Left is the player, right the computer. */
 export class PongGame extends BaseGame {
-  /** Design px to logical px. Speeds and sizes are authored for a 600 px tall table. */
+  /** Design px to logical px for sizes. Speeds scale with the table instead (see speedScale). */
   private readonly u: number;
   private readonly rival: Rival;
   private readonly ball: Ball = { x: 0, y: 0, vx: 0, vy: 0, speed: 0 };
@@ -74,7 +78,7 @@ export class PongGame extends BaseGame {
     const t = this.table();
     const half = paddleHalf(t);
     this.movePlayer(dt, t, half);
-    this.rival.update(dt, this.ball, !this.serving && this.ball.vx > 0, t, half, this.u);
+    this.rival.update(dt, this.ball, !this.serving && this.ball.vx > 0, t, half, this.u, speedScale(t));
     if (this.serving) {
       this.serveT -= dt;
       if (this.serveT <= 0) this.launch();
@@ -141,15 +145,16 @@ export class PongGame extends BaseGame {
   private movePlayer(dt: number, t: Table, half: number): void {
     const lo = t.top + half;
     const hi = t.bottom - half;
+    const k = speedScale(t);
     const axis = this.input.axisY();
     const pointer = this.input.pointer;
     if (axis !== 0) {
-      this.playerY += axis * PLAYER_SPEED * this.u * dt;
+      this.playerY += axis * PLAYER_SPEED * k * dt;
     } else if (pointer.down) {
-      const max = POINTER_SPEED * this.u * dt;
+      const max = POINTER_SPEED * k * dt;
       this.playerY += clamp(clamp(pointer.y, lo, hi) - this.playerY, -max, max);
     } else if (this.services.preview) {
-      const max = PLAYER_SPEED * this.u * dt;
+      const max = PLAYER_SPEED * k * dt;
       this.playerY += clamp(clamp(this.ball.y, lo, hi) - this.playerY, -max, max);
     }
     this.playerY = clamp(this.playerY, lo, hi);
@@ -213,7 +218,8 @@ export class PongGame extends BaseGame {
     const py = side === 'player' ? this.playerY : this.rival.y;
     const rel = clamp((b.y - py) / half, -1, 1);
     const angle = rel * MAX_ANGLE;
-    b.speed = Math.min(MAX_SPEED * this.u, b.speed + SPEEDUP * this.u);
+    const k = speedScale(t);
+    b.speed = Math.min(MAX_SPEED * k, b.speed + SPEEDUP * k);
     const dir = side === 'player' ? 1 : -1;
     b.vx = dir * Math.cos(angle) * b.speed;
     b.vy = Math.sin(angle) * b.speed;
@@ -328,7 +334,7 @@ export class PongGame extends BaseGame {
     b.y = (t.top + t.bottom) / 2;
     b.vx = 0;
     b.vy = 0;
-    b.speed = SERVE_SPEED * this.u;
+    b.speed = SERVE_SPEED * speedScale(t);
     this.shots = 0;
   }
 

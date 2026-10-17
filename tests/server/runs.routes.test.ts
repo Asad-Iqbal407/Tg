@@ -89,7 +89,7 @@ describe('POST /api/runs', () => {
     const { cookie } = await register(app, 'Strict_Runs');
     const cases: [Record<string, unknown>, string][] = [
       [{ clientRunId: 'not-a-uuid' }, 'clientRunId must be a UUID.'],
-      [{ gameId: 'pong' }, 'gameId must be one of the games in the arcade.'],
+      [{ gameId: 'chess' }, 'gameId must be one of the games in the arcade.'],
       [{ score: -1 }, 'score must be a whole number from 0 to 10000000.'],
       [{ score: 10_000_001 }, 'score must be a whole number from 0 to 10000000.'],
       [{ score: 1.5 }, 'score must be a whole number from 0 to 10000000.'],
@@ -240,7 +240,7 @@ describe('GET /api/leaderboard/:gameId', () => {
 
   it('answers an unknown game with 404 not_found', async () => {
     const app = await boot();
-    const reply = await send(app, 'GET', '/api/leaderboard/pong');
+    const reply = await send(app, 'GET', '/api/leaderboard/chess');
     expect(reply.status).toBe(404);
     expect(reply.body).toEqual({ error: 'not_found', message: 'Unknown game.' });
   });

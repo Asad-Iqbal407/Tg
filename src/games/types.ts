@@ -3,16 +3,7 @@ import type { Action, Input } from '../core/input';
 import type { Rng } from '../core/rng';
 
 export type GameId =
-  | 'runner'
-  | 'platformer'
-  | 'duck'
-  | 'hill'
-  | 'galaxy'
-  | 'snake'
-  | 'bombsquad'
-  | 'tetris'
-  | 'bubble'
-  | 'pong';
+  'runner' | 'platformer' | 'duck' | 'hill' | 'galaxy' | 'snake' | 'bombsquad' | 'tetris' | 'bubble' | 'pong';
 export const GAME_IDS: readonly GameId[] = [
   'runner',
   'platformer',

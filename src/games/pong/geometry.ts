@@ -1,7 +1,7 @@
 import { clamp } from '../../core/math';
 import type { Insets } from '../types';
 
-/** Sizes and speeds are authored for a table this tall; a run scales them by its logical height. */
+/** Sizes are authored for a canvas this tall; a run scales them by its logical height. */
 export const DESIGN_H = 600;
 export const PADDLE_W = 12;
 /** Gap between a paddle and the table's side edge. */
@@ -35,11 +35,22 @@ export function headHeight(H: number): number {
   return clamp(H * HEAD_FRAC, HEAD_MIN, HEAD_MAX);
 }
 
+/** The playfield height the speeds are authored for: a design canvas less its score band. */
+export const DESIGN_TABLE_H = DESIGN_H - headHeight(DESIGN_H);
+
 /** The playfield for a logical size and live insets. The bottom edge stops above touch controls. */
 export function tableFor(W: number, H: number, ins: Readonly<Insets>): Table {
   const top = ins.top + headHeight(H);
   const bottom = Math.max(top + H * 0.3, H - ins.bottom);
   return { left: ins.left, right: W - ins.right, top, bottom };
+}
+
+/**
+ * How fast the ball and paddles move on this table, relative to the design table: 1 at the design size. Speeds
+ * follow the table, not the canvas, so a rally takes the same time to cross on a phone as on the design canvas.
+ */
+export function speedScale(t: Table): number {
+  return (t.bottom - t.top) / DESIGN_TABLE_H;
 }
 
 /** Half the paddle height for this playfield. */

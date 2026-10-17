@@ -114,6 +114,13 @@ function dragFire(game: GameInstance, input: Input, row: number, col: number): v
   step(game, input);
 }
 
+/** The aim angle that points the shooter at the centre of a cell. */
+function aimAt(s: Internals, row: number, col: number): number {
+  const x = cellX(s.layout, col, shiftOf(s.rows, row));
+  const y = cellY(s.layout, row);
+  return Math.atan2(s.layout.shooterY - y, x - s.layout.shooterX);
+}
+
 const PORTRAIT_PHONES: [string, number, number][] = [
   ['P1', 360, 740],
   ['P2', 390, 844],
@@ -285,6 +292,46 @@ describe('shooting', () => {
     expect(s.shot).not.toBeNull();
     expect(game.getResult().stats['shots']).toBe(1);
   });
+
+  it('a release made mid-flight fires once the shot lands, at the spot it was let go, and only once', () => {
+    const { game, input } = fresh(12);
+    const s = peek(game);
+    setGrid(s, [fullRow(2), fullRow(3)]);
+    s.loaded = 1;
+    s.upcoming = 1;
+    fireTap(game, input);
+    step(game, input, 5);
+    expect(s.shot).not.toBeNull();
+    // A second drag, let go while the first shot is still flying.
+    dragFire(game, input, 1, 7);
+    expect(s.shot).not.toBeNull();
+    expect(game.getResult().stats['shots']).toBe(1);
+    settle(game, input);
+    step(game, input);
+    expect(game.getResult().stats['shots']).toBe(2);
+    expect(Math.atan2(-(s.shot?.vy ?? 0), s.shot?.vx ?? 0)).toBeCloseTo(aimAt(s, 1, 7), 6);
+    settle(game, input);
+    step(game, input, 120);
+    expect(game.getResult().stats['shots']).toBe(2);
+  });
+
+  it('a fire key pressed during a flight goes off once the shot lands', () => {
+    const { game, input } = fresh(13);
+    const s = peek(game);
+    setGrid(s, [fullRow(2), fullRow(3)]);
+    s.loaded = 1;
+    s.upcoming = 1;
+    fireTap(game, input);
+    step(game, input, 5);
+    fireTap(game, input);
+    expect(game.getResult().stats['shots']).toBe(1);
+    settle(game, input);
+    step(game, input);
+    expect(game.getResult().stats['shots']).toBe(2);
+    settle(game, input);
+    step(game, input, 120);
+    expect(game.getResult().stats['shots']).toBe(2);
+  });
 });
 
 describe('ceiling and shooter line', () => {
@@ -377,6 +424,27 @@ describe('levels', () => {
     expect(s.level).toBe(2);
     expect(s.rows.length).toBe(rowsFor(2));
     expect(game.getResult().stats['levels']).toBe(1);
+  });
+
+  it('a release made during the level-clear pause fires once the next level starts', () => {
+    const { game, input } = fresh(15);
+    const s = peek(game);
+    setGrid(s, [[2, 2, 0, 0, 0, 0, 0, 0, 0]]);
+    s.loaded = 2;
+    dragFire(game, input, 0, 2);
+    settle(game, input);
+    expect(s.clearT).toBeGreaterThan(0);
+    // Drag up and let go during the pause. The shot waits for the new level, at the angle it was let go at.
+    drag(input, s.layout.shooterX + 150, s.layout.shooterY - 300);
+    step(game, input);
+    input.pointer.down = false;
+    input.pointer.released = true;
+    step(game, input);
+    expect(game.getResult().stats['shots']).toBe(1);
+    for (let i = 0; i < 200 && !s.shot; i++) step(game, input);
+    expect(s.level).toBe(2);
+    expect(game.getResult().stats['shots']).toBe(2);
+    expect(Math.atan2(-(s.shot?.vy ?? 0), s.shot?.vx ?? 0)).toBeCloseTo(Math.atan2(300, 150), 6);
   });
 
   it('head-start begins on level 2, with an extra row and a sixth colour', () => {

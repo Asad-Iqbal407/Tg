@@ -134,8 +134,9 @@ export function drawScoreBand(
       align: 'center',
       color: colour,
     });
+    // At least 18 logical px, so the labels stay about 11 CSS px tall on the smallest phone stage.
     text(ctx, label, x, cy + head * 0.3, {
-      size: Math.max(9, Math.round(head * 0.2)),
+      size: Math.max(18, Math.round(head * 0.3)),
       align: 'center',
       color: 'rgba(255,255,255,0.7)',
     });
