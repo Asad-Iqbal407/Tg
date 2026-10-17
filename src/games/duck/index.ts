@@ -14,7 +14,7 @@ export const duckGame: GameDefinition = {
   // Wider screens show more sky; the flight band, scenery and HUD all follow the width. The floor
   // keeps ducks large on a narrow canvas (portrait phones, tablets) and the HUD readable there.
   viewport: { minWidth: 640, maxWidth: 1280 },
-  // Aiming is by finger, so the game is played sideways: a portrait phone gets the rotate prompt.
+  // The sky is wide and the ducks cross it, so a portrait phone is asked to rotate.
   orientation: 'landscape',
   accent: '#7CFC00',
   gradient: ['#4caf50', '#1b5e20'],

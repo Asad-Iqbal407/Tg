@@ -66,6 +66,50 @@ const FLIP_SLACK = 0.95;
 const LAND_TOLERANCE = 0.6;
 const BANNER_TIME = 2.6;
 
+/** HUD pill sizes at the desktop scale, in logical px. */
+const HUD_EDGE = 14;
+const HUD_GAP = 10;
+const FUEL_W = 230;
+const COIN_W = 120;
+const DIST_W = 170;
+const SPEED_W = 104;
+const CHIP_W = 150;
+/**
+ * Touch screens show the canvas at well under 1x (a phone in landscape draws 960 logical px in about
+ * 690 CSS px), so their HUD type and pill height grow by TOUCH_TEXT and the pills by TOUCH_PILLS.
+ */
+const TOUCH_TEXT = 1.4;
+const TOUCH_PILLS = 1.15;
+
+interface HudLayout {
+  /** Text and pill height scale. */
+  s: number;
+  /** Pill width scale. */
+  k: number;
+  ph: number;
+  /** True when the pills no longer fit one row, so the coins and speed drop to a second row. */
+  stacked: boolean;
+  /** Bottom edge of the whole HUD block, in logical px. */
+  bottom: number;
+}
+
+/** Layout for a canvas `W` wide: one row of pills when they fit, two rows when they do not. */
+function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: number): HudLayout {
+  const s = touch ? TOUCH_TEXT : 1;
+  const k = touch ? TOUCH_PILLS : 1;
+  const ph = 44 * s;
+  const top = HUD_EDGE + insetTop;
+  const gaps = shield ? 4 : 3;
+  const row = 2 * HUD_EDGE + k * (FUEL_W + COIN_W + SPEED_W + DIST_W + gaps * HUD_GAP) + (shield ? ph : 0);
+  const stacked = row > W;
+  const chipH = 26 * s;
+  // One row: the next-fuel chip sits under the fuel pill. Two rows: the chip sits under the second row.
+  const bottom = stacked
+    ? top + ph + 8 * s + ph + 6 * s + chipH
+    : Math.max(top + ph + 6 * s + chipH, top + ph + 16 * s + 21 * s);
+  return { s, k, ph, stacked, bottom };
+}
+
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 const FLIP_NAMES = ['', '', 'DOUBLE ', 'TRIPLE ', 'QUAD '];
@@ -560,8 +604,10 @@ export class HillGame extends BaseGame {
 
   // ------------------------------------------------------------------ camera & effects
 
+  /** Top of the playfield, below the HUD. Desktop keeps its original 80 px. */
   private hudTop(): number {
-    return this.insets.top + (this.touchUi ? 92 : 80);
+    if (!this.touchUi) return this.insets.top + 80;
+    return hudLayout(this.W, true, this.shield, this.insets.top).bottom + 8;
   }
 
   private snapCamera(): void {
@@ -767,16 +813,18 @@ export class HillGame extends BaseGame {
 
   private drawHud(): void {
     const ctx = this.ctx;
-    const s = this.touchUi ? 1.15 : 1;
+    const { s, k, ph, stacked } = hudLayout(this.W, this.touchUi, this.shield, this.insets.top);
     const ins = this.insets;
-    const left = 14 + ins.left;
-    const top = 14 + ins.top;
-    const right = this.W - 14 - ins.right;
-    const ph = 44 * s;
+    const left = HUD_EDGE + ins.left;
+    const top = HUD_EDGE + ins.top;
+    const right = this.W - HUD_EDGE - ins.right;
     const cy = top + ph / 2;
+    // Second row, used when the pills do not fit one row: coins, shield and speed move down.
+    const row2 = top + ph + 8 * s;
+    const cy2 = row2 + ph / 2;
 
     // Fuel
-    const fuelW = 230 * s;
+    const fuelW = FUEL_W * k;
     const f = this.fuel / this.fuelCap;
     hudPill(ctx, left, top, fuelW, ph);
     drawJerrycan(ctx, left + 24 * s, cy, 28 * s);
@@ -790,7 +838,7 @@ export class HillGame extends BaseGame {
     }
     // Next fuel can distance (and low-fuel warning).
     const low = f < 0.25;
-    const chipY = top + ph + 6 * s;
+    const chipY = (stacked ? row2 + ph : top + ph) + 6 * s;
     const chipH = 26 * s;
     const nextM = Number.isFinite(this.nextFuelX)
       ? Math.max(0, Math.round((this.nextFuelX - this.car.center().x) / PX_PER_M))
@@ -801,7 +849,7 @@ export class HillGame extends BaseGame {
         ctx,
         left,
         chipY,
-        150 * s,
+        CHIP_W * k,
         chipH,
         chipH / 2,
         blinkOn ? 'rgba(200,30,40,0.8)' : 'rgba(8,10,30,0.55)',
@@ -816,37 +864,43 @@ export class HillGame extends BaseGame {
     }
 
     // Coins
-    const coinX = left + fuelW + 10 * s;
-    const coinW = 120 * s;
-    hudPill(ctx, coinX, top, coinW, ph);
-    drawCoin(ctx, coinX + 24 * s, cy, 12 * s);
-    text(ctx, `${this.coins}`, coinX + 44 * s, cy + 1, { size: 22 * s });
+    const coinY = stacked ? row2 : top;
+    const coinCy = coinY + ph / 2;
+    const coinX = stacked ? left : left + fuelW + HUD_GAP * k;
+    const coinW = COIN_W * k;
+    hudPill(ctx, coinX, coinY, coinW, ph);
+    drawCoin(ctx, coinX + 24 * s, coinCy, 12 * s);
+    text(ctx, `${this.coins}`, coinX + 44 * s, coinCy + 1, { size: 22 * s });
     for (const fl of this.flyers) {
       const e = fl.t * fl.t;
-      drawCoin(ctx, lerp(fl.x, coinX + 24 * s, e), lerp(fl.y, cy, e), 9 * s * (1 - 0.3 * fl.t));
+      drawCoin(ctx, lerp(fl.x, coinX + 24 * s, e), lerp(fl.y, coinCy, e), 9 * s * (1 - 0.3 * fl.t));
     }
     if (this.shield) {
-      const gx = coinX + coinW + 10 * s;
-      hudPill(ctx, gx, top, ph, ph);
-      this.drawShieldIcon(gx + ph / 2, cy, 14 * s);
+      const gx = coinX + coinW + HUD_GAP * k;
+      hudPill(ctx, gx, coinY, ph, ph);
+      this.drawShieldIcon(gx + ph / 2, coinCy, 14 * s);
     }
 
-    // Distance + score
-    const distW = 170 * s;
+    // Distance + score. The score sits under the distance, or at the right of the second row.
+    const distW = DIST_W * k;
     hudPill(ctx, right - distW, top, distW, ph);
     text(ctx, `${Math.floor(this.meters)} m`, right - 16 * s, cy + 1, { size: 24 * s, align: 'right' });
-    text(ctx, `${Math.floor(this.score).toLocaleString('en-US')} pts`, right - 16 * s, top + ph + 16 * s, {
-      size: 15 * s,
-      align: 'right',
-      color: '#eef',
-    });
+    const score = `${Math.floor(this.score).toLocaleString('en-US')} pts`;
+    if (stacked) {
+      text(ctx, score, right - 16 * s, cy2 + 1, { size: 15 * s, align: 'right', color: '#eef' });
+    } else {
+      text(ctx, score, right - 16 * s, top + ph + 16 * s, { size: 15 * s, align: 'right', color: '#eef' });
+    }
     // Speed
     const kmh = Math.round((this.car.speed() / PX_PER_M) * 3.6);
-    const spW = 104 * s;
-    const spX = right - distW - 10 * s - spW;
-    hudPill(ctx, spX, top, spW, ph);
-    text(ctx, `${kmh}`, spX + 58 * s, cy + 1, { size: 22 * s, align: 'right' });
-    text(ctx, 'km/h', spX + 62 * s, cy + 3 * s, { size: 13 * s, color: '#aab', weight: 600 });
+    const spW = SPEED_W * k;
+    const spRight = stacked ? right - 124 * s - HUD_GAP * k : right - distW - HUD_GAP * k;
+    const spX = spRight - spW;
+    const spY = stacked ? row2 : top;
+    const spCy = spY + ph / 2;
+    hudPill(ctx, spX, spY, spW, ph);
+    text(ctx, `${kmh}`, spX + 58 * k, spCy + 1, { size: 22 * s, align: 'right' });
+    text(ctx, 'km/h', spX + 62 * k, spCy + 3 * s, { size: 13 * s, color: '#aab', weight: 600 });
 
     const bannerY = Math.max(this.hudTop() + 30, this.H * 0.24);
     if (this.crashed && this.crashReason) {
@@ -872,8 +926,10 @@ export class HillGame extends BaseGame {
       const y = this.H - ins.bottom - 34 * s;
       ctx.font = `700 ${16 * s}px system-ui, sans-serif`;
       const w = Math.min(this.W - 40, 520 * s);
+      // Shrink the line on narrow canvases so it stays inside its pill.
+      const fit = Math.min(1, (w - 32 * s) / Math.max(1, ctx.measureText(this.hint).width));
       fillRoundRect(ctx, this.W / 2 - w / 2, y - 18 * s, w, 36 * s, 18 * s, 'rgba(8,10,30,0.7)');
-      text(ctx, this.hint, this.W / 2, y + 1, { size: 16 * s, align: 'center', weight: 700 });
+      text(ctx, this.hint, this.W / 2, y + 1, { size: 16 * s * fit, align: 'center', weight: 700 });
       ctx.restore();
     }
   }
@@ -902,7 +958,11 @@ export class HillGame extends BaseGame {
     ctx.scale(sc, sc);
     text(ctx, title, 0, 0, { size, align: 'center', color, strokeWidth: 7 });
     if (sub)
-      text(ctx, sub, 0, size * 0.85, { size: Math.min(22, this.W / 34), align: 'center', weight: 700 });
+      text(ctx, sub, 0, size * 0.85, {
+        size: this.touchUi ? 22 : Math.min(22, this.W / 34),
+        align: 'center',
+        weight: 700,
+      });
     ctx.restore();
   }
 

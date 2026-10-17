@@ -11,7 +11,10 @@ export const hillGame: GameDefinition = {
   inspiredBy: 'Hill Climb Racing',
   width: 960,
   height: 540,
-  viewport: { minWidth: 880, maxWidth: 1280, minHeight: 540, maxHeight: 760 },
+  // Phones in landscape get the design width and a shorter height, so the HUD and the car stay
+  // large; the range still covers the 880 to 1280 wide desktop window (960 x 558 at 1280 x 800).
+  viewport: { minWidth: 520, maxWidth: 960, minHeight: 360, maxHeight: 760 },
+  orientation: 'landscape',
   accent: '#4dd9ff',
   gradient: ['#4dd9ff', '#2a7f62'],
   controls: [

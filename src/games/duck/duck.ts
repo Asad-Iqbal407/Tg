@@ -1078,7 +1078,7 @@ export class DuckGame extends BaseGame {
       );
       if (this.phaseT >= PACE.roundSkip && t < 0.8) {
         text(ctx, 'Click or shoot to continue', this.W / 2, this.H * 0.38 + 92, {
-          // At least 13 CSS px on a phone; the hint is the only line that stays small otherwise.
+          // Keeps at least 13 CSS px on a phone.
           size: Math.max(17, 13 / this.cssPerLogical()),
           align: 'center',
           weight: 700,
