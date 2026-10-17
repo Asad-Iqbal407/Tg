@@ -1,0 +1,67 @@
+name: Android APK
+
+# Builds a debug APK of the web app inside the Capacitor Android shell and publishes it as a
+# pre-release named android-latest, so it can be downloaded straight to a phone.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the Android SDK packages the project targets
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - run: npm ci
+
+      - name: Build the web app and copy it into the Android project
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Build the debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk neon-arcade.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neon-arcade-apk
+          path: neon-arcade.apk
+          retention-days: 14
+
+      - name: Publish the APK as the android-latest pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: Neon Arcade Android (latest build)
+          prerelease: true
+          body: Debug build of the web app for Android. Enable "Install unknown apps" for your browser, then open neon-arcade.apk.
+          files: neon-arcade.apk
