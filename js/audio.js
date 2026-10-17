@@ -22,7 +22,13 @@ function createSynth(ac) {
   comp.threshold.value = -15; comp.knee.value = 12; comp.ratio.value = 3.5; comp.attack.value = 0.006; comp.release.value = 0.25;
   master.connect(comp); comp.connect(ac.destination);
 
-  const S = { ac, master, bus: null };
+  const S = { ac, master, bus: null, voices: {} };
+  // recorded dialogue: base64 MP3 clips from js/voices.js, decoded once per audio context
+  S.loadVoices = () => S._voicesP || (S._voicesP = Promise.all(Object.entries(typeof VOICES !== 'undefined' ? VOICES : {}).map(async ([k, v]) => {
+    const bin = atob(v.a), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    try { S.voices[k] = await ac.decodeAudioData(u8.buffer); } catch (e) { /* that line stays subtitled only */ }
+  })));
   S.newBus = () => {
     const b = {};
     b.out = ac.createGain(); b.out.connect(master);
@@ -31,6 +37,7 @@ function createSynth(ac) {
     const ro = ac.createGain(); ro.gain.value = 0.5; b.rev.connect(ro); ro.connect(b.out);
     b.mus = ac.createGain(); b.mus.gain.value = 0.8; b.mus.connect(b.out);
     b.sfx = ac.createGain(); b.sfx.gain.value = 0.95; b.sfx.connect(b.out);
+    b.vox = ac.createGain(); b.vox.gain.value = 1.45; b.vox.connect(b.out);
     return (S.bus = b);
   };
   S.killBus = () => {
@@ -42,7 +49,7 @@ function createSynth(ac) {
   const route = (node, kind, wet = 0, pan = 0) => {
     let n = node;
     if (pan && ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); node.connect(p); n = p; }
-    n.connect(kind === 'm' ? S.bus.mus : S.bus.sfx);
+    n.connect(kind === 'm' ? S.bus.mus : kind === 'v' ? S.bus.vox : S.bus.sfx);
     if (wet) { const g = ac.createGain(); g.gain.value = wet; n.connect(g); g.connect(S.bus.revIn); }
   };
   const osc = (type, f, t, t1) => { const o = ac.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.start(t); o.stop(t1); return o; };
@@ -257,11 +264,18 @@ function createSynth(ac) {
       for (let x = 0.3; x < d - 0.4; x += 0.6 + rnd() * 1.5) { const f = 2600 + rnd() * 1400, o = osc('sine', f, t + x, t + x + 0.16); o.frequency.exponentialRampToValueAtTime(f * 1.35, t + x + 0.08); o.frequency.exponentialRampToValueAtTime(f * 0.9, t + x + 0.15); const g = env(t + x, 0.01, 0.13, p.v ?? 0.03); o.connect(g); route(g, 's', 0.4, rnd() - 0.5); }
     },
     duck(t, p) { if (!S.bus) return; const gp = S.bus.mus.gain; gp.setTargetAtTime(p.to, t, p.tc ?? 0.12); },
+    voice(t, p) {
+      const buf = S.voices[p.key]; if (!buf) return;
+      const src = ac.createBufferSource(); src.buffer = buf;
+      const g = ac.createGain(); g.gain.value = 1; src.connect(g);
+      route(g, 'v', p.wet ?? 0.12, p.pan || 0);
+      src.start(t, p.off || 0);
+    },
   };
   S.play = (ev, when, into = 0) => {
     const fn = I[ev.type]; if (!fn || !S.bus) return;
     let p = ev.p;
-    if (into > 0) { if (!(p.d > into + 0.4)) return; p = Object.assign({}, p, { d: p.d - into }); }
+    if (into > 0) { if (!(p.d > into + 0.4)) return; p = Object.assign({}, p, { d: p.d - into, off: into }); }
     try { fn(Math.max(when, ac.currentTime), p); } catch (e) { /* a bad event never stops the film */ }
   };
   return S;
@@ -418,6 +432,12 @@ function buildScore(TL) {
       case 'end': at(0.3, 'taiko', { v: 0.4 }); break;
     }
   }
+  const PAN = { A: -0.15, KR: -0.15, K: 0.15, S: 0.15, AS: -0.1, P: 0.1, N: 0 };
+  for (const c of TL.cues) {
+    add(c.t, 'voice', { key: c.key, d: c.d, pan: PAN[c.who] || 0, wet: c.who === 'P' || c.who === 'AS' ? 0.35 : 0.12 });
+    add(c.t - 0.12, 'duck', { to: 0.4 });
+    add(c.t + c.d, 'duck', { to: 0.8, tc: 0.4 });
+  }
   ev.sort((a, b) => a.t - b.t);
   return ev;
 }
@@ -428,24 +448,21 @@ function createAudioTransport(TL) {
   if (!AC) return null;
   const ac = new AC({ latencyHint: 'playback' });
   const syn = createSynth(ac), events = buildScore(TL);
-  const X = { ac, playing: false, T0: 0, acT0: 0, ptr: 0, timer: 0, duckOn: false, voiceCues: TL.cues, vptr: 0 };
+  const X = { ac, playing: false, T0: 0, acT0: 0, ptr: 0, timer: 0, ready: syn.loadVoices() };
   X.now = () => X.T0 + (ac.currentTime - X.acT0);
   X.tick = () => {
     if (!X.playing) return;
     const horizon = X.now() + 0.4;
     while (X.ptr < events.length && events[X.ptr].t < horizon) { const e = events[X.ptr++]; syn.play(e, X.acT0 + (e.t - X.T0)); }
-    while (X.vptr < X.voiceCues.length && X.voiceCues[X.vptr].t < horizon) {
-      const c = X.voiceCues[X.vptr++];
-      if (X.duckOn) { const at = X.acT0 + (c.t - X.T0); syn.play({ type: 'duck', p: { to: 0.42 } }, at - 0.1); syn.play({ type: 'duck', p: { to: 0.8, tc: 0.4 } }, at + c.d); }
-    }
   };
   X.start = async (T) => {
     if (ac.state !== 'running') { try { await ac.resume(); } catch (e) { /* stays suspended */ } }
+    await X.ready;
     syn.killBus(); syn.newBus();
     X.T0 = T; X.acT0 = ac.currentTime + 0.05; X.playing = true;
+    if (TL.cues.some((c) => c.t <= T && T < c.t + c.d)) syn.bus.mus.gain.value = 0.4;
     for (const e of events) if (e.t < T && e.t + (e.p.d || 0) > T + 0.4) syn.play(e, X.acT0, T - e.t);
     X.ptr = events.findIndex((e) => e.t >= T); if (X.ptr < 0) X.ptr = events.length;
-    X.vptr = X.voiceCues.findIndex((c) => c.t >= T); if (X.vptr < 0) X.vptr = X.voiceCues.length;
     clearInterval(X.timer); X.timer = setInterval(X.tick, 60); X.tick();
   };
   X.stop = () => { X.playing = false; clearInterval(X.timer); syn.killBus(); };
@@ -454,17 +471,44 @@ function createAudioTransport(TL) {
 }
 
 /* ---------- offline mix for the MP4 renderer ---------- */
+// One giant offline graph is far too slow, so music and effects render in 12 s chunks (each with its
+// own tail), the dialogue is laid in directly, and the music dips under every spoken line.
 async function renderAudioOffline(TL, sr = 48000) {
-  const ac = new OfflineAudioContext(2, Math.ceil(sr * (TL.dur + 1)), sr);
-  const syn = createSynth(ac); syn.newBus();
-  for (const e of buildScore(TL)) syn.play(e, e.t);
-  const buf = await ac.startRendering();
-  const L = buf.getChannelData(0), R = buf.getChannelData(1), n = L.length;
+  const all = buildScore(TL), events = all.filter((e) => e.type !== 'voice' && e.type !== 'duck');
+  const n = Math.ceil(sr * (TL.dur + 1)), L = new Float32Array(n), R = new Float32Array(n);
+  const SEG = 12;
+  for (let s0 = 0; s0 < TL.dur; s0 += SEG) {
+    const evs = events.filter((e) => e.t >= s0 && e.t < s0 + SEG);
+    if (!evs.length) continue;
+    const end = Math.min(TL.dur + 1, Math.max(...evs.map((e) => e.t + (e.p.d || 3))) + 4);
+    const ac = new OfflineAudioContext(2, Math.ceil((end - s0) * sr), sr);
+    const syn = createSynth(ac); syn.newBus();
+    for (const e of evs) syn.play(e, e.t - s0);
+    const buf = await ac.startRendering(), off = Math.round(s0 * sr), bl = buf.getChannelData(0), br = buf.getChannelData(1);
+    for (let i = 0, m = Math.min(bl.length, n - off); i < m; i++) { L[off + i] += bl[i]; R[off + i] += br[i]; }
+  }
+  // duck under dialogue: 0.12 s down, 0.4 s back up
+  const duck = new Float32Array(n).fill(1);
+  for (const c of TL.cues) for (let i = Math.max(0, Math.round((c.t - 0.12) * sr)), e = Math.min(n, Math.round((c.t + c.d) * sr)); i < e; i++) duck[i] = 0.42;
+  for (let i = 1, g = 1; i < n; i++) { const k = duck[i] < g ? 1 / (0.12 * sr) : 1 / (0.4 * sr); g += (duck[i] - g) * Math.min(1, k * 4); duck[i] = g; }
+  for (let i = 0; i < n; i++) { L[i] *= duck[i]; R[i] *= duck[i]; }
+  const dec = new OfflineAudioContext(1, 1, sr), PAN = { A: -0.15, KR: -0.15, K: 0.15, S: 0.15, AS: -0.1, P: 0.1, N: 0 };
+  for (const c of TL.cues) {
+    const v = typeof VOICES !== 'undefined' && VOICES[c.key]; if (!v) continue;
+    const bin = atob(v.a), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    let vb; try { vb = await dec.decodeAudioData(u8.buffer); } catch (e) { continue; }
+    const x = vb.getChannelData(0), off = Math.round(c.t * sr), p = PAN[c.who] || 0;
+    const gl = Math.cos((p + 1) * Math.PI / 4) * 1.7, gr = Math.sin((p + 1) * Math.PI / 4) * 1.7;
+    for (let i = 0, m = Math.min(x.length, n - off); i < m; i++) { L[off + i] += x[i] * gl; R[off + i] += x[i] * gr; }
+  }
+  let peak = 0; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
+  const norm = peak > 0.95 ? 0.95 / peak : 1;
   const out = new DataView(new ArrayBuffer(44 + n * 4));
   const str = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)); };
   str(0, 'RIFF'); out.setUint32(4, 36 + n * 4, true); str(8, 'WAVE'); str(12, 'fmt '); out.setUint32(16, 16, true);
   out.setUint16(20, 1, true); out.setUint16(22, 2, true); out.setUint32(24, sr, true); out.setUint32(28, sr * 4, true); out.setUint16(32, 4, true); out.setUint16(34, 16, true);
   str(36, 'data'); out.setUint32(40, n * 4, true);
-  for (let i = 0, o = 44; i < n; i++, o += 4) { out.setInt16(o, clamp(L[i], -1, 1) * 32767, true); out.setInt16(o + 2, clamp(R[i], -1, 1) * 32767, true); }
+  for (let i = 0, o = 44; i < n; i++, o += 4) { out.setInt16(o, clamp(L[i] * norm, -1, 1) * 32767, true); out.setInt16(o + 2, clamp(R[i] * norm, -1, 1) * 32767, true); }
   return new Uint8Array(out.buffer);
 }

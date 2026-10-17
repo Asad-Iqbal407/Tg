@@ -1,13 +1,44 @@
 'use strict';
 /* दृश्य — shot library. Each shot draws one frame: (ctx, localTime, shot). */
 
-const HZ = 720, GY = 905;
-const DUEL = { A: 430, K: 1490, s: 0.52 };
+const HZ = 720, GY = 935;
+const DUEL = { A: 330, K: 1590, s: 0.62 };
 const RIM_A = [255, 236, 200], RIM_K = [255, 160, 70];
 const FLAG_A = [236, 118, 28], FLAG_K = [232, 182, 62];
+const ARROW_A = [200, 230, 255], ARROW_K = [255, 160, 60];
+let FRAME_T = 0; // absolute film time of the frame being drawn (set by the player)
 
 function cam(c, x, y, z, rot = 0) { c.translate(W / 2, H / 2); c.scale(z, z); c.rotate(rot); c.translate(-x, -y); }
 function shake(lt, amp, seed = 0, f = 24) { return [vnoise(lt * f + seed) * amp, vnoise(lt * f + 50 + seed) * amp]; }
+const lightOf = (p) => ({ light: p.sun, shadow: p.mid, haze: [p.haze, 0.1] });
+
+// how far the speaker's mouth is open right now, from the recorded voice's loudness
+function mouthOf(who) {
+  if (typeof TL === 'undefined') return 0;
+  for (const cue of TL.cues) {
+    if (cue.t > FRAME_T) break;
+    if (cue.who !== who || FRAME_T >= cue.t + cue.d) continue;
+    const v = typeof VOICES !== 'undefined' && VOICES[cue.key];
+    if (!v) return 0.35 + 0.35 * Math.sin(FRAME_T * 17);
+    const i = Math.floor((FRAME_T - cue.t) / 0.04);
+    return i >= 0 && i < v.e.length ? +v.e[i] / 9 : 0;
+  }
+  return 0;
+}
+
+// a standing figure: rim light toward the sun, then painted and shaded as one layer
+function person(c, who, x, y, sc, flip, opts, p, rot = 0, rim) {
+  c.save(); c.translate(x, y); c.scale(flip ? -sc : sc, sc); c.rotate(rot);
+  c.save(); c.translate(-2.5, -1.5); figure(c, flat(rim || p.rim), opts); c.restore();
+  withLayer(c, (lc) => {
+    figure(lc, LOOK[who], opts);
+    const g = lc.createLinearGradient(0, -260, 0, 0);
+    g.addColorStop(0, rgba(p.sun, 0.06)); g.addColorStop(1, rgba(BLACK, 0.35));
+    shadeAtop(lc, g, -200, -400, 400, 420);
+    shadeAtop(lc, rgba(p.haze, 0.1), -200, -400, 400, 420);
+  });
+  c.restore();
+}
 
 // standard battlefield background
 function field(c, p, lt, o = {}) {
@@ -25,25 +56,25 @@ function field(c, p, lt, o = {}) {
 
 // both chariots facing each other across the field
 function duel(c, lt, p, o = {}) {
-  const ax = DUEL.A + (o.aDx || 0), kx = DUEL.K + (o.kDx || 0);
-  chariot(c, {
+  const ax = DUEL.A + (o.aDx || 0), kx = DUEL.K + (o.kDx || 0), L = lightOf(p);
+  chariot(c, Object.assign({
     x: ax, y: GY, s: DUEL.s, dir: 1, t: lt, ph: o.aPh ?? lt * 0.3, wheel: o.aWheel || 0, kneel: o.aKneel || 0, sink: o.aSink || 0,
-    col: p.sil, far: p.haze, rim: o.rimA || mixc(p.rim, RIM_A, 0.5), rimOff: [3, -1],
+    who: 'A', driverWho: 'KR', rim: mixc(p.rim, RIM_A, 0.5), rimOff: [3, -2],
     warrior: { crown: o.aCrown === false ? null : 'kirita', draw: o.aDraw ?? 0, lean: o.aLean || 0, bowDrop: o.aBowDrop || 0 },
     driver: { crown: 'mukut' }, flag: 'hanuman', flagCol: FLAG_A, flagWind: o.wind ?? 1,
-  });
-  chariot(c, {
+  }, L));
+  chariot(c, Object.assign({
     x: kx, y: GY, s: DUEL.s, dir: -1, t: lt + 3, ph: o.kPh ?? lt * 0.3 + 0.4, wheel: o.kWheel || 0, tilt: o.kTilt || 0, sink: o.kSink || 0,
-    col: p.sil, far: p.haze, rim: o.rimK || mixc(p.rim, RIM_K, 0.5), rimOff: [-3, -1], noWarrior: o.kGround,
+    who: 'K', driverWho: 'S', rim: mixc(p.rim, RIM_K, 0.5), rimOff: [-3, -2], noWarrior: o.kGround,
     warrior: { crown: 'karna', draw: o.kDraw ?? 0, lean: o.kLean || 0 },
-    driver: { crown: 'turban' }, flag: 'rope', flagCol: FLAG_K, flagFall: o.kFlagFall || 0, flagWind: o.wind ?? 1,
-  });
+    driver: { crown: 'turban', beard: true }, flag: 'rope', flagCol: FLAG_K, flagFall: o.kFlagFall || 0, flagWind: o.wind ?? 1,
+  }, L));
 }
-const BOW_A = (dx = 0) => [DUEL.A + dx + 29, 732];
-const BOW_K = (dx = 0) => [DUEL.K + dx - 29, 732];
+const BOW_A = (dx = 0) => [DUEL.A + dx + 35, 729];
+const BOW_K = (dx = 0) => [DUEL.K + dx - 35, 729];
 
 function arcPos(a, b, u, h) { return [lerp(a[0], b[0], u), lerp(a[1], b[1], u) - Math.sin(Math.PI * u) * h]; }
-// a volley of arrows; clash=true meets midway with sparks
+// a volley of arrows with glowing trails; clash=true meets midway with sparks
 function volley(c, lt, v) {
   const seed = v.seed || 0, n = v.n;
   for (let k = 0; k < n; k++) {
@@ -55,22 +86,18 @@ function volley(c, lt, v) {
     if (age <= ft * stop) {
       const u = age / ft, p0 = arcPos(v.a, b, u, h), p1 = arcPos(v.a, b, Math.min(1, u + 0.02), h);
       const ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
-      if (v.glow) { c.save(); c.globalCompositeOperation = 'lighter'; c.strokeStyle = rgba(v.glow, 0.35); c.lineWidth = 2; c.beginPath(); c.moveTo(p0[0], p0[1]); c.lineTo(p0[0] - Math.cos(ang) * 90, p0[1] - Math.sin(ang) * 90); c.stroke(); c.restore(); }
-      arrowShape(c, p0[0], p0[1], ang, v.len ?? 34, rgba(v.col), v.w ?? 2.2);
-    } else if (age < ft * stop + 0.5 && v.spark) {
+      c.save(); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+      const g = c.createLinearGradient(p0[0], p0[1], p0[0] - Math.cos(ang) * 170, p0[1] - Math.sin(ang) * 170);
+      g.addColorStop(0, rgba(v.glow, 0.85)); g.addColorStop(1, rgba(v.glow, 0));
+      c.strokeStyle = g; c.lineWidth = 5; c.beginPath(); c.moveTo(p0[0], p0[1]); c.lineTo(p0[0] - Math.cos(ang) * 170, p0[1] - Math.sin(ang) * 170); c.stroke();
+      glowAt(c, p0[0], p0[1], 26, v.glow, 0.8);
+      c.restore();
+      arrowShape(c, p0[0], p0[1], ang, v.len ?? 62, rgba(v.col || [60, 40, 30]), v.w ?? 3.4);
+    } else if (age < ft * stop + 0.6) {
       const p0 = arcPos(v.a, b, stop, h);
-      sparks(c, p0[0], p0[1], age - ft * stop, 9, v.spark, k + seed, 280, 0.45);
+      sparks(c, p0[0], p0[1], age - ft * stop, 16, v.spark || v.glow, k + seed, 420, 0.55);
     }
   }
-}
-function volleySfx(v, pan) {
-  const ev = [];
-  for (let k = 0; k < v.n; k += v.sfxEvery || 3) {
-    const ts = lerp(v.t0, v.t1, (k + hash(k + (v.seed || 0)) * 0.9) / v.n);
-    ev.push([ts, 'arrow', { v: 0.16, pan }]);
-    if (v.clash && k % 6 === 0) ev.push([ts + v.ft * 0.5, 'metal', { v: 0.08, pan: 0 }]);
-  }
-  return ev;
 }
 
 /* ---------- shots ---------- */
@@ -144,18 +171,18 @@ SHOT.run = (c, lt, s) => {
   const scroll = lt * 950 * dir, bob = Math.sin(lt * 15) * 2.5;
   c.save(); c.translate(0, bob * 0.4);
   field(c, p, lt, { scroll, sx: isA ? 1500 : 420, sy: 430, sr: 62, ca: 0.5, debris: 1.2 });
-  const cx = isA ? 690 : 1230, cy = 938 + bob;
+  const cx = isA ? 690 : 1230, cy = 945 + bob;
   for (let j = 0; j < 30; j++) { // dust kicked up by the wheels
     const tb = Math.floor(lt / 0.07) - j, age = lt - tb * 0.07;
     const x = cx + (-30 - age * 520) * dir + (hash(tb) - 0.5) * 40, y = cy - 30 - age * 90 - hash(tb + 3) * 30, r = 40 + age * 160;
     glowAt(c, x, y, r, mixc(p.haze, p.glow, 0.2), 0.24 * (1 - age / 2.1));
   }
-  chariot(c, {
-    x: cx, y: cy, s: 0.95, dir, t: lt, ph: lt * 2.4, wheel: lt * 7, col: p.sil, far: p.haze, rim: isA ? RIM_A : RIM_K, rimOff: [isA ? 3 : -3, -2],
-    warrior: { crown: isA ? 'kirita' : 'karna', draw: 0.15 }, driver: { crown: isA ? 'mukut' : 'turban' },
+  chariot(c, Object.assign({
+    x: cx, y: cy, s: 0.95, dir, t: lt, ph: lt * 2.4, wheel: lt * 7, who: s.who, driverWho: isA ? 'KR' : 'S', rim: isA ? RIM_A : RIM_K, rimOff: [isA ? 3 : -3, -2],
+    warrior: { crown: isA ? 'kirita' : 'karna', draw: 0.15 }, driver: { crown: isA ? 'mukut' : 'turban', beard: !isA },
     flag: isA ? 'hanuman' : 'rope', flagCol: isA ? FLAG_A : FLAG_K, flagWind: 1.7,
-  });
-  groundDust(c, lt, p, HZ, 0.35, scroll);
+  }, lightOf(p)));
+  groundDust(c, lt, p, HZ, 0.3, scroll);
   c.restore();
   motes(c, lt, 40, p.glow, 0.3, 4);
 };
@@ -167,13 +194,22 @@ const BUST = {
   A: { x: 680, flip: false, rim: [255, 240, 210] },
   KR: { x: 680, flip: false, rim: [150, 255, 232] },
 };
+function bustBackdrop(c, lt, p, sun, seed) {
+  drawSky(c, p, H * 0.92);
+  drawClouds(c, lt, { n: 6, y0: 120, y1: 640, sp: 10, a: 0.35, col: mixc(p.glow, p.mid, 0.6) });
+  if (sun) { drawSun(c, sun[0], sun[1], sun[2], p, 1); drawRays(c, sun[0], sun[1], lt, p, 0.07); }
+  armies(c, 900, p, lt * 8, 0.8, 0.9);
+  hazeBand(c, 900, p, 0.65);
+  c.fillStyle = rgba(p.g2); c.fillRect(-10, 900, W + 20, 300);
+  bokeh(c, lt, 14, mixc(p.glow, p.sun, 0.3), 0.18, seed);
+}
 SHOT.bust = (c, lt, s) => {
   const who = s.who, mood = s.mood || '', b = BUST[who];
-  let p, sun = null, rim = b.rim, tilt = 0, hy = 578, emberN = 20, ember = [255, 150, 60], sh = [0, 0];
+  let p, sun = null, rim = b.rim, tilt = 0, hy = 590, emberN = 20, ember = [255, 150, 60], sh = [0, 0];
   if (who === 'K') {
-    p = PAL.battle; sun = [b.x - 70, hy - 150, 230];
+    p = PAL.battle; sun = [b.x - 70, hy - 160, 230];
     if (mood === 'angry') { p = palMix(PAL.battle, PAL.fire, 0.65); emberN = 70; sh = shake(lt, 3); }
-    if (mood === 'resolve') { p = palMix(PAL.battle, PAL.venom, 0.35); sun = [b.x - 70, hy - 150, 200]; }
+    if (mood === 'resolve') { p = palMix(PAL.battle, PAL.venom, 0.35); sun = [b.x - 70, hy - 160, 200]; }
     if (mood === 'shame') { p = PAL.late; tilt = 0.06 + ss(0.5, 3, lt) * 0.14; sun = [b.x - 300, hy - 60, 170]; }
     if (mood === 'sun') { p = PAL.dusk; tilt = -0.2; sun = [430, 300, 190]; rim = [255, 200, 120]; emberN = 0; }
   } else if (who === 'S') { p = palMix(PAL.battle, PAL.sepia, 0.35); sun = [1700, 260, 70]; }
@@ -185,49 +221,151 @@ SHOT.bust = (c, lt, s) => {
     if (mood === 'smile') p = palMix(PAL.peacock, PAL.day, 0.25);
   }
   c.save(); c.translate(sh[0], sh[1]);
-  drawSky(c, p, H * 0.92);
-  drawClouds(c, lt, { n: 6, y0: 120, y1: 640, sp: 10, a: 0.35, col: mixc(p.glow, p.mid, 0.6) });
-  if (sun) { drawSun(c, sun[0], sun[1], sun[2], p, 1); drawRays(c, sun[0], sun[1], lt, p, 0.07); }
-  armies(c, 900, p, lt * 8, 0.8, 0.9);
-  hazeBand(c, 900, p, 0.65);
-  c.fillStyle = rgba(p.g2); c.fillRect(-10, 900, W + 20, 300);
-  bokeh(c, lt, 14, mixc(p.glow, p.sun, 0.3), 0.18, who.length * 7);
+  bustBackdrop(c, lt, p, sun, who.length * 7);
   const z = 1 + lt * 0.006, breathe = Math.sin(lt * 1.6) * 4;
-  bust(c, who, { x: b.x, y: hy + breathe, s: 318 * z, flip: b.flip, t: lt, tilt, dark: mixc(p.sil, BLACK, 0.4), rim, glow: 30 });
+  bust(c, who, { x: b.x, y: hy + breathe, s: 330 * z, flip: b.flip, t: lt, tilt, mood, mouth: mouthOf(who), rim, glow: 30, light: p.sun, dark: mixc(p.mid, BLACK, 0.5), tint: [p.mid, 0.08] });
   if (emberN) embers(c, lt, emberN, ember, { rise: 900, a: 0.8, seed: who.length });
   c.restore();
   motes(c, lt, 35, mixc(p.sun, p.glow, 0.4), 0.3);
 };
 
+// close-up with the bow: drawn while the mantra builds, released at the end
 SHOT.invoke = (c, lt, s) => {
   const ast = ASTRA[s.astra], col = ast.col, isK = s.who === 'K', fail = !!s.fail;
-  const hx = isK ? 1260 : 660, hy = 566, sc = 290 * (1 + lt * 0.012), dirx = isK ? -1 : 1;
-  const power = ss(0.1, Math.min(s.dur - 0.3, 3), lt), broken = fail ? ss(2.4, 4.4, lt) : 0, life = 1 - broken * 0.85;
+  const hx = isK ? 1270 : 650, hy = 590, sc = 285 * (1 + lt * 0.012), dirx = isK ? -1 : 1;
+  const rel = fail ? 1e9 : s.dur - 0.75, r = lt - rel;
+  const power = ss(0.1, Math.min(rel, 3), lt), broken = fail ? ss(2.4, 4.4, lt) : 0, life = 1 - broken * 0.85;
+  const draw = fail ? easeOut(ss(0, 1, lt)) * (1 - broken * 0.6) : easeOut(ss(0.1, Math.min(rel - 0.2, 2.2), lt));
   const p = palMix(PAL.night, isK ? PAL.battle : PAL.day, 0.25);
+  const kick = r > 0 ? shake(lt, 14 * Math.exp(-r * 7), 3) : [0, 0];
+  c.save(); c.translate(kick[0], kick[1]);
   drawSky(c, p, H);
   glowAt(c, hx, hy, 1100, col, (0.18 + power * 0.32) * life);
   bokeh(c, lt, 18, col, 0.16 * life, 11);
-  mandala(c, hx, hy, 370 + power * 40, lt, col, (0.15 + power * 0.55) * life * (fail ? 0.8 + 0.2 * Math.sin(lt * 40) : 1), ast.mantra, broken);
-  const tipX = hx + dirx * 1.62 * sc, tipY = hy + 0.19 * sc;
+  mandala(c, hx, hy, 370 + power * 40, lt, col, (0.15 + power * 0.55) * life * (fail ? 0.8 + 0.2 * Math.sin(lt * 40) : 1) * (r > 0 ? Math.max(0, 1 - r * 2) : 1), ast.mantra, broken);
+  const handX = lerp(0.98, 0.33, draw), tipX = hx + dirx * (handX + 1.3) * sc, tipY = hy + 0.19 * sc;
+  if (r < 0) {
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 40; i++) { // energy converging on the arrowhead
+      const ph = (lt * 0.7 + hash(i)) % 1, a = hash(i + 20) * TAU + lt * 0.8, rr = (1 - ph) * 420;
+      glowAt(c, tipX + Math.cos(a) * rr, tipY + Math.sin(a) * rr * 0.6, 14, col, ph * power * life * 0.9);
+    }
+    c.restore();
+  }
+  bust(c, s.who, { x: hx, y: hy, s: sc, flip: isK, t: lt, mood: 'fierce', mouth: mouthOf(s.who), rim: mixc(col, WHITE, 0.35), glow: 34, light: mixc(col, WHITE, 0.5), dark: [10, 6, 8], bow: { len: 1.3, draw, rel: r >= 0 ? r : -1 } });
   c.save(); c.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 40; i++) { // energy converging on the arrowhead
-    const ph = (lt * 0.7 + hash(i)) % 1, a = hash(i + 20) * TAU + lt * 0.8, r = (1 - ph) * 420;
-    glowAt(c, tipX + Math.cos(a) * r, tipY + Math.sin(a) * r * 0.6, 14, col, ph * power * life * 0.9);
+  if (r < 0) {
+    const flick = fail ? Math.max(0, 1 - broken * 1.4) * (0.6 + 0.4 * Math.sin(lt * 31)) : 1;
+    glowAt(c, tipX, tipY, 220 * (0.5 + power), col, 0.85 * power * flick);
+    glowAt(c, tipX, tipY, 60, WHITE, 0.9 * power * flick);
+  } else { // released: the astra leaves the bow
+    const x = hx + dirx * (1.63 * sc + r * 5200);
+    astraBolt(c, x, tipY, isK ? Math.PI : 0, col, 2.2, 900);
+    glowAt(c, hx + dirx * 1.05 * sc, hy + 0.26 * sc, 500, col, Math.max(0, 1 - r * 3));
+    shockRing(c, hx + dirx * 1.6 * sc, tipY, 40 + r * 900, 40, col, Math.max(0, 0.8 - r * 1.6));
   }
   c.restore();
-  bust(c, s.who, { x: hx, y: hy, s: sc, flip: isK, t: lt, dark: [8, 5, 6], rim: mixc(col, WHITE, 0.35), glow: 34, bow: { len: 1.62 } });
-  c.save(); c.globalCompositeOperation = 'lighter';
-  const flick = fail ? Math.max(0, 1 - broken * 1.4) * (0.6 + 0.4 * Math.sin(lt * 31)) : 1;
-  glowAt(c, tipX, tipY, 220 * (0.5 + power), col, 0.85 * power * flick);
-  glowAt(c, tipX, tipY, 60, WHITE, 0.9 * power * flick);
-  c.restore();
-  if (s.astra === 'anjalika') {
+  if (s.astra === 'anjalika' && r < 0) {
     c.save(); c.translate(tipX, tipY); c.scale(dirx * 1.6, 1.6); c.fillStyle = rgba([255, 236, 170], power);
     c.beginPath(); c.moveTo(30, -26); c.quadraticCurveTo(-14, -18, -8, 0); c.quadraticCurveTo(-14, 18, 30, 26); c.quadraticCurveTo(4, 14, 4, 0); c.quadraticCurveTo(4, -14, 30, -26); c.fill();
     c.restore();
   }
+  c.restore();
   if (fail) grade(c, [120, 20, 20], broken * 0.5, 'multiply');
-  if (!fail) fill(c, mixc(col, WHITE, 0.6), ss(s.dur - 0.35, s.dur, lt) * 0.9);
+  else fill(c, mixc(col, WHITE, 0.6), ss(s.dur - 0.25, s.dur, lt) * 0.7);
+};
+
+// medium close-up of an archer drawing and loosing a single arrow
+SHOT.shoot = (c, lt, s) => {
+  const who = s.who, isK = who === 'K', col = s.col || (isK ? ARROW_K : ARROW_A);
+  const rel = s.rel ?? s.dur - 0.9, r = lt - rel;
+  const p = s.pal ? PAL[s.pal] : isK ? PAL.battle : palMix(PAL.day, PAL.battle, 0.3);
+  const hx = isK ? 1330 : 590, hy = 610, sc = 275 * (1 + lt * 0.012), dirx = isK ? -1 : 1;
+  const kick = r > 0 ? shake(lt, 12 * Math.exp(-r * 6), 3) : [0, 0];
+  const draw = easeOut(ss(0.15, rel - 0.2, lt));
+  c.save(); c.translate(kick[0], kick[1]);
+  bustBackdrop(c, lt, p, [isK ? 520 : 1400, 330, 80], 5);
+  bust(c, who, { x: hx, y: hy, s: sc, flip: isK, t: lt, mood: 'fierce', rim: isK ? RIM_K : RIM_A, glow: 26, light: p.sun, dark: mixc(p.mid, BLACK, 0.5), bow: { len: 1.3, draw, rel: r >= 0 ? r : -1 } });
+  const handX = lerp(0.98, 0.33, draw), tipX = hx + dirx * (handX + 1.3) * sc, tipY = hy + 0.19 * sc;
+  c.save(); c.globalCompositeOperation = 'lighter';
+  if (r < 0) glowAt(c, tipX, tipY, 90, col, draw * 0.7);
+  else {
+    const x = hx + dirx * (1.63 * sc + r * 4600);
+    astraBolt(c, x, tipY, isK ? Math.PI : 0, col, 1.5, 700);
+    glowAt(c, hx + dirx * 1.05 * sc, hy + 0.26 * sc, 300, col, Math.max(0, 1 - r * 4));
+    shockRing(c, hx + dirx * 1.5 * sc, tipY, 30 + r * 700, 30, col, Math.max(0, 0.7 - r * 1.8));
+  }
+  c.restore();
+  if (r >= 0) arrowShape(c, hx + dirx * (1.63 * sc + r * 4600), tipY, isK ? Math.PI : 0, 260, '#3a2a1e', 7);
+  c.restore();
+  motes(c, lt, 30, mixc(p.sun, p.glow, 0.4), 0.3);
+};
+
+// the arrow arrives: sparks, splinters, and the target thrown back
+function splinters(c, x, y, e, n, col, seed, dir = 1) {
+  if (e < 0 || e > 1.4) return;
+  c.fillStyle = col;
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (hash(i + seed) - 0.5) * 2.4, v = 400 + hash(i + seed + 3) * 700;
+    const px = x + Math.cos(a) * v * e * dir * 0.8, py = y + Math.sin(a) * v * e + 1100 * e * e;
+    c.save(); c.translate(px, py); c.rotate(e * 14 * (hash(i) - 0.5)); c.fillRect(-9, -2.5, 18, 5); c.restore();
+  }
+}
+SHOT.hit = (c, lt, s) => {
+  const tgt = s.target, imp = s.at ?? 0.55, e = lt - imp;
+  const p = s.pal ? PAL[s.pal] : PAL.battle;
+  const sh = shake(lt, 16 * bump(imp - 0.02, imp + 0.6, lt));
+  c.save(); c.translate(sh[0], sh[1]);
+  if (tgt === 'K' || tgt === 'A') {
+    const isK = tgt === 'K', dir = isK ? -1 : 1, col = isK ? ARROW_A : ARROW_K, push = (s.push ?? 120) * easeOut(ss(imp, imp + 1.1, lt)) * -dir;
+    const sc = 1.3, cx = (isK ? 1180 : 740) + push, cy = 990;
+    field(c, p, lt, { sx: isK ? 560 : 1400, sy: 420, sr: 70, hz: 690 });
+    chariot(c, Object.assign({
+      x: cx, y: cy, s: sc, dir, t: lt, ph: 0.2 + push * 0.004, wheel: push / (120 * sc) * dir, who: tgt, driverWho: isK ? 'S' : 'KR',
+      rim: isK ? RIM_K : RIM_A, rimOff: [-3 * dir, -2], warrior: { crown: isK ? 'karna' : 'kirita', draw: 0.3, lean: -0.12 * bump(imp, imp + 1.2, lt) },
+      driver: { crown: isK ? 'turban' : 'mukut', beard: isK }, flag: isK ? 'rope' : 'hanuman', flagCol: isK ? FLAG_K : FLAG_A,
+    }, lightOf(p)));
+    const ix = cx + dir * -20 * sc, iy = cy - 190 * sc;
+    for (let i = 0; i < 8; i++) { const d2 = e - i * 0.08; if (d2 > 0 && d2 < 2.4) glowAt(c, cx - dir * (i * 40 - 60), cy - 30 - d2 * 40, 120 + d2 * 120, mixc(p.haze, p.glow, 0.25), (1 - d2 / 2.4) * 0.5); }
+    if (e < 0) { // incoming
+      const u = ss(imp - 0.4, imp, lt), x = lerp(isK ? -200 : W + 200, ix, u);
+      astraBolt(c, x, iy, isK ? 0 : Math.PI, col, 1.3, 520);
+      arrowShape(c, x, iy, isK ? 0 : Math.PI, 240, '#3a2a1e', 6);
+    } else { // embedded, still quivering
+      c.save(); c.translate(ix, iy); c.rotate((isK ? 0 : Math.PI) + Math.sin(e * 60) * 0.05 * Math.exp(-e * 4));
+      arrowShape(c, 0, 0, 0, 170, '#3a2a1e', 6); c.restore();
+      c.save(); c.globalCompositeOperation = 'lighter';
+      glowAt(c, ix, iy, 700, col, Math.max(0, 1 - e * 2.5));
+      sparks(c, ix, iy, e, 70, [255, 220, 150], 9, 1000, 0.9);
+      c.restore();
+      splinters(c, ix, iy, e, 22, '#6b2c1b', 4, -dir);
+    }
+    groundDust(c, lt, p, 690, 0.25);
+  } else if (tgt === 'armorA') {
+    const pp = palMix(PAL.late, PAL.day, 0.3), col = ARROW_K;
+    bustBackdrop(c, lt, pp, [1500, 300, 80], 3);
+    const recoil = bump(imp, imp + 1.6, lt);
+    bust(c, 'A', { x: 640 - recoil * 40, y: 480, s: 330, t: lt, tilt: -0.16 * recoil, mood: 'angry', rim: RIM_A, glow: 26, light: pp.sun, dark: mixc(pp.mid, BLACK, 0.5) });
+    const ix = 640 + 0.62 * 330 - recoil * 40, iy = 480 + 1.08 * 330;
+    if (e < 0) { const x = lerp(W + 200, ix, ss(imp - 0.35, imp, lt)); astraBolt(c, x, iy - 20, Math.PI + 0.06, col, 1.3, 520); arrowShape(c, x, iy - 20, Math.PI + 0.06, 240, '#3a2a1e', 6); }
+    else {
+      c.save(); c.translate(ix + e * 500, iy - e * 700 + 900 * e * e); c.rotate(Math.PI + e * 9); arrowShape(c, 0, 0, 0, 200, '#3a2a1e', 6); c.restore(); // glances off the armour
+      c.save(); c.globalCompositeOperation = 'lighter'; glowAt(c, ix, iy, 600, col, Math.max(0, 1 - e * 2.5)); sparks(c, ix, iy, e, 80, [255, 220, 150], 2, 1100, 0.9); c.restore();
+    }
+  } else if (tgt === 'flag') {
+    const pp = PAL.late, col = ARROW_A, fall = easeIn(ss(imp, imp + 1.8, lt)), px = 1080, cutY = 600;
+    field(c, pp, lt, { sx: 560, sy: 520, sr: 80, hz: 820 });
+    c.strokeStyle = '#3d190f'; c.lineCap = 'round'; c.lineWidth = 26;
+    c.beginPath(); c.moveTo(px, H + 40); c.lineTo(px, cutY); c.stroke();
+    c.save(); c.translate(px, cutY); c.rotate(fall * 1.25); c.translate(fall * 120, fall * fall * 950);
+    c.strokeStyle = '#3d190f'; c.lineWidth = 24; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, -470); c.stroke();
+    c.fillStyle = '#d9a441'; c.beginPath(); c.arc(0, -478, 18, 0, TAU); c.fill();
+    flagCloth(c, 0, -460, 560, 330, lt, FLAG_K, 'rope', 1.4 - fall);
+    c.restore();
+    if (e < 0) { const x = lerp(-200, px, ss(imp - 0.35, imp, lt)); astraBolt(c, x, cutY, 0, col, 1.3, 520); arrowShape(c, x, cutY, 0, 240, '#3a2a1e', 6); }
+    else { c.save(); c.globalCompositeOperation = 'lighter'; glowAt(c, px, cutY, 600, col, Math.max(0, 1 - e * 2.5)); sparks(c, px, cutY, e, 60, [255, 220, 150], 6, 900, 0.9); c.restore(); splinters(c, px, cutY, e, 26, '#5a2a14', 8, 1); }
+  }
+  c.restore();
 };
 
 // ----- astra spectacles -----
@@ -281,7 +419,7 @@ SHOT.astra = (c, lt, s) => {
   const kind = s.kind, col = ASTRA[kind].col;
   let p, sh = [0, 0], sa = 1, o = {};
   if (kind === 'agni') { const k = ss(0.7, 1.7, lt); p = palMix(PAL.battle, PAL.fire, k); sa = 1 - k * 0.5; sh = shake(lt, 5 * k * (0.5 + 0.5 * Math.sin(lt * 3))); }
-  else if (kind === 'varuna') { const k = ss(0.6, 2, lt); p = palMix(PAL.fire, PAL.storm, k); sa = 1 - k; o.cdark = k; }
+  else if (kind === 'varuna') { const k = ss(0.6, 2, lt); p = palMix(PAL.fire, PAL.storm, k); sa = 1 - k; }
   else if (kind === 'vayu') { const k = ss(1, 5, lt); p = palMix(PAL.storm, PAL.battle, k); sa = k; o.wind = 1 + 2 * bump(0.6, 7, lt); sh = shake(lt, 3 * bump(0.6, 6, lt)); }
   else if (kind === 'indra') { const k = ss(0.6, 1.4, lt); p = palMix(PAL.battle, PAL.indra, k); sa = 1 - k * 0.7; sh = shake(lt, 4 * k); }
   else { const k = ss(0.8, 1.8, lt); p = palMix(PAL.indra, PAL.bhargava, k); sa = 0.4; sh = shake(lt, 7 * ss(1.4, 2, lt) * (1 - ss(6, 8, lt))); }
@@ -300,28 +438,27 @@ SHOT.astra = (c, lt, s) => {
 
   duel(c, lt, p, { aDraw: kind === 'agni' || kind === 'vayu' || kind === 'indra' ? 1 - ss(0.1, 0.25, lt) : 0.2, kDraw: kind === 'varuna' || kind === 'bhargava' ? 1 - ss(0.1, 0.25, lt) : 0.2, wind: o.wind });
 
-  // launch bolt
   const src = kind === 'varuna' || kind === 'bhargava' ? K : A;
   const sky = kind === 'vayu' ? [1300, 260] : kind === 'agni' ? [1150, 210] : kind === 'varuna' ? [820, 200] : kind === 'indra' ? [1000, 180] : [1180, 300];
-  if (lt > 0.1 && lt < 0.9) {
-    const u = easeIn(ss(0.1, 0.85, lt)), q = arcPos(src, sky, u, 120), q2 = arcPos(src, sky, Math.max(0, u - 0.04), 120);
-    astraBolt(c, q[0], q[1], Math.atan2(q[1] - q2[1], q[0] - q2[0]), col, 1.2, 300);
+  if (lt > 0.05 && lt < 0.9) {
+    const u = easeIn(ss(0.05, 0.85, lt)), q = arcPos(src, sky, u, 120), q2 = arcPos(src, sky, Math.max(0, u - 0.04), 120);
+    astraBolt(c, q[0], q[1], Math.atan2(q[1] - q2[1], q[0] - q2[0]), col, 1.9, 420);
   }
   const burst = bump(0.8, 1.6, lt);
-  if (burst > 0) { shockRing(c, sky[0], sky[1], (lt - 0.8) * 1500, 90, col, burst); glowAt(c, sky[0], sky[1], 700, col, burst * 0.8); }
+  if (burst > 0) { shockRing(c, sky[0], sky[1], (lt - 0.8) * 1500, 90, col, burst); glowAt(c, sky[0], sky[1], 800, col, burst * 0.9); }
 
   if (kind === 'agni') {
     c.save(); c.globalCompositeOperation = 'lighter';
     for (let i = 0; i < 70; i++) {
       const ts = 1 + hash(i + 3) * (s.dur - 2), age = lt - ts, ft = 0.9 + hash(i) * 0.4;
       const x0 = 500 + hash(i + 9) * 1500, x1 = x0 + 260 + hash(i + 1) * 120, y1 = HZ + 30 + hash(i + 5) * 220;
-      if (age > 0 && age < ft) { const u = age / ft, x = lerp(x0, x1, u), y = lerp(-80, y1, u * u); astraBolt(c, x, y, Math.atan2(y1 + 80, x1 - x0), [255, 120, 30], 0.55, 200); }
-      else if (age >= ft && age < ft + 0.6) { const k = (age - ft) / 0.6; glowAt(c, x1, y1, 160 + k * 120, [255, 140, 40], (1 - k) * 0.8); }
+      if (age > 0 && age < ft) { const u = age / ft, x = lerp(x0, x1, u), y = lerp(-80, y1, u * u); astraBolt(c, x, y, Math.atan2(y1 + 80, x1 - x0), [255, 120, 30], 0.7, 240); }
+      else if (age >= ft && age < ft + 0.6) { const k = (age - ft) / 0.6; glowAt(c, x1, y1, 180 + k * 140, [255, 140, 40], (1 - k) * 0.85); }
     }
     c.restore();
     drawFires(c, lt + 7, ss(1.4, 3, lt), 1.3);
     embers(c, lt, 90, [255, 140, 40], { rise: 1000, a: 1, drift: 60 });
-    grade(c, [255, 90, 20], 0.25 * ss(1, 2, lt), 'overlay');
+    grade(c, [255, 90, 20], 0.22 * ss(1, 2, lt), 'overlay');
   }
   if (kind === 'varuna') {
     const rk = ss(1, 1.8, lt);
@@ -339,12 +476,12 @@ SHOT.astra = (c, lt, s) => {
       c.lineTo(x + 30 + Math.sin(lt * 3 + i) * 10, 200); c.lineTo(x + 60, HZ + 160); c.lineTo(x - 60, HZ + 160); c.fill();
     }
     c.restore();
-    for (let i = 0; i < FIRES.length; i += 2) { // steam where the fire dies
+    for (let i = 0; i < FIRES.length; i += 2) {
       const f = FIRES[i], a = bump(1.6 + hash(i) * 1.5, 7, lt) * 0.5;
       if (a > 0) glowAt(c, f.x, f.y - 60 - (lt - 1.6) * 40, 120 + (lt - 1.6) * 30, [210, 220, 230], a * 0.5);
     }
     rain(c, lt, rk, 0.18);
-    grade(c, [60, 120, 200], 0.3 * rk, 'soft-light');
+    grade(c, [60, 120, 200], 0.28 * rk, 'soft-light');
   }
   if (kind === 'vayu') {
     const wi = ss(0.5, 1.1, lt) * (1 - ss(6, 7.5, lt));
@@ -357,9 +494,8 @@ SHOT.astra = (c, lt, s) => {
     }
     c.restore();
     c.fillStyle = rgba(p.sil);
-    for (let i = 0; i < 60; i++) { // torn debris flying past
+    if (wi >= 0.2) for (let i = 0; i < 60; i++) {
       const sp = 1200 + hash(i) * 900, x = ((hash(i + 10) * (W + 600) + lt * sp) % (W + 600)) - 300, y = HZ - 200 + hash(i + 11) * 500 + Math.sin(lt * 3 + i) * 40;
-      if (wi < 0.2) continue;
       c.save(); c.translate(x, y); c.rotate(lt * 8 + i); c.fillRect(-6, -2, 12, 4); c.restore();
     }
     groundDust(c, lt * 3, p, HZ, 0.4 * wi, -lt * 900);
@@ -371,16 +507,16 @@ SHOT.astra = (c, lt, s) => {
       if (a > 0) { lightning(c, 1020, 260, x, HZ + 60 + hash(t0) * 120, t0 * 9, 3.5, [255, 236, 150], a); fill(c, [255, 245, 220], a * 0.2); }
     }
     c.save(); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
-    c.strokeStyle = rgba([255, 230, 150], 0.8); c.lineWidth = 2.2; c.beginPath();
+    c.strokeStyle = rgba([255, 230, 150], 0.85); c.lineWidth = 3; c.beginPath();
     const hits = [];
     for (let i = 0; i < 420; i++) {
       const ts = 1.2 + hash(i) * (s.dur - 1.6), age = lt - ts, ft = 0.55 + hash(i + 2) * 0.25;
       const x0 = 300 + hash(i + 3) * 1300, y1 = HZ + 10 + hash(i + 4) * 240, x1 = x0 + 520 + (y1 - HZ) * 0.6;
-      if (age > 0 && age < ft) { const u = age / ft, x = lerp(x0, x1, u), y = lerp(-60, y1, u); c.moveTo(x, y); c.lineTo(x - 26, y - 46); }
+      if (age > 0 && age < ft) { const u = age / ft, x = lerp(x0, x1, u), y = lerp(-60, y1, u); c.moveTo(x, y); c.lineTo(x - 34, y - 60); }
       else if (age >= ft && age < ft + 0.25) hits.push([x1, y1, age - ft]);
     }
     c.stroke();
-    for (const [x, y, a] of hits) glowAt(c, x, y, 26, [255, 210, 120], (1 - a / 0.25) * 0.8);
+    for (const [x, y, a] of hits) glowAt(c, x, y, 34, [255, 210, 120], (1 - a / 0.25) * 0.85);
     c.restore();
     groundDust(c, lt, p, HZ, 0.3 * ss(1.5, 3, lt), 0);
   }
@@ -389,7 +525,7 @@ SHOT.astra = (c, lt, s) => {
     parashu(c, sx, sy, 0.9 + sg * 0.25, -0.35 + Math.sin(lt) * 0.05, col, sg * (1 - ss(7, 8.5, lt) * 0.6));
     const waveR = (lt - 1.5) * 1700;
     for (const d of [0, 180, 360]) shockRing(c, sx, sy, waveR - d, 70, col, (1 - ss(1.5, 3.2, lt)) * 0.8);
-    c.save(); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.strokeStyle = rgba([255, 230, 150], 0.7); c.lineWidth = 2; c.beginPath();
+    c.save(); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.strokeStyle = rgba([255, 230, 150], 0.75); c.lineWidth = 2.6; c.beginPath();
     const pops = [];
     for (let i = 0; i < 160; i++) { // Indra's arrows still falling until the wave reaches them
       const ts = hash(i) * 2.2 - 0.6, age = lt - ts, ft = 0.8;
@@ -397,19 +533,19 @@ SHOT.astra = (c, lt, s) => {
       if (age < 0 || age > ft) continue;
       const u = age / ft, x = lerp(x0, x1, u), y = lerp(-60, y1, u);
       if (Math.hypot(x - sx, y - sy) < waveR) { pops.push([x, y]); continue; }
-      c.moveTo(x, y); c.lineTo(x - 26, y - 46);
+      c.moveTo(x, y); c.lineTo(x - 30, y - 52);
     }
     c.stroke();
-    for (const [x, y] of pops) glowAt(c, x, y, 30, col, 0.6);
+    for (const [x, y] of pops) glowAt(c, x, y, 34, col, 0.65);
     c.restore();
     for (let i = 0; i < 8; i++) { // strikes into the Pandava ranks
       const t0 = 2 + i * 0.6, a = bump(t0, t0 + 0.45, lt), tx = 120 + hash(i + 30) * 700, ty = HZ + 20 + hash(i + 31) * 60;
-      if (a > 0) { lightning(c, sx, sy, tx, ty, i * 13 + 5, 4, col, a); glowAt(c, tx, ty, 280, [255, 140, 220], a * 0.8); }
+      if (a > 0) { lightning(c, sx, sy, tx, ty, i * 13 + 5, 4, col, a); glowAt(c, tx, ty, 300, [255, 140, 220], a * 0.85); }
       const e = lt - t0 - 0.2;
       if (e > 0 && e < 2.5) { glowAt(c, tx, ty - e * 40, 140 + e * 120, [255, 120, 60], (1 - e / 2.5) * 0.5); sparks(c, tx, ty, e, 16, [255, 160, 220], i, 500, 1); }
     }
     embers(c, lt, 60, [255, 120, 220], { rise: 900, a: 0.7, x0: 0, w: 1000 });
-    grade(c, [180, 40, 160], 0.22 * sg, 'overlay');
+    grade(c, [180, 40, 160], 0.2 * sg, 'overlay');
   }
   c.restore();
 };
@@ -417,22 +553,12 @@ SHOT.astra = (c, lt, s) => {
 SHOT.wide = (c, lt, s) => {
   const mode = s.mode;
   if (mode === 'exchange') {
-    const p = PAL.battle;
-    const kPush = easeOut(ss(3.3, 4.1, lt)) * 95, aPush = -easeOut(ss(6.1, 6.6, lt)) * 26;
-    const sh = shake(lt, 6 * (bump(3.25, 3.9, lt) + bump(6.05, 6.5, lt)));
-    c.save(); c.translate(sh[0], sh[1]); cam(c, 960, 600, 1.02 + lt * 0.003);
+    const p = PAL.battle, dr = (lt * 1.4) % 1;
+    c.save(); cam(c, 960, 600, 1.02 + lt * 0.004);
     field(c, p, lt, { sx: 980, sy: 520, sr: 58 });
-    const dr = (lt * 1.6) % 1;
-    duel(c, lt, p, { aDx: aPush, kDx: kPush, aDraw: lt > 2.2 && lt < 2.8 ? ss(2.2, 2.6, lt) : dr, kDraw: lt > 5 && lt < 5.6 ? ss(5, 5.4, lt) : (dr + 0.5) % 1, kWheel: kPush / 62, aWheel: aPush / 62 });
-    volley(c, lt, { a: BOW_A(aPush), b: BOW_K(kPush), n: 26, t0: 0.2, t1: 9.5, ft: 0.75, arc: 80, col: p.sil, spark: [255, 200, 120], clash: true, seed: 1 });
-    volley(c, lt, { a: BOW_K(kPush), b: BOW_A(aPush), n: 26, t0: 0.3, t1: 9.6, ft: 0.75, arc: 80, col: p.sil, spark: [255, 200, 120], clash: true, seed: 2 });
-    for (const [t0, from, to, colr] of [[2.65, BOW_A(), [DUEL.K - 40, 760], [200, 230, 255]], [5.45, BOW_K(kPush), [DUEL.A + 30, 760], [255, 160, 60]]]) {
-      const u = ss(t0, t0 + 0.6, lt);
-      if (u > 0 && u < 1) { const q = arcPos(from, to, u, 50), q2 = arcPos(from, to, u - 0.03, 50); astraBolt(c, q[0], q[1], Math.atan2(q[1] - q2[1], q[0] - q2[0]), colr, 0.8, 220); }
-      const e = lt - t0 - 0.6;
-      if (e > 0 && e < 0.7) { sparks(c, to[0] + (t0 > 4 ? aPush : kPush), to[1], e, 24, colr, t0, 520, 0.7); glowAt(c, to[0] + (t0 > 4 ? aPush : kPush), to[1], 260, colr, (1 - e / 0.7) * 0.7); }
-    }
-    for (const [t0, x] of [[3.3, DUEL.K], [6.1, DUEL.A]]) { const e = lt - t0; if (e > 0 && e < 2.5) glowAt(c, x + (t0 > 4 ? aPush : kPush), GY - 20, 160 + e * 120, mixc(p.haze, p.glow, 0.3), (1 - e / 2.5) * 0.5); }
+    duel(c, lt, p, { aDraw: dr, kDraw: (dr + 0.5) % 1 });
+    volley(c, lt, { a: BOW_A(), b: BOW_K(), n: 16, t0: 0.2, t1: s.dur - 0.3, ft: 0.75, arc: 80, glow: ARROW_A, clash: true, seed: 1 });
+    volley(c, lt, { a: BOW_K(), b: BOW_A(), n: 16, t0: 0.3, t1: s.dur - 0.2, ft: 0.75, arc: 80, glow: ARROW_K, clash: true, seed: 2 });
     groundDust(c, lt, p, HZ, 0.3);
     c.restore();
     return;
@@ -444,8 +570,8 @@ SHOT.wide = (c, lt, s) => {
     const dr = (lt * 2.2) % 1;
     duel(c, lt, p, { aDraw: dr, kDraw: (dr + 0.5) % 1 });
     for (let w = 0; w < 3; w++) {
-      volley(c, lt, { a: BOW_A(), b: BOW_K(), n: 40, t0: w * 0.4, t1: s.dur, ft: 0.8, arc: 120 + w * 140, col: p.sil, spark: [255, 190, 110], clash: w > 0, seed: 10 + w, spread: 160, spreadY: 80 });
-      volley(c, lt, { a: BOW_K(), b: BOW_A(), n: 40, t0: w * 0.4 + 0.2, t1: s.dur, ft: 0.8, arc: 120 + w * 140, col: p.sil, spark: [255, 190, 110], clash: w > 0, seed: 20 + w, spread: 160, spreadY: 80 });
+      volley(c, lt, { a: BOW_A(), b: BOW_K(), n: 30, t0: w * 0.4, t1: s.dur, ft: 0.8, arc: 120 + w * 140, glow: ARROW_A, clash: w > 0, seed: 10 + w, spread: 160, spreadY: 80 });
+      volley(c, lt, { a: BOW_K(), b: BOW_A(), n: 30, t0: w * 0.4 + 0.2, t1: s.dur, ft: 0.8, arc: 120 + w * 140, glow: ARROW_K, clash: w > 0, seed: 20 + w, spread: 160, spreadY: 80 });
     }
     c.restore();
     return;
@@ -456,73 +582,54 @@ SHOT.wide = (c, lt, s) => {
     field(c, p, lt, { sx: 980, sy: 520, sr: 58, sa: 0.7 });
     duel(c, lt, p, { aCrown: false, aDraw: lt > 1.5 && lt < 3 ? (lt * 4) % 1 : 0.2, kDraw: 0 });
     const u = ss(0, 2.9, lt), fall = ss(3, 5.5, lt);
-    const sx = lerp(1600, 820, easeIn(u)) - fall * 60, sy = lerp(180, 560, u) + fall * fall * 500;
+    const sx = lerp(1600, 760, easeIn(u)) - fall * 60, sy = lerp(180, 540, u) + fall * fall * 500;
     if (fall < 1) {
       c.save(); c.globalAlpha = 1 - ss(4.5, 5.5, lt);
-      serpent(c, lt * 2, { x: sx, y: sy, s: 170, flip: true, rot: 0.5 + fall * 2, dark: [4, 10, 6], rim: [160, 255, 120], glow: 24, wig: 2,
+      serpent(c, lt * 2, { x: sx, y: sy, s: 210, flip: true, rot: 0.5 + fall * 2, dark: [20, 70, 30], rim: [160, 255, 120], glow: 24, wig: 2,
         ctrl: [[0, 0], [-0.3, -0.05], [-0.7, 0.05], [-1.1, -0.1], [-1.5, 0.05], [-1.9, -0.05]] });
       c.restore();
-      if (lt > 3) { c.save(); c.globalCompositeOperation = 'lighter'; for (let i = 0; i < 6; i++) flame(c, sx + (i - 3) * 30, sy + 20, 90 * (1 - fall), 40, lt, i); c.restore(); }
+      if (lt > 3) { c.save(); c.globalCompositeOperation = 'lighter'; for (let i = 0; i < 6; i++) flame(c, sx + (i - 3) * 30, sy + 20, 110 * (1 - fall), 46, lt, i); c.restore(); }
     }
     for (let i = 0; i < 6; i++) {
-      const t0 = 1.55 + i * 0.24, e = lt - t0, from = BOW_A(), tu = clamp((t0 + 0.28) / 2.9), to = [lerp(1600, 820, easeIn(tu)), lerp(180, 560, tu)];
-      if (e > 0 && e < 0.28) { const q = arcPos(from, to, e / 0.28, 30); astraBolt(c, q[0], q[1], Math.atan2(to[1] - from[1], to[0] - from[0]), [230, 240, 255], 0.5, 140); }
-      if (e >= 0.28 && e < 0.9) sparks(c, to[0], to[1], e - 0.28, 18, [150, 255, 120], i * 7, 380, 0.62);
+      const t0 = 1.55 + i * 0.24, e = lt - t0, from = BOW_A(), tu = clamp((t0 + 0.28) / 2.9), to = [lerp(1600, 760, easeIn(tu)), lerp(180, 540, tu)];
+      if (e > 0 && e < 0.28) { const q = arcPos(from, to, e / 0.28, 30); astraBolt(c, q[0], q[1], Math.atan2(to[1] - from[1], to[0] - from[0]), [230, 240, 255], 0.9, 220); }
+      if (e >= 0.28 && e < 0.9) sparks(c, to[0], to[1], e - 0.28, 24, [150, 255, 120], i * 7, 480, 0.62);
     }
-    if (lt > 2.9 && lt < 3.6) glowAt(c, sx, sy, 520, [150, 255, 120], bump(2.9, 3.6, lt));
+    if (lt > 2.9 && lt < 3.6) glowAt(c, sx, sy, 560, [150, 255, 120], bump(2.9, 3.6, lt));
     c.restore();
     return;
   }
-  // dharma, chestHit, flagCut: Karna stands on the ground beside his sunken chariot
+  // dharma / flagCut: Karna stands on the ground beside his sunken chariot
   const p = PAL.late;
-  const sh = mode === 'chestHit' ? shake(lt, 5 * bump(1.05, 1.6, lt)) : mode === 'flagCut' ? shake(lt, 4 * bump(2.1, 2.6, lt)) : [0, 0];
-  c.save(); c.translate(sh[0], sh[1]);
+  c.save();
   if (mode === 'dharma') cam(c, 960, 600, 1 + lt * 0.004);
   field(c, p, lt, { sx: 940, sy: 590, sr: 64, ra: 0.1 });
-  const fallFlag = mode === 'flagCut' ? ss(0.95, 2.2, lt) : 0;
-  const aLean = mode === 'chestHit' ? -0.22 * bump(1.05, 3.2, lt) : 0;
-  const aDraw = mode === 'flagCut' ? (lt < 0.55 ? ss(0, 0.45, lt) : 0) : mode === 'chestHit' ? 0.2 : 1;
-  duel(c, lt, p, { kGround: true, kTilt: 0.13, kSink: 34, aDraw, aLean, aBowDrop: mode === 'chestHit' ? 30 * bump(1.05, 3.2, lt) : 0, kFlagFall: fallFlag, kPh: 0.4, aPh: 0.1 });
-  const kx = 1330, ky = GY + 70, ksc = DUEL.s * 1.55;
-  c.save(); c.translate(kx, ky); c.scale(-ksc, ksc);
-  const kOpts = mode === 'dharma' ? { crown: 'karna', bow: false, armUp: ss(0.8, 2.2, lt), heldBow: true, t: lt }
-    : mode === 'chestHit' ? { crown: 'karna', draw: lt < 0.6 ? ss(0, 0.5, lt) : 0, t: lt }
-      : { crown: 'karna', bow: false, reach: true, heldBow: true, lean: 0.35, t: lt };
-  sil(c, (cc, col) => figure(cc, col, kOpts), p.sil, mixc(p.rim, RIM_K, 0.6), -3 / ksc, -1.5 / ksc, 0);
-  c.restore();
-  if (mode === 'chestHit') {
-    const from = [kx - 96 * ksc, ky - 182 * ksc], to = [DUEL.A - 20, GY - 150], u = ss(0.6, 1.05, lt);
-    if (u > 0 && u < 1) { const q = arcPos(from, to, u, 20); astraBolt(c, q[0], q[1], Math.atan2(to[1] - from[1], to[0] - from[0]), [255, 170, 70], 0.7, 200); }
-    sparks(c, to[0], to[1], lt - 1.05, 26, [255, 170, 70], 3, 520, 0.8);
-  }
-  if (mode === 'flagCut') {
-    const from = BOW_A(), to = [DUEL.K + 150 * DUEL.s, GY - 430 * DUEL.s], u = ss(0.5, 0.95, lt);
-    if (u > 0 && u < 1) { const q = arcPos(from, to, u, 60), q2 = arcPos(from, to, u - 0.03, 60); astraBolt(c, q[0], q[1], Math.atan2(q[1] - q2[1], q[0] - q2[0]), [220, 235, 255], 0.7, 200); }
-    sparks(c, to[0], to[1], lt - 0.95, 22, [255, 220, 150], 4, 420, 0.7);
-    const e = lt - 2.2;
-    if (e > 0 && e < 2.5) glowAt(c, DUEL.K + 330, GY - 10, 140 + e * 140, mixc(p.haze, p.glow, 0.3), (1 - e / 2.5) * 0.55);
-  }
+  duel(c, lt, p, { kGround: true, kTilt: 0.13, kSink: 34, aDraw: mode === 'flagCut' ? 0 : 1, kFlagFall: mode === 'flagCut' ? 0.55 + ss(0, 1.4, lt) * 0.45 : 0, kPh: 0.4, aPh: 0.1 });
+  const kOpts = mode === 'dharma' ? { crown: 'karna', bow: false, armUp: ss(0.8, 2.2, lt), heldBow: true, t: lt } : { crown: 'karna', bow: false, reach: true, heldBow: true, lean: 0.35, t: lt };
+  person(c, 'K', 1300, GY + 80, DUEL.s * 1.6, true, kOpts, p, 0, mixc(p.rim, RIM_K, 0.6));
+  if (mode === 'flagCut') { const e = lt; if (e < 2.5) glowAt(c, DUEL.K + 330, GY - 10, 140 + e * 140, mixc(p.haze, p.glow, 0.3), (1 - e / 2.5) * 0.55); }
   groundDust(c, lt, p, HZ, 0.25);
   c.restore();
 };
 
 SHOT.quiver = (c, lt, s) => {
-  const p = palMix(PAL.night, PAL.venom, 0.55), hx = 1250, hy = 578, sc = 318 * (1 + lt * 0.006);
+  const p = palMix(PAL.night, PAL.venom, 0.55), hx = 1250, hy = 590, sc = 318 * (1 + lt * 0.006);
   drawSky(c, p, H);
   glowAt(c, 1000, 480, 900, [90, 200, 80], 0.22);
   drawClouds(c, lt, { n: 8, y0: 100, y1: 900, sp: 6, a: 0.25, col: [70, 100, 70], seed: 30 });
   bokeh(c, lt, 12, [120, 255, 110], 0.12, 3);
-  bust(c, 'K', { x: hx, y: hy + Math.sin(lt * 1.4) * 3, s: sc, flip: true, t: lt, dark: [4, 8, 5], rim: [200, 255, 150], glow: 30 });
+  bust(c, 'K', { x: hx, y: hy + Math.sin(lt * 1.4) * 3, s: sc, flip: true, t: lt, mood: 'resolve', rim: [200, 255, 150], glow: 30, light: [200, 255, 170], dark: [10, 30, 15], tint: [[60, 140, 60], 0.12] });
   const ax = hx - 0.98 * sc, top = hy - 0.95 * sc, bot = hy + 1.45 * sc;
   c.save(); c.lineCap = 'round';
-  c.strokeStyle = rgba([5, 10, 6]); c.lineWidth = 16; c.beginPath(); c.moveTo(hx - 0.45 * sc, hy + 1.0 * sc); c.lineTo(ax + 6, hy + 0.55 * sc); c.stroke();
-  c.lineWidth = 9; c.beginPath(); c.moveTo(ax, bot); c.lineTo(ax, top); c.stroke();
-  c.fillStyle = rgba([5, 10, 6]); c.beginPath(); c.arc(ax + 4, hy + 0.55 * sc, 34, 0, TAU); c.fill();
+  c.strokeStyle = LOOK.K.skin; c.lineWidth = 16; c.beginPath(); c.moveTo(hx - 0.45 * sc, hy + 1.0 * sc); c.lineTo(ax + 6, hy + 0.55 * sc); c.stroke();
+  c.strokeStyle = '#4a2c14'; c.lineWidth = 9; c.beginPath(); c.moveTo(ax, bot); c.lineTo(ax, top); c.stroke();
+  c.fillStyle = LOOK.K.skin; c.beginPath(); c.arc(ax + 4, hy + 0.55 * sc, 34, 0, TAU); c.fill();
+  c.fillStyle = LOOK.K.gold; c.fillRect(ax - 30, hy + 0.55 * sc + 26, 60, 10);
   c.globalCompositeOperation = 'lighter';
   c.strokeStyle = rgba([150, 255, 120], 0.35 + 0.15 * Math.sin(lt * 5)); c.lineWidth = 3; c.beginPath(); c.moveTo(ax + 5, bot); c.lineTo(ax + 5, top); c.stroke();
   for (let i = 0; i < 14; i++) { const y = lerp(top, bot, i / 14) + Math.sin(lt * 2 + i) * 10; glowAt(c, ax + Math.sin(lt * 1.5 + i * 0.8) * 20, y, 40, [130, 255, 100], 0.25); }
   c.restore();
-  serpent(c, lt, { x: ax, y: top - 6, s: 150, rot: -Math.PI / 2, dark: [5, 10, 6], rim: [190, 255, 140], glow: 20, wig: 0.5, ctrl: [[0, 0], [-0.25, 0.02], [-0.55, -0.02], [-0.85, 0.01]] });
+  serpent(c, lt, { x: ax, y: top - 6, s: 150, rot: -Math.PI / 2, dark: [20, 70, 30], rim: [190, 255, 140], glow: 20, wig: 0.5, ctrl: [[0, 0], [-0.25, 0.02], [-0.55, -0.02], [-0.85, 0.01]] });
   drawClouds(c, lt, { n: 5, y0: top + 100, y1: hy + 200, sp: -14, a: 0.18, col: [180, 200, 170], sc: 0.6, seed: 61 });
   embers(c, lt, 26, [140, 255, 110], { rise: 700, a: 0.5 });
 };
@@ -541,7 +648,7 @@ SHOT.nagaFlight = (c, lt, s) => {
   const exit = easeIn(ss(s.dur - 0.9, s.dur, lt)) * 1500;
   const ax = 960 + Math.sin(sl * 2.2) * 30 - exit, ay = 470 + Math.sin(sl * 3.4) * 14, L = 560;
   c.save(); c.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 60; i++) { // venom fire trail
+  for (let i = 0; i < 60; i++) {
     const ph = (lt * 1.4 + hash(i)) % 1, x = ax + L * 0.5 + ph * 900, y = ay + (hash(i + 4) - 0.5) * 80 * ph + Math.sin(lt * 3 + i) * 10;
     glowAt(c, x, y, 40 + ph * 80, [120, 255, 90], (1 - ph) * 0.45);
   }
@@ -560,9 +667,9 @@ SHOT.nagaFlight = (c, lt, s) => {
     c.restore();
   };
   helix(false);
-  arrowShape(c, ax - L * 0.5, ay, Math.PI, L, rgba([6, 12, 8]), 8);
+  arrowShape(c, ax - L * 0.5, ay, Math.PI, L, '#2a3a20', 9);
   helix(true);
-  serpent(c, lt * 2, { x: ax - L * 0.5 - 10, y: ay, s: 230, flip: true, dark: [4, 10, 6], rim: [190, 255, 140], glow: 26, wig: 0.3, ctrl: [[0, 0], [-0.25, 0.02], [-0.5, -0.02], [-0.7, 0]] });
+  serpent(c, lt * 2, { x: ax - L * 0.5 - 10, y: ay, s: 230, flip: true, dark: [20, 70, 30], rim: [190, 255, 140], glow: 26, wig: 0.3, ctrl: [[0, 0], [-0.25, 0.02], [-0.5, -0.02], [-0.7, 0]] });
   c.restore();
   motes(c, lt, 50, [200, 255, 180], 0.35, 30);
 };
@@ -573,11 +680,11 @@ SHOT.press = (c, lt, s) => {
   const sh = shake(lt, 9 * bump(0.9, 1.6, lt));
   c.save(); c.translate(sh[0], sh[1]);
   field(c, p, lt, { sx: 1500, sy: 400, sr: 70, hz: 700, debris: 0.8 });
-  chariot(c, {
-    x: cx, y: gy, s: sc, dir: 1, t: lt, ph: 0.15, sink, kneel, col: p.sil, far: p.haze, rim: RIM_A, rimOff: [3, -2],
+  chariot(c, Object.assign({
+    x: cx, y: gy, s: sc, dir: 1, t: lt, ph: 0.15, sink, kneel, who: 'A', driverWho: 'KR', rim: RIM_A, rimOff: [3, -2],
     warrior: { crown: lt < hit ? 'kirita' : null, draw: 0.1, hairWind: lt > hit ? 3 : 1 }, driver: { crown: 'mukut', lean: 0.25 * ss(0.7, 0.95, lt) },
     flag: 'hanuman', flagCol: FLAG_A,
-  });
+  }, lightOf(p)));
   const g = c.createLinearGradient(0, gy, 0, H);
   g.addColorStop(0, rgba(mixc(p.g1, p.haze, 0.3))); g.addColorStop(1, rgba(p.g2));
   c.fillStyle = g; c.fillRect(-50, gy - 2, W + 100, H);
@@ -588,32 +695,30 @@ SHOT.press = (c, lt, s) => {
   const ay = 590, axp = 2100 - (lt - 0.45) * 2300;
   if (lt > 0.45 && axp > -300) {
     const q = [axp, ay - Math.max(0, lt - hit) * 140];
-    astraBolt(c, q[0], q[1], Math.PI + (lt > hit ? 0.12 : 0), [130, 255, 100], 1, 360);
-    serpent(c, lt * 3, { x: q[0] - 10, y: q[1], s: 110, flip: true, dark: [4, 10, 6], rim: [190, 255, 140], glow: 16, wig: 0.4, ctrl: [[0, 0], [-0.3, 0], [-0.6, 0]] });
+    astraBolt(c, q[0], q[1], Math.PI + (lt > hit ? 0.12 : 0), [130, 255, 100], 1.3, 420);
+    serpent(c, lt * 3, { x: q[0] - 10, y: q[1], s: 120, flip: true, dark: [20, 70, 30], rim: [190, 255, 140], glow: 16, wig: 0.4, ctrl: [[0, 0], [-0.3, 0], [-0.6, 0]] });
   }
   const e = lt - hit;
   if (e > 0) {
     const cxr = cx - 42 * sc + -560 * e, cyr = gy + sink - 380 * sc - 520 * e + 700 * e * e;
     c.save(); c.translate(cxr, cyr); c.rotate(-e * 7); c.scale(sc * 1.6, sc * 1.6); c.translate(0, 236);
-    sil(c, (cc, col) => { cc.fillStyle = col; crownSmall(cc, 'kirita'); }, p.sil, [255, 220, 140], 0.8, -0.6, 0);
+    crownSmall(c, 'kirita', LOOK.A);
     c.restore();
-    sparks(c, cx - 30, gy + sink - 395, e, 40, [255, 230, 150], 77, 700, 0.9);
-    glowAt(c, cx - 30, gy + sink - 395, 500, [200, 255, 160], (1 - ss(0, 0.5, e)) * 0.9);
+    sparks(c, cx - 30, gy + sink - 395, e, 50, [255, 230, 150], 77, 800, 0.9);
+    glowAt(c, cx - 30, gy + sink - 395, 520, [200, 255, 160], (1 - ss(0, 0.5, e)) * 0.9);
   }
   c.restore();
 };
 
 SHOT.crown = (c, lt, s) => {
-  const p = palMix(PAL.day, PAL.battle, 0.35), hx = 700, hy = 580, sc = 318, hit = 0.38;
-  drawSky(c, p, H * 0.92);
-  drawSun(c, 1500, 300, 80, p, 1); drawRays(c, 1500, 300, lt, p, 0.07);
-  armies(c, 900, p, lt * 5, 0.8, 0.9); hazeBand(c, 900, p, 0.6); c.fillStyle = rgba(p.g2); c.fillRect(-10, 900, W + 20, 300);
+  const p = palMix(PAL.day, PAL.battle, 0.35), hx = 700, hy = 600, sc = 318, hit = 0.38;
+  bustBackdrop(c, lt, p, [1500, 300, 80], 9);
   const e = Math.max(0, lt - hit) * 0.55;
-  bust(c, 'A', { x: hx, y: hy, s: sc, t: lt * (lt > hit ? 2 : 1), noCrown: lt > hit, dark: [10, 8, 9], rim: [255, 240, 210], hairAmt: lt > hit ? 2.4 : 1 });
+  bust(c, 'A', { x: hx, y: hy, s: sc, t: lt * (lt > hit ? 2 : 1), noCrown: lt > hit, mood: lt > hit ? 'angry' : '', rim: [255, 240, 210], hairAmt: lt > hit ? 2.4 : 1, light: p.sun, dark: mixc(p.mid, BLACK, 0.5) });
   const ax = lerp(2000, -200, ss(0.05, 0.7, lt));
-  if (lt < 0.72) astraBolt(c, ax, hy - 0.86 * sc, Math.PI, [130, 255, 100], 1.3, 500);
+  if (lt < 0.72) astraBolt(c, ax, hy - 0.86 * sc, Math.PI, [130, 255, 100], 1.4, 500);
   c.save(); c.translate(hx + 40 - 760 * e, hy - 420 * e + 150 * e * e); c.rotate(-e * 2.6); c.scale(sc, sc);
-  sil(c, (cc, col) => { cc.fillStyle = col; tieredCrown(cc, -1.32); }, [10, 8, 9], [255, 220, 150], 0.02, -0.01, 24);
+  c.fillStyle = LOOK.A.crown; tieredCrown(c, -1.32, false, LOOK.A);
   c.restore();
   if (lt > hit) {
     sparks(c, hx + 0.3 * sc, hy - 0.8 * sc, (lt - hit) * 0.5, 60, [255, 230, 160], 5, 900, 1.2);
@@ -625,11 +730,11 @@ SHOT.crown = (c, lt, s) => {
 SHOT.serpent = (c, lt, s) => {
   const p = palMix(PAL.night, PAL.venom, 0.7);
   drawSky(c, p, H);
-  glowAt(c, 900, 500, 1000, [80, 200, 70], 0.2);
+  glowAt(c, 900, 500, 1000, [80, 200, 70], 0.22);
   drawClouds(c, lt, { n: 10, y0: 100, y1: 1000, sp: 12, a: 0.35, col: [40, 70, 45], sc: 2, seed: 70 });
   for (const t0 of [1.4, 4.2]) { const a = bump(t0, t0 + 0.3, lt); if (a > 0) { lightning(c, 1500, -40, 1650, 600, t0 * 5, 3, [170, 255, 140], a); fill(c, [200, 255, 190], a * 0.12); } }
-  const speak = s.cues && s.cues[0] && lt > s.cues[0].lt && lt < s.cues[0].lt + s.cues[0].d;
-  serpent(c, lt * (speak ? 2.5 : 1), { x: 880, y: 360 + Math.sin(lt * 1.2) * 14, s: 380, dark: [3, 8, 5], rim: [150, 255, 120], glow: 40, wig: 1.2,
+  const m = mouthOf('AS');
+  serpent(c, lt * (m > 0.1 ? 2.5 : 1), { x: 880, y: 360 + Math.sin(lt * 1.2) * 14 - m * 8, s: 380, dark: [24, 80, 36], rim: [150, 255, 120], glow: 40, wig: 1.2,
     ctrl: [[0, 0], [-0.12, 0.32], [-0.14, 0.66], [-0.4, 0.95], [-0.85, 1.0], [-1.15, 0.85], [-1.0, 0.6], [-0.7, 0.68]] });
   drawClouds(c, lt, { n: 6, y0: 800, y1: 1000, sp: 18, a: 0.45, col: [30, 50, 34], sc: 2.2, seed: 90 });
   embers(c, lt, 30, [140, 255, 110], { rise: 900, a: 0.6 });
@@ -642,7 +747,7 @@ SHOT.wheel = (c, lt, s) => {
   drawSky(c, p, hz); drawSun(c, 520, 420, 80, p, 1); drawRays(c, 520, 420, lt, p, 0.1);
   drawClouds(c, lt, { n: 6, y0: 140, y1: 400, sp: 6, a: 0.5, col: mixc(p.glow, p.mid, 0.5) });
   ridge(c, hz + 2, 40, 0.002, 3, p.far, 0, 1); armies(c, hz, p, 0, 0.9, 0.5); hazeBand(c, hz, p, 0.5); drawGround(c, hz, p);
-  chariot(c, { x: 932, y: 800, s: 2.4, dir: -1, t: lt, sink, tilt, col: p.sil, rim: RIM_K, rimOff: [-4, -3], horses: false, noWarrior: true, wheel: Math.sin(lt * 3) * 0.04 * (1 - ss(2, 3, lt)) });
+  chariot(c, Object.assign({ x: 932, y: 800, s: 2.4, dir: -1, t: lt, sink, tilt, who: 'K', rim: RIM_K, rimOff: [-4, -3], horses: false, noWarrior: true, wheel: Math.sin(lt * 3) * 0.04 * (1 - ss(2, 3, lt)) }, lightOf(p)));
   const mudY = 800;
   c.fillStyle = rgba([24, 12, 8]);
   c.beginPath(); c.moveTo(-50, mudY + 20);
@@ -672,41 +777,43 @@ function hut(c) {
   c.beginPath(); c.moveTo(1450, 860); c.lineTo(1450, 760); c.lineTo(1560, 690); c.lineTo(1690, 760); c.lineTo(1690, 860); c.fill();
   c.beginPath(); c.moveTo(1420, 770); c.lineTo(1560, 670); c.lineTo(1720, 770); c.lineTo(1700, 778); c.lineTo(1560, 690); c.lineTo(1440, 778); c.fill();
 }
-function seatedKarna(c, col, o) { // seated facing right, origin at hips on ground
-  c.fillStyle = c.strokeStyle = col; c.lineCap = 'round';
-  c.beginPath(); c.moveTo(-26, 0); c.lineTo(22, 0); c.quadraticCurveTo(30, -50, 20, -98); c.lineTo(-24, -100); c.quadraticCurveTo(-30, -50, -26, 0); c.fill();
-  c.lineWidth = 26; c.beginPath(); c.moveTo(-10, -6); c.lineTo(86, -2); c.stroke();
+function seatedKarna(c, P, o) { // young Karna seated facing right, origin at hips on ground
+  if (typeof P === 'string') P = flat(P);
+  c.lineCap = 'round';
+  c.fillStyle = P.skin; c.beginPath(); c.moveTo(-26, 0); c.lineTo(22, 0); c.quadraticCurveTo(30, -50, 20, -98); c.lineTo(-24, -100); c.quadraticCurveTo(-30, -50, -26, 0); c.fill();
+  c.strokeStyle = P.white; c.lineWidth = 3; c.beginPath(); c.moveTo(-20, -96); c.lineTo(18, -10); c.stroke(); // sacred thread of his brahmin disguise
+  c.strokeStyle = P.white; c.lineWidth = 26; c.beginPath(); c.moveTo(-10, -6); c.lineTo(86, -2); c.stroke();
   c.lineWidth = 18; c.beginPath(); c.moveTo(80, 2); c.lineTo(10, 12); c.stroke();
-  c.fillRect(-5, -116, 12, 18); c.beginPath(); c.ellipse(4, -130, 15, 17, 0, 0, TAU); c.fill();
+  c.fillStyle = P.skin; c.fillRect(-5, -116, 12, 18); c.beginPath(); c.ellipse(4, -130, 15, 17, 0, 0, TAU); c.fill();
   c.beginPath(); c.moveTo(17, -134); c.lineTo(24, -124); c.lineTo(17, -121); c.fill();
-  c.beginPath(); c.ellipse(-6, -148, 10, 8, 0, 0, TAU); c.fill();
-  c.lineWidth = 11; c.beginPath(); c.moveTo(14, -88); c.lineTo(50, -50); c.lineTo(82, -36); c.stroke();
+  if (!P.flat) { c.fillStyle = P.eye; c.beginPath(); c.ellipse(12, -133, 2.6, 1.8, 0, 0, TAU); c.fill(); }
+  c.fillStyle = P.hair; c.beginPath(); c.ellipse(-6, -148, 10, 8, 0, 0, TAU); c.fill(); c.beginPath(); c.ellipse(0, -140, 15, 8, 0, Math.PI, TAU); c.fill();
+  c.strokeStyle = P.skin; c.lineWidth = 11; c.beginPath(); c.moveTo(14, -88); c.lineTo(50, -50); c.lineTo(82, -36); c.stroke();
   if (o.join) { c.beginPath(); c.moveTo(-14, -88); c.lineTo(30, -70); c.lineTo(44, -96); c.stroke(); }
   else { c.beginPath(); c.moveTo(-14, -88); c.lineTo(-40, -40); c.lineTo(-46, -4); c.stroke(); }
 }
-function sage(c, col, rise) { // Parashurama: lying with head on Karna's lap (rise 0) to sitting up (rise 1); origin at hips
-  c.fillStyle = c.strokeStyle = col; c.lineCap = 'round'; c.lineJoin = 'round';
-  c.lineWidth = 24; c.beginPath(); c.moveTo(0, 0); c.lineTo(120, 4); c.lineTo(160, 0); c.stroke();
-  c.beginPath(); c.ellipse(168, -8, 10, 15, 0, 0, TAU); c.fill();
+function sage(c, P, rise) { // Parashurama: lying with head on Karna's lap (rise 0) to sitting up (rise 1); origin at hips
+  if (typeof P === 'string') P = flat(P);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.strokeStyle = P.cloth; c.lineWidth = 24; c.beginPath(); c.moveTo(0, 0); c.lineTo(120, 4); c.stroke();
+  c.strokeStyle = P.skin; c.beginPath(); c.moveTo(120, 4); c.lineTo(160, 0); c.stroke();
+  c.fillStyle = P.skin; c.beginPath(); c.ellipse(168, -8, 10, 15, 0, 0, TAU); c.fill();
   c.save(); c.rotate(lerp(0, Math.PI / 2, easeInOut(rise)));
-  c.beginPath(); c.moveTo(6, -18); c.quadraticCurveTo(-70, -26, -140, -24); c.quadraticCurveTo(-160, -2, -140, 28); c.quadraticCurveTo(-70, 32, 6, 20); c.closePath(); c.fill();
-  c.fillRect(-170, -9, 32, 18);
+  c.fillStyle = P.skin; c.beginPath(); c.moveTo(6, -18); c.quadraticCurveTo(-70, -26, -140, -24); c.quadraticCurveTo(-160, -2, -140, 28); c.quadraticCurveTo(-70, 32, 6, 20); c.closePath(); c.fill();
+  c.fillStyle = P.cloth; c.beginPath(); c.moveTo(6, -18); c.lineTo(-60, -22); c.lineTo(-30, 26); c.lineTo(6, 20); c.fill();
+  c.fillStyle = P.skin; c.fillRect(-170, -9, 32, 18);
   c.beginPath(); c.ellipse(-190, -2, 19, 17, 0, 0, TAU); c.fill();
-  c.beginPath(); c.ellipse(-215, -4, 14, 11, 0, 0, TAU); c.fill();
-  c.beginPath(); c.moveTo(-197, 12); c.lineTo(-189, 25); c.lineTo(-182, 14); c.fill();
-  c.beginPath(); c.moveTo(-182, 12); c.quadraticCurveTo(-160, 42, -126, 36); c.lineTo(-170, 6); c.fill();
+  c.fillStyle = P.hair; c.beginPath(); c.ellipse(-215, -4, 14, 11, 0, 0, TAU); c.fill();
+  c.fillStyle = P.skin; c.beginPath(); c.moveTo(-197, 12); c.lineTo(-189, 25); c.lineTo(-182, 14); c.fill();
+  c.fillStyle = P.beard; c.beginPath(); c.moveTo(-182, 12); c.quadraticCurveTo(-160, 42, -126, 36); c.lineTo(-170, 6); c.fill();
   const pt = ss(0.6, 1, rise);
-  c.lineWidth = 12; c.beginPath(); c.moveTo(-128, 16); c.lineTo(lerp(-80, -150, pt), lerp(26, 72, pt)); c.lineTo(lerp(-40, -176, pt), lerp(14, 126, pt)); c.stroke();
+  c.strokeStyle = P.skin; c.lineWidth = 12; c.beginPath(); c.moveTo(-128, 16); c.lineTo(lerp(-80, -150, pt), lerp(26, 72, pt)); c.lineTo(lerp(-40, -176, pt), lerp(14, 126, pt)); c.stroke();
   c.restore();
 }
-function standingSage(c, col, t) { // Parashurama standing, axe raised; faces left
-  c.save(); c.scale(-1, 1);
-  figure(c, col, { bow: false, armUp: 1, crown: null, hair: true, t });
-  c.fillStyle = c.strokeStyle = col;
-  c.beginPath(); c.ellipse(-2, -236, 11, 15, 0, 0, TAU); c.fill();
-  c.beginPath(); c.moveTo(16, -200); c.quadraticCurveTo(20, -170, 4, -150); c.lineTo(-2, -196); c.fill();
-  c.lineWidth = 6; c.beginPath(); c.moveTo(82, -224); c.lineTo(90, -340); c.stroke();
-  c.beginPath(); c.moveTo(86, -350); c.quadraticCurveTo(140, -380, 160, -320); c.quadraticCurveTo(130, -320, 122, -292); c.quadraticCurveTo(108, -320, 88, -312); c.fill();
+function flashFig(c, x, y, sc, draw, p, rim) { // rim light, then paint + sepia shading on a layer
+  c.save(); c.translate(x, y); c.scale(sc, sc);
+  c.save(); c.translate(1.2, -0.8); draw(c, flat(rim)); c.restore();
+  withLayer(c, (lc) => { draw(lc, null); shadeAtop(lc, rgba(p.mid, 0.28), -400, -500, 900, 700); });
   c.restore();
 }
 SHOT.flashback = (c, lt, s) => {
@@ -720,27 +827,18 @@ SHOT.flashback = (c, lt, s) => {
   const rim = [255, 226, 170];
   if (s.phase === 0) {
     const rise = ss(4.6, 5.8, lt);
-    c.save(); c.translate(860, 880); c.scale(1.45, 1.45);
-    sil(c, (cc, col) => seatedKarna(cc, col, { join: rise > 0.5 }), p.sil, rim, 1.2, -0.8, 0);
-    c.restore();
-    c.save(); c.translate(860 + 90 * 1.45 + 190 * 1.45, 880 - 22 * 1.45); c.scale(1.45, 1.45);
-    sil(c, (cc, col) => sage(cc, col, rise), p.sil, rim, 1.2, -0.8, 0);
-    c.restore();
+    flashFig(c, 860, 880, 1.45, (cc, F) => seatedKarna(cc, F || LOOK.K, { join: rise > 0.5 }), p, rim);
+    flashFig(c, 860 + 90 * 1.45 + 190 * 1.45, 880 - 22 * 1.45, 1.45, (cc, F) => sage(cc, F || LOOK.P, rise), p, rim);
     const bx = 860 + 60 * 1.45, by = 880 + 6;
     c.save(); c.globalCompositeOperation = 'lighter'; glowAt(c, bx, by, 26, [255, 60, 40], 0.9 * (0.6 + 0.4 * Math.sin(lt * 10))); c.restore();
     c.strokeStyle = rgba([150, 10, 10], 0.95); c.lineWidth = 4; c.beginPath(); c.moveTo(bx, by + 4); c.lineTo(bx + 2, by + 4 + ss(0.5, 4, lt) * 70); c.stroke();
   } else {
-    c.save(); c.translate(760, 890); c.scale(1.45, 1.45);
-    sil(c, (cc, col) => seatedKarna(cc, col, { join: true }), p.sil, rim, 1.2, -0.8, 0);
-    c.restore();
-    c.save(); c.translate(1180, 900); c.scale(1.5, 1.5);
-    sil(c, (cc, col) => standingSage(cc, col, lt), p.sil, [255, 150, 110], 1.2, -0.8, 0);
-    c.restore();
+    flashFig(c, 760, 890, 1.45, (cc, F) => seatedKarna(cc, F || LOOK.K, { join: true }), p, rim);
+    person(c, 'P', 1180, 900, 1.5, true, { bow: false, armUp: 1, axe: true, crown: 'jata', beard: true, t: lt }, p, 0, [255, 150, 110]);
     for (const t0 of [0.2, 3.4]) { const a = bump(t0, t0 + 0.5, lt); fill(c, [255, 120, 80], a * 0.35); }
     grade(c, [200, 60, 30], 0.25 * ss(0, 1, lt), 'overlay');
   }
-  // old-film treatment
-  fill(c, BLACK, (1 - fl) * 1.5);
+  fill(c, BLACK, (1 - fl) * 1.5); // old-film flicker, scratches and dust
   c.strokeStyle = 'rgba(255,240,210,.18)'; c.lineWidth = 1.5;
   for (let i = 0; i < 3; i++) { const x = hash(Math.floor(lt * 12) + i * 7) * W; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + 6, H); c.stroke(); }
   c.fillStyle = 'rgba(30,20,10,.5)';
@@ -753,21 +851,19 @@ SHOT.flashback = (c, lt, s) => {
 /* ----- the final arrow ----- */
 function sunsetStage(c, lt, p, sunY, o = {}) {
   field(c, p, lt, { hz: 760, sx: 1240, sy: sunY, sr: 300, ra: 0.14, sa: o.sa ?? 1, armyA: 0.6, debris: 0.8, ca: 0.4, stars: o.stars });
-  chariot(c, { x: 1640, y: GY + 20, s: 0.68, dir: -1, t: lt, tilt: 0.13, sink: 40, col: p.sil, rim: RIM_K, rimOff: [-3, -1], horses: false, noWarrior: true, flag: null });
+  chariot(c, Object.assign({ x: 1640, y: GY + 10, s: 0.68, dir: -1, t: lt, tilt: 0.13, sink: 40, who: 'K', rim: RIM_K, rimOff: [-3, -1], horses: false, noWarrior: true, flag: null }, lightOf(p)));
 }
 SHOT.anjalikaFlight = (c, lt, s) => {
   const p = PAL.dusk, u = lt / s.dur;
   c.save(); cam(c, 960, 560, 1 + u * 0.05);
   sunsetStage(c, lt, p, 640);
-  c.save(); c.translate(1240, 905); c.scale(-1.45, 1.45);
-  sil(c, (cc, col) => figure(cc, col, { crown: 'karna', bow: false, heldBow: true, armUp: 0.15, t: lt * 0.3 }), p.sil, [255, 200, 120], -1.5, -1, 0);
-  c.restore();
+  person(c, 'K', 1240, 905, 1.45, true, { crown: 'karna', bow: false, heldBow: true, armUp: 0.15, t: lt * 0.3 }, p, 0, [255, 200, 120]);
   const x = lerp(-250, 1150, Math.pow(u, 1.25)), y = 625 + Math.sin(u * 3) * 6;
   c.save(); c.globalCompositeOperation = 'lighter';
   for (let i = 0; i < 40; i++) { const ph = (lt * 0.25 + hash(i)) % 1; glowAt(c, x - ph * 700, y + (hash(i + 3) - 0.5) * 50 * ph, 30 + ph * 50, [255, 200, 80], (1 - ph) * 0.35); }
   c.restore();
-  astraBolt(c, x, y, 0, [255, 210, 90], 1.4, 640);
-  c.save(); c.translate(x, y); c.scale(1.7, 1.7); c.fillStyle = rgba([255, 240, 190]);
+  astraBolt(c, x, y, 0, [255, 210, 90], 1.6, 700);
+  c.save(); c.translate(x, y); c.scale(1.9, 1.9); c.fillStyle = rgba([255, 240, 190]);
   c.beginPath(); c.moveTo(30, -26); c.quadraticCurveTo(-14, -18, -8, 0); c.quadraticCurveTo(-14, 18, 30, 26); c.quadraticCurveTo(4, 14, 4, 0); c.quadraticCurveTo(4, -14, 30, -26); c.fill();
   c.restore();
   c.restore();
@@ -777,14 +873,12 @@ SHOT.impact = (c, lt, s) => {
   const p = palMix(PAL.dusk, PAL.night, ss(0, s.dur, lt) * 0.35);
   sunsetStage(c, lt, p, lerp(640, 690, ss(0, s.dur, lt)));
   const fall = easeIn(ss(0.5, 2.7, lt)) * 1.5;
-  c.save(); c.translate(1240, 905); c.scale(-1.45, 1.45); c.rotate(-fall);
-  sil(c, (cc, col) => figure(cc, col, { crown: lt < 0.6 ? 'karna' : null, bow: false, heldBow: lt < 1, armUp: 0.6 * bump(0.3, 2.5, lt), t: lt * 0.3 }), p.sil, [255, 200, 120], -1.5, -1, 0);
-  c.restore();
+  person(c, 'K', 1240, 905, 1.45, true, { crown: lt < 0.6 ? 'karna' : null, bow: false, heldBow: lt < 1, armUp: 0.6 * bump(0.3, 2.5, lt), t: lt * 0.3 }, p, -fall, [255, 200, 120]);
   const e = lt - 0.6;
   if (e > 0) {
-    const cx = 1230 + e * 260, cy = 905 - 360 + Math.min(e, 1.4) * 0 + 380 * Math.min(1, e * e * 1.1);
+    const cx = 1230 + e * 260, cy = 905 - 360 + 380 * Math.min(1, e * e * 1.1);
     c.save(); c.translate(cx, Math.min(cy, 900)); c.rotate(e * 3); c.scale(1.45, 1.45); c.translate(0, 236);
-    c.fillStyle = rgba(p.sil); crownSmall(c, 'karna'); c.restore();
+    crownSmall(c, 'karna', LOOK.K); c.restore();
   }
   const d = lt - 2.7;
   if (d > 0 && d < 3.5) for (let i = 0; i < 6; i++) glowAt(c, 1300 + i * 70, 880 - d * 30, 120 + d * 120, mixc(p.haze, p.glow, 0.3), (1 - d / 3.5) * 0.45);
@@ -795,11 +889,9 @@ SHOT.ascension = (c, lt, s) => {
   const sy = lerp(620, 790, ss(6, s.dur, lt)), sx = 700, beam = bump(2.2, 14, lt), arrive = ss(5, 7, lt);
   c.save(); cam(c, 960, 560, 1.05 - k * 0.05);
   field(c, p, lt, { hz: 770, sx, sy, sr: 150 + arrive * 30, sa: 1 - ss(s.dur - 4, s.dur, lt) * 0.7, ra: 0.1 + arrive * 0.12, stars: ss(s.dur * 0.45, s.dur, lt), armyA: 0.5, debris: 0.9, ca: 0.35 });
-  chariot(c, { x: 1640, y: GY + 20, s: 0.68, dir: -1, t: lt, tilt: 0.13, sink: 40, col: p.sil, rim: RIM_K, rimOff: [-3, -1], horses: false, noWarrior: true, flag: null });
+  chariot(c, Object.assign({ x: 1640, y: GY + 10, s: 0.68, dir: -1, t: lt, tilt: 0.13, sink: 40, who: 'K', rim: RIM_K, rimOff: [-3, -1], horses: false, noWarrior: true, flag: null }, lightOf(p)));
   const bx = 1250, by = 895;
-  c.save(); c.translate(bx + 120, by + 8); c.rotate(-Math.PI / 2 * 0.98);
-  sil(c, (cc, col) => figure(cc, col, { crown: null, bow: false, t: 0, hair: true }), p.sil, [255, 190, 110], 1, -1.5, 0);
-  c.restore();
+  person(c, 'K', bx + 120, by + 8, 1, false, { crown: null, bow: false, t: 0, hair: true }, p, -Math.PI / 2 * 0.98, [255, 190, 110]);
   c.save(); c.globalCompositeOperation = 'lighter';
   glowAt(c, bx, by - 20, 260, [255, 210, 120], ss(0.6, 2.4, lt) * (1 - ss(10, 14, lt)) * 0.8);
   const P = (u) => { const a = 1 - u; return [a * a * bx + 2 * a * u * 1150 + u * u * sx, a * a * (by - 30) + 2 * a * u * 160 + u * u * sy]; };
@@ -823,47 +915,13 @@ SHOT.ascension = (c, lt, s) => {
 SHOT.end = (c, lt, s) => {
   fill(c, BLACK, 1);
   embers(c, lt, 30, [255, 150, 60], { rise: 900, a: 0.4 });
-  const a = ss(0.4, 2.4, lt) * (1 - ss(s.dur - 1, s.dur, lt)), a2 = ss(2, 3.5, lt) * (1 - ss(s.dur - 1, s.dur, lt));
+  const a = ss(0.4, 2.4, lt) * (1 - ss(s.dur - 1.2, s.dur, lt)), a2 = ss(2, 3.5, lt) * (1 - ss(s.dur - 1.2, s.dur, lt));
   c.save(); c.textAlign = 'center'; c.textBaseline = 'middle';
   const g = c.createLinearGradient(0, 360, 0, 560);
   g.addColorStop(0, rgba([255, 244, 210], a)); g.addColorStop(1, rgba([200, 120, 40], a));
   c.font = '170px "Rozha One", "Tiro Devanagari Hindi", serif'; c.shadowColor = rgba([255, 130, 40], 0.7 * a); c.shadowBlur = 40 * VIEW.scale;
-  c.fillStyle = g; c.fillText('समाप्त', W / 2, 460);
+  c.fillStyle = g; c.fillText('समाप्त', W / 2, 470);
   c.shadowBlur = 0;
-  c.font = '40px "Tiro Devanagari Hindi", serif'; c.fillStyle = rgba([240, 220, 190], a2); c.fillText('कर्ण अर्जुन युद्ध', W / 2, 610);
-  c.font = '28px "Mukta", sans-serif'; c.fillStyle = rgba([200, 175, 150], a2); c.fillText('वेदव्यास कृत महाभारत के कर्ण पर्व पर आधारित', W / 2, 670);
-  c.restore();
-};
-
-const CREDITS = [
-  ['h', 'अस्त्र जो इस युद्ध में चले'],
-  ['i', 'आग्नेयास्त्र — अग्निदेव — अर्जुन'], ['i', 'वरुणास्त्र — वरुणदेव — कर्ण'], ['i', 'वायव्यास्त्र — वायुदेव — अर्जुन'],
-  ['i', 'ऐन्द्रास्त्र — देवराज इन्द्र — अर्जुन'], ['i', 'भार्गवास्त्र — परशुराम — कर्ण'], ['i', 'नागास्त्र (अश्वसेन) — कर्ण'], ['i', 'अंजलिकास्त्र — अर्जुन'],
-  ['g'],
-  ['h', 'जो नहीं चल सका'], ['i', 'ब्रह्मास्त्र — परशुराम के शाप से कर्ण मंत्र भूल गया'], ['i', 'वासवी शक्ति — चौदहवीं रात घटोत्कच पर चल चुकी थी'],
-  ['g'],
-  ['h', 'पात्र'], ['i', 'कर्ण · अर्जुन · श्रीकृष्ण · शल्य'], ['i', 'नाग अश्वसेन · भगवान परशुराम'],
-  ['g'],
-  ['h', 'आधार'], ['i', 'वेदव्यास कृत महाभारत — कर्ण पर्व'], ['n', '“वाह कर्ण” वाला प्रसंग लोक-परंपरा से लिया गया है'],
-  ['g'],
-  ['h', 'संगीत'], ['i', 'तानपुरा · नगाड़ा · शंख · बाँसुरी · वृंदगान'], ['n', 'ब्राउज़र में वेब ऑडियो से रचित, राग भैरवी के स्वरों पर'],
-  ['g'], ['g'],
-  ['h', '॥ इति ॥'],
-];
-SHOT.credits = (c, lt, s) => {
-  fill(c, BLACK, 1);
-  embers(c, lt, 24, [255, 150, 60], { rise: 900, a: 0.35 });
-  const lh = { h: 84, i: 58, n: 50, g: 50 }, total = CREDITS.reduce((a, r) => a + lh[r[0]], 0);
-  let y = H + 20 - (lt / (s.dur - 2)) * (H + total - 380);
-  c.save(); c.textAlign = 'center'; c.textBaseline = 'middle';
-  for (const [k, txt] of CREDITS) {
-    y += lh[k];
-    if (!txt || y < LB - 40 || y > H - LB + 40) continue;
-    const edge = Math.min(ss(LB - 20, LB + 80, y), 1 - ss(H - LB - 80, H - LB + 20, y));
-    if (k === 'h') { c.font = '50px "Rozha One", serif'; c.fillStyle = rgba([240, 186, 90], edge); }
-    else if (k === 'i') { c.font = '38px "Mukta", sans-serif'; c.fillStyle = rgba([240, 228, 205], edge); }
-    else { c.font = '28px "Mukta", sans-serif'; c.fillStyle = rgba([180, 165, 150], edge); }
-    c.fillText(txt, W / 2, y);
-  }
+  c.font = '44px "Tiro Devanagari Hindi", serif'; c.fillStyle = rgba([240, 220, 190], a2); c.fillText('कर्ण अर्जुन युद्ध', W / 2, 620);
   c.restore();
 };

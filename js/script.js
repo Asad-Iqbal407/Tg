@@ -4,13 +4,13 @@
    Shot length grows to fit its lines; `min` sets a floor. */
 
 const CAST = {
-  N:  { name: 'सूत्रधार', color: '#efe4cc', pitch: 0.9, rate: 0.9 },
-  K:  { name: 'कर्ण', color: '#ffb44f', pitch: 0.72, rate: 0.92 },
-  A:  { name: 'अर्जुन', color: '#b5dcff', pitch: 1.0, rate: 0.98 },
-  KR: { name: 'श्रीकृष्ण', color: '#72e6d4', pitch: 1.1, rate: 0.9 },
-  S:  { name: 'शल्य', color: '#dcc08f', pitch: 0.82, rate: 1.04 },
-  AS: { name: 'अश्वसेन', color: '#a6ff86', pitch: 0.55, rate: 0.85 },
-  P:  { name: 'परशुराम', color: '#ff8a66', pitch: 0.6, rate: 0.88 },
+  N: { name: 'सूत्रधार', color: '#efe4cc' },
+  K: { name: 'कर्ण', color: '#ffb44f' },
+  A: { name: 'अर्जुन', color: '#b5dcff' },
+  KR: { name: 'श्रीकृष्ण', color: '#72e6d4' },
+  S: { name: 'शल्य', color: '#dcc08f' },
+  AS: { name: 'अश्वसेन', color: '#a6ff86' },
+  P: { name: 'परशुराम', color: '#ff8a66' },
 };
 
 const CHAPTERS = [
@@ -79,7 +79,11 @@ const SCRIPT = [
     ['KR', 'उसके बाणों में सूर्य का तेज है, और गुरु परशुराम की विद्या।'],
   ] },
   // ४ पहला प्रहार
-  { ch: 3, type: 'wide', mode: 'exchange', mus: 'battle', min: 10, hit: true },
+  { ch: 3, type: 'wide', mode: 'exchange', mus: 'battle', min: 6.5, hit: true },
+  { ch: 3, type: 'shoot', who: 'A', mus: 'battle', min: 2.6 },
+  { ch: 3, type: 'hit', target: 'K', push: 170, mus: 'battle', min: 3.6 },
+  { ch: 3, type: 'shoot', who: 'K', mus: 'battle', min: 2.6 },
+  { ch: 3, type: 'hit', target: 'A', push: 45, mus: 'battle', min: 3.4 },
   { ch: 3, type: 'bust', who: 'KR', mood: 'smile', mus: 'talk', L: [['KR', 'वाह कर्ण, वाह!']] },
   { ch: 3, type: 'bust', who: 'A', mus: 'talk', L: [['A', 'माधव! मेरे बाण उसका रथ कई हाथ पीछे धकेलते हैं, और आप उसकी प्रशंसा करते हैं?']] },
   { ch: 3, type: 'bust', who: 'KR', mus: 'talk', L: [
@@ -87,15 +91,15 @@ const SCRIPT = [
     ['KR', 'फिर भी उसके बाण इसे पीछे धकेल देते हैं। सोचो — वह कैसा धनुर्धर है!'],
   ] },
   // ५ दिव्यास्त्रों का युद्ध
-  { ch: 4, type: 'invoke', who: 'A', astra: 'agni', mus: 'astra', min: 3.6, lead: 0.9, L: [['A', 'आग्नेयास्त्र!', 2.2]] },
+  { ch: 4, type: 'invoke', who: 'A', astra: 'agni', mus: 'astra', min: 4.4, lead: 0.9, L: [['A', 'आग्नेयास्त्र!', 2.2]] },
   { ch: 4, type: 'astra', kind: 'agni', mus: 'astra', min: 8, hit: true, card: astraCard('agni', 'left') },
-  { ch: 4, type: 'invoke', who: 'K', astra: 'varuna', mus: 'astra', min: 3.6, lead: 0.9, L: [['K', 'वरुणास्त्र!', 2.2]] },
+  { ch: 4, type: 'invoke', who: 'K', astra: 'varuna', mus: 'astra', min: 4.4, lead: 0.9, L: [['K', 'वरुणास्त्र!', 2.2]] },
   { ch: 4, type: 'astra', kind: 'varuna', mus: 'astra', min: 8, hit: true, card: astraCard('varuna', 'right') },
-  { ch: 4, type: 'invoke', who: 'A', astra: 'vayu', mus: 'astra', min: 3.6, lead: 0.9, L: [['A', 'वायव्यास्त्र!', 2.2]] },
+  { ch: 4, type: 'invoke', who: 'A', astra: 'vayu', mus: 'astra', min: 4.4, lead: 0.9, L: [['A', 'वायव्यास्त्र!', 2.2]] },
   { ch: 4, type: 'astra', kind: 'vayu', mus: 'astra', min: 7.5, hit: true, card: astraCard('vayu', 'left') },
-  { ch: 4, type: 'invoke', who: 'A', astra: 'indra', mus: 'astra', min: 3.6, lead: 0.9, L: [['A', 'ऐन्द्रास्त्र!', 2.2]] },
+  { ch: 4, type: 'invoke', who: 'A', astra: 'indra', mus: 'astra', min: 4.4, lead: 0.9, L: [['A', 'ऐन्द्रास्त्र!', 2.2]] },
   { ch: 4, type: 'astra', kind: 'indra', mus: 'astra', min: 8, hit: true, card: astraCard('indra', 'left') },
-  { ch: 4, type: 'invoke', who: 'K', astra: 'bhargava', mus: 'astra', min: 4, lead: 0.8, L: [['K', 'यह गुरु परशुराम का भार्गवास्त्र है, अर्जुन! रोक सको तो रोको!']] },
+  { ch: 4, type: 'invoke', who: 'K', astra: 'bhargava', mus: 'astra', min: 4.6, lead: 0.6, L: [['K', 'यह गुरु परशुराम का भार्गवास्त्र है, अर्जुन! रोक सको तो रोको!']] },
   { ch: 4, type: 'astra', kind: 'bhargava', mus: 'astra', min: 8.5, hit: true, card: astraCard('bhargava', 'right') },
   { ch: 4, type: 'bust', who: 'KR', mood: 'urgent', mus: 'battle', L: [['KR', 'पार्थ! भार्गवास्त्र हमारी सेना को भस्म कर रहा है। संभलो!']] },
   { ch: 4, type: 'wide', mode: 'storm', mus: 'battle', min: 8, lead: 2.2, L: [['N', 'फिर दोनों ओर से ऐसी बाण-वर्षा हुई कि आकाश ढक गया, और सूर्य भी छिप गया।']] },
@@ -107,6 +111,7 @@ const SCRIPT = [
   ] },
   { ch: 5, type: 'bust', who: 'S', mus: 'tension', L: [['S', 'कर्ण! यह बाण गर्दन पर नहीं, छाती पर साधो।']] },
   { ch: 5, type: 'bust', who: 'K', mood: 'resolve', mus: 'tension', L: [['K', 'शल्य, कर्ण दो बार लक्ष्य नहीं साधता।']] },
+  { ch: 5, type: 'shoot', who: 'K', col: [125, 255, 106], pal: 'battle', mus: 'silence', min: 2.6 },
   { ch: 5, type: 'nagaFlight', mus: 'silence', min: 4.6 },
   { ch: 5, type: 'press', mus: 'battle', lead: 2.4, hit: true, L: [['N', 'उसी क्षण श्रीकृष्ण ने पैरों से रथ को दबा दिया — रथ एक हाथ धरती में धँस गया, घोड़े घुटनों पर आ गए।']] },
   { ch: 5, type: 'crown', mus: 'battle', lead: 1.6, L: [['N', 'नागास्त्र अर्जुन का शीश नहीं, केवल इन्द्र का दिया किरीट ले उड़ा।']] },
@@ -147,8 +152,11 @@ const SCRIPT = [
     ['KR', 'क्व ते धर्मस्तदा गतः? तब कहाँ गया था तुम्हारा धर्म, कर्ण?'],
   ] },
   { ch: 7, type: 'bust', who: 'K', mood: 'shame', mus: 'tension', lead: 1.2, L: [['N', 'कर्ण ने कोई उत्तर नहीं दिया। लज्जा से उसका सिर झुक गया — पर उसने धनुष नहीं छोड़ा।']] },
-  { ch: 7, type: 'wide', mode: 'chestHit', mus: 'battle', lead: 2.2, hit: true, L: [['N', 'भूमि पर खड़े कर्ण ने ऐसा बाण मारा कि अर्जुन क्षण भर को विचलित हो उठे।']] },
-  { ch: 7, type: 'wide', mode: 'flagCut', mus: 'battle', lead: 2.4, L: [['N', 'संभलते ही अर्जुन ने कर्ण की हस्तिकक्ष्या ध्वजा काट गिराई।']] },
+  { ch: 7, type: 'shoot', who: 'K', pal: 'late', mus: 'battle', min: 2.6, hit: true },
+  { ch: 7, type: 'hit', target: 'armorA', mus: 'battle', lead: 1.6, L: [['N', 'भूमि पर खड़े कर्ण ने ऐसा बाण मारा कि अर्जुन क्षण भर को विचलित हो उठे।']] },
+  { ch: 7, type: 'shoot', who: 'A', pal: 'late', mus: 'battle', min: 2.6 },
+  { ch: 7, type: 'hit', target: 'flag', mus: 'battle', lead: 1.5, L: [['N', 'संभलते ही अर्जुन ने कर्ण की हस्तिकक्ष्या ध्वजा काट गिराई।']] },
+  { ch: 7, type: 'wide', mode: 'flagCut', mus: 'battle', min: 3.2 },
   { ch: 7, type: 'bust', who: 'KR', mood: 'urgent', mus: 'battle', L: [['KR', 'पार्थ! इससे पहले कि कर्ण रथ पर चढ़े — बाण चलाओ!']] },
   // ९ अंजलिकास्त्र
   { ch: 8, type: 'invoke', who: 'A', astra: 'anjalika', mus: 'climax', min: 9, lead: 1.6, card: astraCard('anjalika', 'left', [['आकार', 'जुड़ी अंजलि-सा फलक'], ['तेज', 'इन्द्र के वज्र और यम के दण्ड-सा'], ['चलाया', 'अर्जुन — इस युद्ध का अंतिम बाण']]), L: [
@@ -165,11 +173,15 @@ const SCRIPT = [
     ['N', 'उस दिन अर्जुन जीते। धर्म जीता।'],
     ['N', 'पर इतिहास आज भी उस दानवीर को नमन करता है — कर्ण।'],
   ] },
-  { ch: 9, type: 'end', mus: 'end', min: 8, fadeIn: 1.5 },
-  { ch: 9, type: 'credits', mus: 'end', min: 26, fadeOut: 3 },
+  { ch: 9, type: 'end', mus: 'end', min: 8, fadeIn: 1.5, fadeOut: 1.5 },
 ];
 
 const lineDur = (s) => clamp(1.5 + s.length * 0.07, 2.5, 8.8);
+function fnv(s) { // same hash as tools/make-voices.py, so each line finds its recording
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(s)) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
 
 function buildTimeline() {
   let T = 0, lastCh = -1;
@@ -182,10 +194,11 @@ function buildTimeline() {
     s.cues = [];
     for (const l of s.L || []) {
       if (typeof l === 'number') { cur += l; continue; }
-      const d = l[2] ?? lineDur(l[1]);
-      const cue = { t: T + cur, d, who: l[0], text: l[1], lt: cur };
+      const key = l[0] + '_' + fnv(l[1]), v = typeof VOICES !== 'undefined' ? VOICES[key] : null;
+      const d = v ? Math.max(v.d + 0.1, l[2] || 0) : l[2] ?? lineDur(l[1]);
+      const cue = { t: T + cur, d, who: l[0], text: l[1], lt: cur, key };
       cues.push(cue); s.cues.push(cue);
-      cur += d + 0.45;
+      cur += d + 0.32;
     }
     s.dur = Math.max(s.min ?? 0, cur + (s.tail ?? 0.35));
     for (const cp of s.caps || []) caps.push({ t: T + cp[0], d: cp[2] ?? 3.5, text: cp[1] });
