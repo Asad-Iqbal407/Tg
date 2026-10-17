@@ -2,7 +2,17 @@ import type { AudioLike, MusicTheme } from '../core/audio';
 import type { Action, Input } from '../core/input';
 import type { Rng } from '../core/rng';
 
-export type GameId = 'runner' | 'platformer' | 'duck' | 'hill' | 'galaxy' | 'snake' | 'bombsquad' | 'tetris';
+export type GameId =
+  | 'runner'
+  | 'platformer'
+  | 'duck'
+  | 'hill'
+  | 'galaxy'
+  | 'snake'
+  | 'bombsquad'
+  | 'tetris'
+  | 'bubble'
+  | 'pong';
 export const GAME_IDS: readonly GameId[] = [
   'runner',
   'platformer',
@@ -12,6 +22,8 @@ export const GAME_IDS: readonly GameId[] = [
   'snake',
   'bombsquad',
   'tetris',
+  'bubble',
+  'pong',
 ];
 
 export type BoostId = 'coin-doubler' | 'xp-booster' | 'shield' | 'head-start';
