@@ -1,7 +1,7 @@
 // Renders the film to an MP4: frames from the same canvas engine (headless Chromium),
 // sound from an offline Web Audio mix of the same score, joined with ffmpeg.
 //
-// usage: node tools/render-mp4.mjs <out.mp4> [--fps 24] [--workers 3] [--from 0] [--to <end>] [--crf 20] [--audio-only]
+// usage: node tools/render-mp4.mjs <out.mp4> [--fps 24] [--workers 3] [--from 0] [--to <end>] [--crf 20] [--audio-only | --audio <mix.wav>]
 // needs: playwright (with Chromium) and ffmpeg on PATH.
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -41,11 +41,16 @@ const from = opt('from', 0), to = Math.min(opt('to', dur), dur);
 
 console.log(`film ${dur.toFixed(1)}s · rendering ${from}–${to.toFixed(1)}s at ${fps} fps with ${workers} workers`);
 const t0 = Date.now();
-const wavLen = await first.evaluate(() => window.__film.audio());
-const wav = path.join(tmp, 'audio.wav'), fd = fs.openSync(wav, 'w'), CH = 4 << 20;
-for (let i = 0; i * CH < wavLen; i++) fs.writeSync(fd, Buffer.from(await first.evaluate(([i, CH]) => window.__film.audioChunk(i, CH), [i, CH]), 'base64'));
-fs.closeSync(fd);
-console.log(`audio mixed in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+const ai = argv.indexOf('--audio');
+let wav = path.join(tmp, 'audio.wav');
+if (ai > 0) wav = path.resolve(argv[ai + 1]); // reuse a mix made earlier with --audio-only
+else {
+  const wavLen = await first.evaluate(() => window.__film.audio());
+  const fd = fs.openSync(wav, 'w'), CH = 4 << 20;
+  for (let i = 0; i * CH < wavLen; i++) fs.writeSync(fd, Buffer.from(await first.evaluate(([i, CH]) => window.__film.audioChunk(i, CH), [i, CH]), 'base64'));
+  fs.closeSync(fd);
+  console.log(`audio mixed in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+}
 if (argv.includes('--audio-only')) { fs.renameSync(wav, out.replace(/\.\w+$/, '.wav')); fs.rmSync(tmp, { recursive: true, force: true }); await browser.close(); process.exit(0); }
 
 const N = Math.ceil((to - from) * fps), per = Math.ceil(N / workers);

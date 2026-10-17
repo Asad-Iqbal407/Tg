@@ -50,6 +50,8 @@ Needs Node 18+, [Playwright](https://playwright.dev) with Chromium, and `ffmpeg`
 npm install playwright            # once, if it is not installed globally
 node tools/render-mp4.mjs karna-arjun-yuddh.mp4             # full film, 1920×1080, 24 fps
 node tools/render-mp4.mjs clip.mp4 --from 160 --to 230      # one part
+node tools/render-mp4.mjs mix.mp4 --audio-only               # just the soundtrack (writes mix.wav)
+node tools/render-mp4.mjs film.mp4 --audio mix.wav           # reuse that soundtrack
 ```
 
 The MP4 has the music, sound effects and burned-in Hindi subtitles. It has no spoken dialogue, because the voice comes from the viewer's browser.
