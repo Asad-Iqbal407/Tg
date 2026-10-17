@@ -32,10 +32,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - uses: android-actions/setup-android@v3
-
       - name: Install the Android SDK packages the project targets
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+        # The Ubuntu runner ships the Android SDK; accept its licences and add the packages we target.
+        run: |
+          SDKMANAGER="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | head -n 1)/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
 
       - run: npm ci
 
