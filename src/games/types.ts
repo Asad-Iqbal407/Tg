@@ -117,6 +117,12 @@ export interface GameDefinition {
   touchButtons: readonly TouchButton[];
   /** Flexible logical size range; omit for a fixed width x height. */
   viewport?: ViewportRange;
+  /**
+   * Orientation the game is designed for. On a touch phone held the other way the shell asks the
+   * player to rotate before the run starts and pauses a run that is rotated away. Omit or use 'any'
+   * for games that work well either way.
+   */
+  orientation?: 'landscape' | 'portrait' | 'any';
   /** Where pointer presses count: only on the canvas (default) or anywhere on the play stage. */
   pointerArea?: 'canvas' | 'stage';
   /** In-game score points converted into one arcade coin. */
