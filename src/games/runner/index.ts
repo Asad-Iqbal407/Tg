@@ -13,6 +13,7 @@ export const runnerGame: GameDefinition = {
   height: 960,
   // Portrait design size; wider screens see more of the city (Hor+), taller ones more sky.
   viewport: { minWidth: 540, maxWidth: 1706, minHeight: 900, maxHeight: 1200 },
+  orientation: 'portrait',
   accent: '#ff6b6b',
   gradient: ['#ff6b6b', '#7a2f7d'],
   controls: [

@@ -767,14 +767,16 @@ export class RunnerGame extends BaseGame {
 
   /**
    * The logical size can be shown at well under 1 CSS px per logical px (a 1706 px wide run on a
-   * landscape phone), so the HUD grows until its main numbers are at least ~15 CSS px tall.
+   * landscape phone, or a 540 px wide run on a 360 px phone), so the HUD grows until its main numbers
+   * are at least ~15 CSS px tall and its smallest labels (18 px) at least ~12.5 CSS px.
    */
   private hudScale(): number {
     const canvas = this.ctx.canvas as HTMLCanvasElement | undefined;
     const cssH = canvas && typeof canvas.clientHeight === 'number' ? canvas.clientHeight : 0;
     if (!(cssH > 0)) return this.baseHs;
     const css = cssH / this.H;
-    return this.baseHs * clamp(15 / (24 * this.baseHs * css), 1, 1.8);
+    const need = Math.max(15 / (24 * this.baseHs * css), 12.5 / (18 * this.baseHs * css));
+    return this.baseHs * clamp(need, 1, 1.8);
   }
 
   private pushItem(
@@ -1072,7 +1074,7 @@ export class RunnerGame extends BaseGame {
     }
     if (this.shield) {
       hudPill(ctx, left, y, 124 * s, 34 * s);
-      text(ctx, 'GUARDIAN', left + 62 * s, y + 17 * s, { size: 15 * s, align: 'center', color: '#7cf' });
+      text(ctx, 'GUARDIAN', left + 62 * s, y + 17 * s, { size: 18 * s, align: 'center', color: '#7cf' });
     }
 
     // Announcements live in the sky between the HUD and the horizon, never over the track ahead.

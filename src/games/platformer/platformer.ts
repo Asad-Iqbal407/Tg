@@ -32,6 +32,21 @@ const HUD_PAD = 12;
 const HUD_H = 40;
 /** Strip of floor (px) kept visible above touch controls covering the bottom of the canvas. */
 const FLOOR_STRIP = 24;
+/**
+ * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, which leaves the
+ * 32 px hero under 6% of the screen. There the world is drawn ZOOM_PHONE times bigger (the HUD and
+ * banners with it), easing back to the design framing as the canvas grows to ZOOM_DESKTOP_H px tall.
+ */
+const ZOOM_PHONE = 1.4;
+const ZOOM_PHONE_H = 430;
+const ZOOM_DESKTOP_H = 500;
+
+/** World zoom for a canvas this many CSS px tall: 1 on desktops and when the size is unknown. */
+export function zoomFor(cssHeight: number): number {
+  if (!(cssHeight > 0)) return 1;
+  const t = clamp((ZOOM_DESKTOP_H - cssHeight) / (ZOOM_DESKTOP_H - ZOOM_PHONE_H), 0, 1);
+  return 1 + (ZOOM_PHONE - 1) * t;
+}
 
 interface Box {
   x: number;
@@ -132,6 +147,13 @@ export class PlatformerGame extends BaseGame {
   /** Camera: world x/y of the top-left of the view. camY is presentation only. */
   private camX = 0;
   private camY = 0;
+  /**
+   * World zoom (see zoomFor). The world, HUD and banners are laid out in a vw x vh view: the
+   * logical size divided by the zoom. Insets stay in logical px and are scaled by 1 / zoom.
+   */
+  private zoom = 1;
+  private vw = 0;
+  private vh = 0;
   private checkpointReached = false;
   private coinCounter = 0;
   private flagY = 0;
@@ -154,13 +176,14 @@ export class PlatformerGame extends BaseGame {
   // Render-only state: device pixels per logical px, and fills cached per theme.
   private rsX = 1;
   private rsY = 1;
-  private sky: { theme: Theme; fill: CanvasGradient } | null = null;
+  private sky: { theme: Theme; fill: CanvasGradient; h: number } | null = null;
   private pipeFill: CanvasGradient | null = null;
   private tones = { groundDark: '', grassDark: '' };
 
   constructor(s: GameServices) {
     super(s);
     this.preview = s.preview === true;
+    this.updateZoom();
     this.seed = this.rng.int(1, 1_000_000);
     this.lives = 3 + (this.hasBoost('shield') ? 1 : 0);
     const base = {
@@ -279,11 +302,20 @@ export class PlatformerGame extends BaseGame {
 
   // ------------------------------------------------------------------ camera
 
+  /** Re-read the zoom from the canvas height (CSS px) and derive the view size from the logical size. */
+  private updateZoom(): void {
+    const canvas = this.ctx.canvas as HTMLCanvasElement | undefined;
+    const cssH = !this.preview && typeof canvas?.clientHeight === 'number' ? canvas.clientHeight : 0;
+    this.zoom = zoomFor(cssH);
+    this.vw = this.W / this.zoom;
+    this.vh = this.H / this.zoom;
+  }
+
   private cameraTargetX(): number {
     // Narrow views keep the hero a little further left, so ~1.5 s of run-speed lookahead stays visible.
-    const anchor = clamp(0.4 - (1000 - this.W) * 0.0003, 0.33, 0.4);
-    const maxX = Math.max(0, this.level.cols * T - this.W);
-    return clamp(this.player.x + this.player.w / 2 - this.W * anchor, 0, maxX);
+    const anchor = clamp(0.4 - (1000 - this.vw) * 0.0003, 0.33, 0.4);
+    const maxX = Math.max(0, this.level.cols * T - this.vw);
+    return clamp(this.player.x + this.player.w / 2 - this.vw * anchor, 0, maxX);
   }
 
   /**
@@ -292,11 +324,14 @@ export class PlatformerGame extends BaseGame {
    * hero's row and a strip of floor stay above them. It also follows the hero above the HUD.
    */
   private cameraTargetY(): number {
-    const worldTop = ROWS * T - this.H;
-    const hudBottom = this.insets.top + HUD_PAD + HUD_H;
-    const need = GROUND_ROW * T + FLOOR_STRIP - (this.H - this.insets.bottom);
+    const k = 1 / this.zoom;
+    const worldTop = ROWS * T - this.vh;
+    const hudBottom = this.insets.top * k + HUD_PAD + HUD_H;
+    const need = GROUND_ROW * T + FLOOR_STRIP - (this.vh - this.insets.bottom * k);
     const maxShift = Math.max(worldTop, (CHUNK_TOP_ROW + 1) * T - hudBottom - 8);
-    let y = clamp(need, worldTop, maxShift);
+    // A zoomed-in view can be too short for both the top chunk row and the ground above the touch
+    // controls. The ground wins; the hero-follow below still keeps the hero under the HUD.
+    let y = clamp(need, worldTop, Math.max(maxShift, need));
     const p = this.player;
     if ((this.phase === 'play' || this.phase === 'flag') && !p.dead) y = Math.min(y, p.y - hudBottom - 4);
     return y;
@@ -416,6 +451,7 @@ export class PlatformerGame extends BaseGame {
   // ------------------------------------------------------------------ update
 
   protected tick(dt: number): void {
+    this.updateZoom();
     this.phaseT += dt;
     this.bannerT += dt;
     this.hurryT += dt;
@@ -718,7 +754,7 @@ export class PlatformerGame extends BaseGame {
   private updateEnemies(dt: number, prevBottom: number, descending: boolean): void {
     const p = this.player;
     const viewL = this.camX - 3 * T;
-    const viewR = this.camX + this.W + 3 * T;
+    const viewR = this.camX + this.vw + 3 * T;
     let landTop = Infinity;
     for (const e of this.enemies) {
       if (!e.active) {
@@ -745,7 +781,7 @@ export class PlatformerGame extends BaseGame {
       }
       this.moveY(e, e.vy * dt);
       if (e.y > ROWS * T + 60) e.state = 'dead';
-      if (e.x + e.w < this.camX - this.W || e.x > this.camX + this.W * 2.5) {
+      if (e.x + e.w < this.camX - this.vw || e.x > this.camX + this.vw * 2.5) {
         if (e.state === 'shellMove') e.state = 'dead';
       }
 
@@ -991,7 +1027,7 @@ export class PlatformerGame extends BaseGame {
           break;
         }
       }
-      if (f.x < this.camX - 40 || f.x > this.camX + this.W + 40) f.life = 0;
+      if (f.x < this.camX - 40 || f.x > this.camX + this.vw + 40) f.life = 0;
       if (f.life <= 0)
         this.particles.emit({
           x: f.x,
@@ -1020,10 +1056,12 @@ export class PlatformerGame extends BaseGame {
 
   render(): void {
     const ctx = this.ctx;
+    this.updateZoom();
     const m = typeof ctx.getTransform === 'function' ? ctx.getTransform() : undefined;
-    this.rsX = m && m.a > 0 ? m.a : 1;
-    this.rsY = m && m.d > 0 ? m.d : 1;
+    this.rsX = (m && m.a > 0 ? m.a : 1) * this.zoom;
+    this.rsY = (m && m.d > 0 ? m.d : 1) * this.zoom;
     ctx.save();
+    if (this.zoom !== 1) ctx.scale(this.zoom, this.zoom);
     ctx.translate(this.snapX(this.shake.x), this.snapY(this.shake.y));
     this.drawBackground();
     ctx.save();
@@ -1041,7 +1079,17 @@ export class PlatformerGame extends BaseGame {
     this.texts.render(ctx);
     ctx.restore();
     ctx.restore();
-    if (!this.preview) this.drawHud();
+    if (this.preview) return;
+    // The HUD stays steady under screen shake. At design zoom it is drawn exactly as before; when
+    // zoomed it gets its own scale, kept in a save so it cannot leak state into the next frame.
+    if (this.zoom === 1) {
+      this.drawHud();
+    } else {
+      ctx.save();
+      ctx.scale(this.zoom, this.zoom);
+      this.drawHud();
+      ctx.restore();
+    }
   }
 
   private snapX(v: number): number {
@@ -1061,11 +1109,11 @@ export class PlatformerGame extends BaseGame {
 
   private skyFill(): CanvasGradient {
     const th = this.theme;
-    if (this.sky?.theme !== th) {
-      const g = this.ctx.createLinearGradient(0, 0, 0, this.H);
+    if (this.sky?.theme !== th || this.sky.h !== this.vh) {
+      const g = this.ctx.createLinearGradient(0, 0, 0, this.vh);
       g.addColorStop(0, th.sky[0]);
       g.addColorStop(1, th.sky[1]);
-      this.sky = { theme: th, fill: g };
+      this.sky = { theme: th, fill: g, h: this.vh };
     }
     return this.sky.fill;
   }
@@ -1074,7 +1122,7 @@ export class PlatformerGame extends BaseGame {
     const ctx = this.ctx;
     const th = this.theme;
     ctx.fillStyle = this.skyFill();
-    ctx.fillRect(-20, -20, this.W + 40, this.H + 40);
+    ctx.fillRect(-20, -20, this.vw + 40, this.vh + 40);
     // Hills stand on the horizon, so they move vertically with the world.
     const horizon = GROUND_ROW * T - this.camY;
     if (th.stars) this.drawStars();
@@ -1086,7 +1134,7 @@ export class PlatformerGame extends BaseGame {
 
   private drawStars(): void {
     const ctx = this.ctx;
-    const period = this.W + 240;
+    const period = this.vw + 240;
     const count = Math.round(period / 17);
     ctx.fillStyle = '#fff';
     for (let i = 0; i < count; i++) {
@@ -1114,7 +1162,7 @@ export class PlatformerGame extends BaseGame {
     const scroll = this.camX * parallax;
     const base = Math.floor(scroll / span);
     const off = base * span - scroll;
-    const n = Math.ceil(this.W / span) + 2;
+    const n = Math.ceil(this.vw / span) + 2;
     ctx.fillStyle = color;
     ctx.beginPath();
     for (let i = -1; i < n; i++) {
@@ -1130,7 +1178,7 @@ export class PlatformerGame extends BaseGame {
     const scroll = this.camX * 0.35;
     const base = Math.floor(scroll / span);
     const off = base * span - scroll;
-    const n = Math.ceil(this.W / span) + 2;
+    const n = Math.ceil(this.vw / span) + 2;
     this.ctx.fillStyle = this.theme.stars ? 'rgba(200,210,255,0.25)' : 'rgba(255,255,255,0.92)';
     for (let i = -1; i < n; i++) {
       const x = off + i * span + hash1(base + i) * 120;
@@ -1158,10 +1206,10 @@ export class PlatformerGame extends BaseGame {
     const scroll = this.camX * 0.35;
     const base = Math.floor(scroll / span);
     const off = base * span - scroll;
-    const n = Math.ceil(this.W / span) + 2;
+    const n = Math.ceil(this.vw / span) + 2;
     const top = 14 - this.camY * 0.3;
     ctx.fillStyle = this.theme.hillFar;
-    ctx.fillRect(-20, -20, this.W + 40, top + 20);
+    ctx.fillRect(-20, -20, this.vw + 40, top + 20);
     ctx.beginPath();
     for (let i = -1; i < n; i++) {
       const x = off + i * span + hash1(base + i + 11) * 60;
@@ -1186,11 +1234,11 @@ export class PlatformerGame extends BaseGame {
   private drawTiles(): void {
     const ctx = this.ctx;
     const c0 = Math.max(0, Math.floor(this.camX / T) - 1);
-    const c1 = Math.min(this.level.cols - 1, Math.ceil((this.camX + this.W) / T) + 1);
+    const c1 = Math.min(this.level.cols - 1, Math.ceil((this.camX + this.vw) / T) + 1);
     const r0 = clamp(Math.floor(this.camY / T) - 1, 0, ROWS - 1);
-    const r1 = clamp(Math.ceil((this.camY + this.H) / T), 0, ROWS - 1);
+    const r1 = clamp(Math.ceil((this.camY + this.vh) / T), 0, ROWS - 1);
     // When the view reaches below the level (touch framing), the bottom ground row extends down.
-    const floorEnd = Math.max(ROWS * T, this.camY + this.H + 20);
+    const floorEnd = Math.max(ROWS * T, this.camY + this.vh + 20);
     const th = this.theme;
     for (let row = r0; row <= r1; row++) {
       for (let col = c0; col <= c1; col++) {
@@ -1316,7 +1364,7 @@ export class PlatformerGame extends BaseGame {
 
   private drawCoins(): void {
     for (const c of this.level.coins) {
-      if (c.taken || c.x < this.camX - T || c.x > this.camX + this.W + T) continue;
+      if (c.taken || c.x < this.camX - T || c.x > this.camX + this.vw + T) continue;
       drawCoin(this.ctx, c.x, c.y, 11, Math.cos(this.time * 4 + c.x * 0.02));
     }
     for (const c of this.popCoins) drawCoin(this.ctx, c.x, c.y, 11, Math.cos(this.time * 20));
@@ -1433,7 +1481,7 @@ export class PlatformerGame extends BaseGame {
     const px = 2.4;
     const step = Math.floor(this.time * 6) % 2;
     for (const e of this.enemies) {
-      if (e.x + e.w < this.camX - T || e.x > this.camX + this.W + T) continue;
+      if (e.x + e.w < this.camX - T || e.x > this.camX + this.vw + T) continue;
       // Waiting enemies stand still; every sprite faces right and is mirrored when heading left.
       const frame = e.active ? step : 0;
       const flip = e.vx < 0 || (e.vx === 0 && e.dir < 0);
@@ -1502,10 +1550,10 @@ export class PlatformerGame extends BaseGame {
   /** HUD anchored to the canvas edges inside the insets: score, coins, world on the left; clock, lives on the right. */
   private drawHud(): void {
     const ctx = this.ctx;
-    const ins = this.insets;
-    const top = ins.top + HUD_PAD;
-    const left = ins.left + HUD_PAD;
-    const right = this.W - ins.right - HUD_PAD;
+    const k = 1 / this.zoom;
+    const top = this.insets.top * k + HUD_PAD;
+    const left = this.insets.left * k + HUD_PAD;
+    const right = this.vw - this.insets.right * k - HUD_PAD;
     const cy = top + HUD_H / 2 + 1;
     hudPill(ctx, left, top, 196, HUD_H);
     text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, left + 18, cy, { size: 22 });
@@ -1540,7 +1588,7 @@ export class PlatformerGame extends BaseGame {
 
     // Banners sit in the open sky under the HUD, clear of the rows the hero plays in.
     const sky = wy + HUD_H;
-    const mid = ins.top + (this.H - ins.top - ins.bottom) * 0.38;
+    const mid = this.insets.top * k + (this.vh - (this.insets.top + this.insets.bottom) * k) * 0.38;
     if (this.phase === 'play' && this.showBanner && this.bannerT < BANNER_TIME) {
       const t = this.bannerT / BANNER_TIME;
       this.drawBanner(`WORLD ${worldLabel(this.levelNum)}`, this.theme.name, t, '#ffd23f', sky + 72);
@@ -1559,10 +1607,11 @@ export class PlatformerGame extends BaseGame {
   /** The shared banner, centred at height `y` across the area between the side insets. */
   private drawBanner(title: string, subtitle: string, t: number, color: string, y: number): void {
     const ctx = this.ctx;
-    const w = this.W - this.insets.left - this.insets.right;
+    const k = 1 / this.zoom;
+    const w = this.vw - (this.insets.left + this.insets.right) * k;
     ctx.save();
-    ctx.translate(this.insets.left, y - this.H * 0.38);
-    banner(ctx, w, this.H, title, subtitle, t, color);
+    ctx.translate(this.insets.left * k, y - this.vh * 0.38);
+    banner(ctx, w, this.vh, title, subtitle, t, color);
     ctx.restore();
   }
 

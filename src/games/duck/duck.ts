@@ -891,13 +891,18 @@ export class DuckGame extends BaseGame {
     return false;
   }
 
+  /** CSS px per logical px on screen. Reads 1 when the canvas is not laid out (tests). */
+  private cssPerLogical(): number {
+    const css = (this.ctx.canvas as HTMLCanvasElement | undefined)?.clientWidth ?? 0;
+    return css > 0 ? css / this.W : 1;
+  }
+
   /**
    * Extra HUD size on small screens. A phone draws the canvas at few CSS px per logical px, so the
-   * text needs more logical px to stay readable. Reads 1 when the canvas is not laid out (tests).
+   * text needs more logical px to stay readable.
    */
   private phoneScale(): number {
-    const css = (this.ctx.canvas as HTMLCanvasElement | undefined)?.clientWidth ?? 0;
-    return css > 0 ? clamp(0.8 / (css / this.W), 1, 1.2) : 1;
+    return clamp(0.8 / this.cssPerLogical(), 1, 1.2);
   }
 
   /** Bottom HUD bar: anchored to the canvas edges and lifted above the bottom inset. */
@@ -1073,7 +1078,8 @@ export class DuckGame extends BaseGame {
       );
       if (this.phaseT >= PACE.roundSkip && t < 0.8) {
         text(ctx, 'Click or shoot to continue', this.W / 2, this.H * 0.38 + 92, {
-          size: 17,
+          // At least 13 CSS px on a phone; the hint is the only line that stays small otherwise.
+          size: Math.max(17, 13 / this.cssPerLogical()),
           align: 'center',
           weight: 700,
           color: 'rgba(255,255,255,0.85)',

@@ -13,6 +13,8 @@ export const platformerGame: GameDefinition = {
   height: 540,
   // Wider screens see further ahead; the course is always 15 rows tall.
   viewport: { minWidth: 800, maxWidth: 1280 },
+  // Held sideways on a phone the level is zoomed in (see platformer.ts); portrait gets a rotate prompt.
+  orientation: 'landscape',
   accent: '#ffd23f',
   gradient: ['#5c94fc', '#e63946'],
   controls: [

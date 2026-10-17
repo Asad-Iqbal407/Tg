@@ -12,6 +12,8 @@ export const galaxyGame: GameDefinition = {
   width: 540,
   height: 960,
   viewport: { minWidth: 540, maxWidth: 720, minHeight: 900, maxHeight: 1200 },
+  // A vertical shooter: held sideways it would show a sliver of the field, so it asks for portrait.
+  orientation: 'portrait',
   // Right-drags and mouse steering keep working over the letterbox, so the ship never stops mid-fight.
   pointerArea: 'stage',
   accent: '#b06bff',

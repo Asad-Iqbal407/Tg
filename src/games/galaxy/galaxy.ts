@@ -325,6 +325,20 @@ export class GalaxyGame extends BaseGame {
     return this.H / 960;
   }
 
+  /**
+   * HUD and popup size factor. A phone draws the canvas at fewer CSS px per logical px, so the HUD
+   * grows to keep its text near 12 CSS px on screen. Reads 1 when the canvas is not laid out (tests).
+   */
+  private hudScale(): number {
+    const css = (this.ctx.canvas as HTMLCanvasElement | undefined)?.clientWidth ?? 0;
+    return css > 0 ? clamp(0.9 / (css / this.W), 1, 1.5) : 1;
+  }
+
+  /** Floating popup, sized with the HUD so it stays readable on a phone. */
+  private popup(x: number, y: number, label: string, color: string, size: number): void {
+    this.texts.add(x, y, label, color, size * this.hudScale());
+  }
+
   private hpScale(): number {
     return 1 + (this.level() - 1) * 0.08;
   }
@@ -508,7 +522,7 @@ export class GalaxyGame extends BaseGame {
     this.overdriveT = Math.max(0, this.overdriveT - dt);
     this.chainT -= dt;
     if (this.chainT <= 0 && this.chain > 0) {
-      if (this.chain >= 10) this.texts.add(this.shipX, this.shipY - 60, 'CHAIN LOST', '#ff6b6b', 18);
+      if (this.chain >= 10) this.popup(this.shipX, this.shipY - 60, 'CHAIN LOST', '#ff6b6b', 18);
       this.chain = 0;
     }
     for (const s of this.stars) {
@@ -732,7 +746,8 @@ export class GalaxyGame extends BaseGame {
       case 'hover': {
         if (e.t < e.dur) {
           e.y += (e.targetY - e.y) * damp(2, dt);
-          e.x = e.x0 + Math.sin(e.t * 0.9) * 60;
+          // The sway stops at the edges, so the outer ships of a full line never leave the screen.
+          e.x = clamp(e.x0 + Math.sin(e.t * 0.9) * 60, e.r + 6, this.W - e.r - 6);
         } else {
           e.vy = Math.min(420, e.vy + 300 * dt);
           e.y += e.vy * dt;
@@ -924,7 +939,7 @@ export class GalaxyGame extends BaseGame {
       this.shake.add(0.5);
       this.rings.push({ x: e.x, y: e.y, r: e.r * 0.6, life: 0.6, color: BULLET_MAGENTA });
       for (const b of this.enemyShots) if (Math.hypot(b.x - e.x, b.y - e.y) < 160) b.alive = false;
-      this.texts.add(this.W / 2, this.H * 0.3, e.rage === 2 ? 'RAGE II' : 'RAGE I', BULLET_MAGENTA, 26);
+      this.popup(this.W / 2, this.H * 0.3, e.rage === 2 ? 'RAGE II' : 'RAGE I', BULLET_MAGENTA, 26);
       this.audio.play('warning', { volume: 0.6 });
     }
   }
@@ -975,8 +990,8 @@ export class GalaxyGame extends BaseGame {
     this.rings.push({ x: e.x, y: e.y, r: e.r * 0.3, life: 0.12, color: '#fff' });
     if (big) this.rings.push({ x: e.x, y: e.y, r: e.r * 0.9, life: 0.6, color: ENEMY_COLOR[e.kind] });
     if (mult > 1 || big)
-      this.texts.add(e.x, e.y - 20, mult > 1 ? `${pts} x${mult}` : `${pts}`, '#ffd23f', big ? 28 : 18);
-    if (mult > prevMult) this.texts.add(e.x, e.y + 26, `CHAIN x${mult}!`, BULLET_ORANGE, 16);
+      this.popup(e.x, e.y - 20, mult > 1 ? `${pts} x${mult}` : `${pts}`, '#ffd23f', big ? 28 : 18);
+    if (mult > prevMult) this.popup(e.x, e.y + 26, `CHAIN x${mult}!`, BULLET_ORANGE, 16);
     if (e.kind === 'boss') {
       this.boss = null;
       this.addStat('bosses');
@@ -992,9 +1007,9 @@ export class GalaxyGame extends BaseGame {
       this.drops.push({ kind: 'bomb', x: e.x + 40, y: e.y, vy: 90, alive: true });
       if (this.lives < this.startLives) {
         this.lives++;
-        this.texts.add(this.W / 2, this.H / 2 - 60, '1UP', '#7CFC00', 30);
+        this.popup(this.W / 2, this.H / 2 - 60, '1UP', '#7CFC00', 30);
       }
-      this.texts.add(this.W / 2, this.H / 2 - 100, 'BOSS DEFEATED!', '#7CFC00', 36);
+      this.popup(this.W / 2, this.H / 2 - 100, 'BOSS DEFEATED!', '#7CFC00', 36);
       return;
     }
     const r = this.rng.next();
@@ -1066,28 +1081,28 @@ export class GalaxyGame extends BaseGame {
         this.audio.play('powerup');
         if (this.weapon < MAX_WEAPON) {
           this.weapon++;
-          this.texts.add(this.shipX, this.shipY - 50, 'POWER UP!', '#4dd9ff', 22);
+          this.popup(this.shipX, this.shipY - 50, 'POWER UP!', '#4dd9ff', 22);
         } else {
           // Surplus power becomes Overdrive: faster fire and double damage, lengthened by Overclock.
           this.overdriveMax = this.powerTime(OVERDRIVE_SEC);
           this.overdriveT = this.overdriveMax;
           this.score += 300;
-          this.texts.add(this.shipX, this.shipY - 50, 'OVERDRIVE!', '#ffd23f', 22);
+          this.popup(this.shipX, this.shipY - 50, 'OVERDRIVE!', '#ffd23f', 22);
         }
         break;
       case 'bomb':
         this.bombs = Math.min(5, this.bombs + 1);
         this.audio.play('select');
-        this.texts.add(this.shipX, this.shipY - 50, '+1 BOMB', '#ff9f1c', 22);
+        this.popup(this.shipX, this.shipY - 50, '+1 BOMB', '#ff9f1c', 22);
         break;
       case 'shield':
         if (this.shield) {
           // Already shielded: the spare becomes a bomb instead of being wasted.
           this.bombs = Math.min(5, this.bombs + 1);
-          this.texts.add(this.shipX, this.shipY - 50, '+1 BOMB', '#ff9f1c', 22);
+          this.popup(this.shipX, this.shipY - 50, '+1 BOMB', '#ff9f1c', 22);
         } else {
           this.shield = true;
-          this.texts.add(this.shipX, this.shipY - 50, 'SHIELD', '#7cf', 22);
+          this.popup(this.shipX, this.shipY - 50, 'SHIELD', '#7cf', 22);
         }
         this.audio.play('powerup');
         break;

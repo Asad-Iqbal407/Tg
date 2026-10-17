@@ -333,7 +333,7 @@ export function drawCrate(ctx: CanvasRenderingContext2D, c: CrateLike): void {
   ctx.beginPath();
   ctx.ellipse(c.x - 7, by - 9, 5, 8, -0.4, 0, TAU);
   ctx.fill();
-  text(ctx, info.badge, c.x, by + 1, { size: 15, align: 'center', color: '#1b1b2e', stroke: null });
+  text(ctx, info.badge, c.x, by + 1, { size: 17, align: 'center', color: '#1b1b2e', stroke: null });
   fillRoundRect(ctx, c.x - CRATE_HALF, c.y - CRATE_HALF, CRATE_HALF * 2, CRATE_HALF * 2, 6, '#c58b4a');
   ctx.strokeStyle = '#7a5226';
   ctx.lineWidth = 3;

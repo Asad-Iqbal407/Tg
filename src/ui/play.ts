@@ -7,6 +7,7 @@ import type { App } from './app';
 import { fmt, h, isTouchDevice } from './dom';
 import { icon, type IconName } from './icons';
 import { Modal } from './overlay';
+import { declaresOrientation, needsRotation, orientationOf, type Orientation } from './orientation';
 import { showResults } from './results';
 
 /** Runs shorter than this with zero score are discarded instead of recorded. */
@@ -40,6 +41,8 @@ export class PlayScreen {
   private readonly muteBtn: HTMLButtonElement;
   private readonly fullscreenBtn: HTMLButtonElement | null;
   private readonly rotateHint: HTMLButtonElement;
+  /** "Rotate your phone" prompt for games that declare an orientation (touch phones only). */
+  private readonly rotateGate: HTMLElement;
   private readonly viewport: Viewport;
   private readonly input = new Input();
   private readonly loop: GameLoop;
@@ -60,6 +63,8 @@ export class PlayScreen {
   private sawTouch = isTouchDevice();
   /** Rotate prompt dismissed, per stage orientation. */
   private readonly rotateDismissed = { landscape: false, portrait: false };
+  /** Orientation the player chose "Play anyway" for; the prompt returns only after a turn. */
+  private anywayFor: Orientation | null = null;
   private menuRaf = 0;
   private shownFps = -1;
   private slowTime = 0;
@@ -100,7 +105,8 @@ export class PlayScreen {
       h('span', { class: 'rotate-hint__text', text: 'Rotate for a bigger view' }),
       icon('close', 'icon rotate-hint__close'),
     );
-    this.stage = h('div', { class: 'play__stage' }, this.rotateHint);
+    this.rotateGate = this.buildRotateGate();
+    this.stage = h('div', { class: 'play__stage' }, this.rotateHint, this.rotateGate);
     this.el = h(
       'section',
       {
@@ -175,11 +181,11 @@ export class PlayScreen {
       });
     }
     this.paused = false;
-    this.input.setEnabled(true);
     this.app.audio.setPaused(false);
     this.app.audio.setMusicPaused(false);
     this.app.audio.startMusic(this.def.music);
-    this.loop.start();
+    // A game that wants the other orientation waits behind the rotate prompt; the music waits too.
+    this.refreshPlay();
   }
 
   private step(dt: number): void {
@@ -238,9 +244,12 @@ export class PlayScreen {
     const landscape = a.width > a.height;
     const rotated = this.stageLandscape !== null && landscape !== this.stageLandscape;
     this.stageLandscape = landscape;
+    // Insets follow the new layout at once, so the next frame already avoids the new button spots.
     this.updateLayout();
-    // A rotation mid-run reshuffles everything: stop and let the player choose.
-    if (rotated) this.pause();
+    // Games that declare an orientation keep their run through a turn (the prompt holds it when the
+    // turn is the wrong way). Other games pause, as before, so the player can choose.
+    if (rotated && !declaresOrientation(this.def.orientation)) this.pause();
+    this.refreshPlay();
     if (this.paused) this.updateFitOffer();
     if (this.loop.isRunning) this.loop.invalidate();
     else this.redraw();
@@ -293,9 +302,82 @@ export class PlayScreen {
     const hint = this.rotateHint;
     const a = this.viewport.available();
     const key = a.width > a.height ? 'landscape' : 'portrait';
-    const show = this.sawTouch && !this.rotateDismissed[key] && this.rotateGain() >= ROTATE_GAIN;
+    // The rotate prompt and this hint never show together: the prompt covers a touch phone held the
+    // wrong way for a declared orientation, and the hint covers every other case.
+    const prompted = this.rotateBlocked();
+    const show = !prompted && this.sawTouch && !this.rotateDismissed[key] && this.rotateGain() >= ROTATE_GAIN;
     hint.classList.toggle('is-visible', show);
     if (show) this.placeRotateHint();
+  }
+
+  /** The rotate prompt's card: an icon, the reason, and a way to play in the current orientation. */
+  private buildRotateGate(): HTMLElement {
+    const want = this.def.orientation === 'landscape' ? 'landscape' : 'portrait';
+    return h(
+      'div',
+      {
+        class: 'rotate-gate',
+        attrs: { role: 'region', 'aria-label': 'Rotate your phone' },
+        on: { pointerdown: (e) => e.stopPropagation() },
+      },
+      h(
+        'div',
+        { class: 'rotate-gate__card' },
+        icon('rotate', 'icon rotate-gate__icon'),
+        h('h2', { class: 'rotate-gate__title', text: 'Rotate your phone' }),
+        h('p', { class: 'rotate-gate__text', text: `${this.def.title} plays best in ${want} mode.` }),
+        h('button', {
+          class: 'btn btn--ghost rotate-gate__anyway',
+          text: 'Play anyway',
+          attrs: { type: 'button' },
+          on: { click: () => this.playAnyway() },
+        }),
+      ),
+    );
+  }
+
+  private playAnyway(): void {
+    this.anywayFor = orientationOf(window.innerWidth, window.innerHeight);
+    this.refreshPlay();
+    this.viewport.canvas.focus({ preventScroll: true });
+  }
+
+  /** True while the phone is held the wrong way for this game and the player has not waived it. */
+  private rotateBlocked(): boolean {
+    const preferred = this.def.orientation;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (declaresOrientation(preferred) && orientationOf(w, h) === preferred) this.anywayFor = null;
+    return needsRotation(preferred, isTouchDevice(), w, h, this.anywayFor);
+  }
+
+  /**
+   * Keep the loop in step with the phone: a turn the wrong way holds the run behind the prompt, and
+   * a turn back (or "Play anyway") resumes it. The pause menu and the results keep their own state.
+   */
+  private refreshPlay(): void {
+    if (this.destroyed || !this.game || this.resultsOpen) return;
+    const blocked = this.rotateBlocked();
+    this.rotateGate.classList.toggle('is-visible', blocked);
+    if (blocked) this.holdForRotate();
+    else if (!this.paused) this.startLoop();
+  }
+
+  /** Stop the simulation behind the rotate prompt: no input, no music, no engines. */
+  private holdForRotate(): void {
+    this.loop.stop();
+    this.input.setEnabled(false);
+    this.releaseTouches();
+    this.app.audio.setMusicPaused(true);
+    this.app.audio.setPaused(true);
+    this.redraw();
+  }
+
+  private startLoop(): void {
+    this.input.setEnabled(true);
+    this.app.audio.setPaused(false);
+    this.app.audio.setMusicPaused(false);
+    this.loop.start();
   }
 
   /** Put the rotate prompt in the widest letterbox band so it doesn't cover the game. */
@@ -443,10 +525,7 @@ export class PlayScreen {
     this.closePauseModal();
     this.stopMenuPad();
     this.paused = false;
-    this.input.setEnabled(true);
-    this.app.audio.setMusicPaused(false);
-    this.app.audio.setPaused(false);
-    this.loop.start();
+    this.refreshPlay();
     this.viewport.canvas.focus({ preventScroll: true });
   }
 

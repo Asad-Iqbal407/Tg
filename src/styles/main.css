@@ -26,6 +26,8 @@
   --topbar-h: 64px;
   --tabbar-h: 64px;
   --safe-b: env(safe-area-inset-bottom, 0px);
+  /* On-screen play buttons; touch screens scale them to the short side (see the coarse block). */
+  --touch: 64px;
   color-scheme: dark;
 }
 
@@ -1931,27 +1933,28 @@ body.is-playing .toast__text span {
   gap: 10px;
   align-items: flex-end;
 }
-/* Translucent and blur-free: the game stays visible (and cheap to composite) under the buttons. */
+/* Translucent and blur-free: the game stays visible (and cheap to composite) under the buttons.
+   manipulation (not none) keeps double-tap zoom off the buttons; the stage itself stays none. */
 .touch-btn {
-  width: 64px;
-  height: 64px;
+  width: var(--touch);
+  height: var(--touch);
   padding: 0;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.92);
   font-weight: 900;
-  font-size: 1.05rem;
+  font-size: clamp(0.8rem, calc(var(--touch) * 0.28), 1.05rem);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
   pointer-events: auto;
-  touch-action: none;
+  touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 .touch-btn--wide {
-  width: 104px;
-  height: 72px;
+  width: calc(var(--touch) * 1.5);
+  height: var(--touch);
   border-radius: 22px;
 }
 .touch-btn.is-down {
@@ -2012,6 +2015,56 @@ body.is-playing .toast__text span {
   90% {
     transform: rotate(-90deg);
   }
+}
+
+/* Shown on a touch phone held the other way from a game's declared orientation. The run waits
+   behind it (see PlayScreen.refreshPlay) and it clears as soon as the phone turns. */
+.rotate-gate {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  padding-top: max(16px, env(safe-area-inset-top, 0px));
+  background: rgba(5, 6, 15, 0.84);
+}
+.rotate-gate.is-visible {
+  display: flex;
+}
+.rotate-gate__card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 320px;
+  max-height: 100%;
+  overflow: auto;
+  padding: 22px 20px;
+  border-radius: var(--radius);
+  text-align: center;
+  background: #12143a;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+}
+.rotate-gate__icon {
+  width: 44px;
+  height: 44px;
+  color: var(--accent);
+  animation: rotate-nudge 2.6s ease-in-out infinite;
+}
+.rotate-gate__title {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+.rotate-gate__text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.rotate-gate__anyway {
+  margin-top: 6px;
 }
 
 /* ==========================================================================
@@ -2271,5 +2324,68 @@ body.is-playing .toast__text span {
   .game-card__play {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* Touch screens (phones and tablets): every control is at least 44 CSS px on its smaller side, and
+   menu text is at least 14 px. Placed last so it overrides the phone-width rules above. Fine
+   pointers (desktop) keep their sizes. */
+@media (pointer: coarse) {
+  :root {
+    --touch: clamp(48px, 16vmin, 72px);
+  }
+  .icon-btn,
+  .topbar .icon-btn,
+  .play__header .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .modal__close {
+    width: 44px;
+    height: 44px;
+  }
+  .brand,
+  .player-chip,
+  .currency,
+  .btn,
+  .btn--sm,
+  .tab,
+  .input,
+  .select,
+  .tabbar__link {
+    min-height: 44px;
+  }
+  .brand,
+  .player-chip {
+    min-width: 44px;
+  }
+  input[type='range'] {
+    min-height: 44px;
+  }
+  /* Inline text links: a taller and wider hit area that leaves the line's layout as it was. */
+  .link {
+    padding: 11px 8px;
+    margin: -11px -8px;
+  }
+  .small,
+  small,
+  .pill,
+  .rarity-tag,
+  .calendar__label,
+  .field__label,
+  .countdown,
+  .btn--sm,
+  .stat__label,
+  .stat-bar__label,
+  .board th,
+  .stats-table th,
+  .lobby__section h3,
+  kbd {
+    font-size: 0.875rem;
+  }
+  /* Six labels share a 360 px bar, so the bottom navigation stays at 12 px. */
+  .tabbar__link,
+  .tabbar__badge {
+    font-size: 0.75rem;
   }
 }
