@@ -33,6 +33,11 @@ const UPRIGHT_STAGES: [string, number, number][] = [
   ['P3', 430, 882],
 ];
 
+/** Runs wider than the 800 px upright design (a landscape run turned to portrait), on each phone held upright. */
+const WIDE_UPRIGHT: [string, number, number, number][] = UPRIGHT_STAGES.flatMap(([id, w, h]) =>
+  [1032, 1096].map((runW): [string, number, number, number] => [`${id} ${runW} px run`, w, h, runW]),
+);
+
 /** Whether two HUD pills share any area. */
 const overlap = (a: HudBox, b: HudBox): boolean =>
   a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + HUD_H && b.y < a.y + HUD_H;
@@ -58,6 +63,7 @@ interface Framed extends GameInstance {
   player: Box;
   camY: number;
   enemies: unknown[];
+  vw: number;
   vh: number;
 }
 
@@ -203,6 +209,55 @@ describe('Pixel Quest layout', () => {
     g.render();
     const p = g.player;
     // The hero is below both HUD rows (12 px padding, two 40 px rows, an 8 px gap) and its feet are in view.
+    const hudBottom = 12 + 2 * HUD_H + 8;
+    expect(p.y - g.camY).toBeGreaterThanOrEqual(hudBottom);
+    expect(p.y + p.h - g.camY).toBeLessThanOrEqual(g.vh - 16);
+  });
+
+  it('shows the same view width held upright, whatever the run is wide', () => {
+    expect(800 / zoomFor(263, 800)).toBeCloseTo(800 / 1.9, 6);
+    expect(1096 / zoomFor(192, 1096)).toBeCloseTo(800 / 1.9, 6);
+  });
+
+  it.each(WIDE_UPRIGHT)('keeps the hero at least 8 percent of the short side on %s', (_name, w, h, runW) => {
+    const scale = Math.min(w / runW, h / (ROWS * T));
+    const hero = HERO_DRAW_H * scale * zoomFor(ROWS * T * scale, runW);
+    expect(hero / Math.min(w, h)).toBeGreaterThanOrEqual(0.08);
+  });
+
+  it.each(WIDE_UPRIGHT)('draws the smallest HUD label at least 12.5 CSS px on %s', (_name, w, h, runW) => {
+    const scale = Math.min(w / runW, h / (ROWS * T));
+    const cssH = ROWS * T * scale;
+    const zoom = zoomFor(cssH, runW);
+    expect(Math.max(18, hudFloorPx(cssH, zoom)) * scale * zoom).toBeGreaterThanOrEqual(12.5 - 1e-9);
+  });
+
+  it('keeps the hero under the two-row HUD and the ground in view on a wide run held upright', () => {
+    // A 1096 px run turned upright: its 192 CSS px tall canvas gets the same 421 px view as an 800 px run.
+    const ctx = mockCtx();
+    (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 192 };
+    const input = new Input();
+    const g = def.create({
+      ctx,
+      width: 1096,
+      height: 540,
+      insets: NO_INSETS,
+      input,
+      audio: new NullAudio(),
+      rng: new Rng(1),
+      loadout: { skin: toSkinData(defaultSkin('platformer')), boosts: new Set(), powerDuration: 1 },
+      reducedMotion: false,
+      haptic: () => undefined,
+    }) as unknown as Framed;
+    expect(g.vw).toBeCloseTo(800 / 1.9, 0);
+    g.enemies.length = 0;
+    input.setVirtual('right', true, 'test');
+    for (let i = 0; i < Math.round(2.5 * 60); i++) {
+      g.update(DT);
+      input.postUpdate();
+    }
+    g.render();
+    const p = g.player;
     const hudBottom = 12 + 2 * HUD_H + 8;
     expect(p.y - g.camY).toBeGreaterThanOrEqual(hudBottom);
     expect(p.y + p.h - g.camY).toBeLessThanOrEqual(g.vh - 16);

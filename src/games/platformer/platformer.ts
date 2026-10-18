@@ -42,7 +42,8 @@ const FLOOR_STRIP = 24;
  * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, so it gets ZOOM_PHONE;
  * the zoom eases back to the design framing as the canvas grows to ZOOM_DESKTOP_H px tall. A phone held
  * upright (Play anyway) shows the 800 px view in a 243-290 CSS px tall canvas, where the 36 px hero would
- * be under 7% of the short side, so it gets ZOOM_UPRIGHT, which keeps it at about 8.5%.
+ * be under 7% of the short side, so it gets ZOOM_UPRIGHT, which keeps it at about 8.5%. A run wider than
+ * 800 px held upright (a landscape run turned to portrait) zooms in further, so it keeps that share too.
  */
 const ZOOM_PHONE = 1.4;
 const ZOOM_PHONE_MIN_H = 360;
@@ -50,12 +51,19 @@ const ZOOM_PHONE_H = 430;
 const ZOOM_UPRIGHT = 1.9;
 const ZOOM_UPRIGHT_H = 300;
 const ZOOM_DESKTOP_H = 500;
+/** Width (logical px) of the view a phone held upright shows: an 800 px run at ZOOM_UPRIGHT. */
+const UPRIGHT_VIEW_W = 800 / ZOOM_UPRIGHT;
 /** HUD labels are drawn at least this many CSS px tall, however small the canvas (see hudFloorPx). */
 const HUD_MIN_CSS = 12.5;
 
-/** World zoom for a canvas this many CSS px tall: 1 on desktops and when the size is unknown. */
-export function zoomFor(cssHeight: number): number {
+/**
+ * World zoom for a canvas this many CSS px tall, showing a run `logicalWidth` px wide: 1 on desktops and
+ * when the size is unknown. Held upright (a canvas under ZOOM_UPRIGHT_H px tall) a run 800 px or wider
+ * is zoomed in so its view is UPRIGHT_VIEW_W px wide, the same view as an 800 px run.
+ */
+export function zoomFor(cssHeight: number, logicalWidth = 0): number {
   if (!(cssHeight > 0)) return 1;
+  if (cssHeight < ZOOM_UPRIGHT_H) return Math.max(ZOOM_UPRIGHT, logicalWidth / UPRIGHT_VIEW_W);
   if (cssHeight < ZOOM_PHONE_MIN_H) {
     const t = clamp((cssHeight - ZOOM_UPRIGHT_H) / (ZOOM_PHONE_MIN_H - ZOOM_UPRIGHT_H), 0, 1);
     return ZOOM_UPRIGHT + (ZOOM_PHONE - ZOOM_UPRIGHT) * t;
@@ -383,7 +391,7 @@ export class PlatformerGame extends BaseGame {
   private updateZoom(): void {
     const canvas = this.ctx.canvas as HTMLCanvasElement | undefined;
     const cssH = !this.preview && typeof canvas?.clientHeight === 'number' ? canvas.clientHeight : 0;
-    this.zoom = zoomFor(cssH);
+    this.zoom = zoomFor(cssH, this.W);
     this.vw = this.W / this.zoom;
     this.vh = this.H / this.zoom;
   }
