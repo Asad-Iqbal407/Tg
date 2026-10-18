@@ -649,7 +649,8 @@ describe('Galaxy War landscape phone fallback', () => {
       const stage = stageFor(w, h);
       const before = chooseLogicalSize(def, stage.w, stage.h);
       const after = chooseLogicalSize(landscape, stage.w, stage.h);
-      const fill = (s: { width: number; height: number }) => fittedArea(s, stage.w, stage.h) / (stage.w * stage.h);
+      const fill = (s: { width: number; height: number }) =>
+        fittedArea(s, stage.w, stage.h) / (stage.w * stage.h);
       expect(fill(before), name).toBeLessThan(0.45);
       expect(fill(after), name).toBeGreaterThanOrEqual(0.64);
       // Enough height is kept for the vertical reaction distance the waves are tuned for.
@@ -711,7 +712,9 @@ describe('Galaxy War pickups and popups', () => {
         parentElement: { clientWidth: stage.w, clientHeight: stage.h },
       };
       const game = drawnRun(size, ctx);
-      const g = probe(game) as unknown as { drops: { kind: string; x: number; y: number; vy: number; alive: boolean }[] };
+      const g = probe(game) as unknown as {
+        drops: { kind: string; x: number; y: number; vy: number; alive: boolean }[];
+      };
       g.drops = [{ kind: 'power', x: 200, y: 300, vy: 0, alive: true }];
       sizes.length = 0;
       (game as unknown as { drawDrop(d: unknown): void }).drawDrop(g.drops[0]);
@@ -729,8 +732,9 @@ describe('Galaxy War pickups and popups', () => {
     (g as unknown as { chain: number }).chain = 6;
     g.damage(e1, 99);
     g.damage(e2, 99);
-    const items = (game as unknown as { texts: { items: { x: number; y: number; text: string; size: number }[] } })
-      .texts.items;
+    const items = (
+      game as unknown as { texts: { items: { x: number; y: number; text: string; size: number }[] } }
+    ).texts.items;
     const scores = items.filter((t) => /x\d$/.test(t.text) && !t.text.startsWith('CHAIN'));
     expect(scores).toHaveLength(2);
     const [a, b] = scores as [(typeof scores)[0], (typeof scores)[0]];
