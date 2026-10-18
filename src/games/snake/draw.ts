@@ -22,13 +22,18 @@ const FADE_STEPS = 8;
 /** How much darker the tail is than the body colour, as a blend toward black. */
 const TAIL_DIM = 0.35;
 /**
- * Head radius on a touch layout, in cells: 1.7 cells across. Landscape phones draw the board at about 0.8x,
- * so this keeps the head at 8% or more of the short side of every phone stage.
+ * Head radius on a touch layout, in cells: 1.8 cells across. Landscape phones draw the board at about 0.8x,
+ * so this keeps the head at 8% or more of the short side of every phone stage. A radius of 0.9 reaches the
+ * playfield frame at the board edge without covering it.
  */
-const TOUCH_HEAD_CELLS = 0.85;
-/** Body width in cells on desktop, and on a touch layout (a full cell, so the snake reads on a phone). */
+const TOUCH_HEAD_CELLS = 0.9;
+/** Body width in cells on desktop, and on a touch layout. */
 const BODY_CELLS = 0.78;
-const TOUCH_BODY_CELLS = 1;
+/**
+ * Touch body width in cells: wider than a cell, so the body is 8% or more of the short side of every phone stage.
+ * A one-cell body is only 5 to 6% there, because a phone draws the board at 0.76x to 1x of its design size.
+ */
+const TOUCH_BODY_CELLS = 1.65;
 
 const HEX = /^#?([0-9a-f]{6})$/i;
 
@@ -191,7 +196,7 @@ export function appleBlinkedOff(apple: Apple, time: number): boolean {
   return apple.golden && apple.left < GOLDEN_BLINK_SEC && Math.floor(time * 10) % 2 === 0;
 }
 
-/** Width of the body stroke in logical px. A touch layout draws it a full cell wide (see TOUCH_BODY_CELLS). */
+/** Width of the body stroke in logical px. A touch layout draws it wider than a cell (see TOUCH_BODY_CELLS). */
 export function bodyWidth(cell: number, thick: number, touch: boolean): number {
   return cell * ((touch ? TOUCH_BODY_CELLS : BODY_CELLS) + 0.06 * thick);
 }
@@ -325,8 +330,8 @@ interface TouchHudSize {
 }
 
 /**
- * Phones show a portrait board at about 1x, but a landscape one (the same 900 x 640 canvas as the
- * desktop) at about 0.6x, so the landscape type is larger to keep it at 12 CSS px or more.
+ * Phones show a portrait board at about 1x, but a landscape one (about 900 x 450 logical px, see the viewport
+ * range in index.ts) at about 0.8x, so the landscape type is larger to keep it at 12 CSS px or more.
  */
 export function touchHudSize(W: number, H: number): TouchHudSize {
   return W > H

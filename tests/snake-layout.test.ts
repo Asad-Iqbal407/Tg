@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { GAMES } from '../src/games/registry';
-import { bodyWidth, headRadius, touchHudSize } from '../src/games/snake/draw';
+import { bodyWidth, frameWidth, headRadius, touchHudSize } from '../src/games/snake/draw';
 import { fitBoard, gridSize } from '../src/games/snake/board';
 import { cornerSizes, createGame } from './helpers';
 import { snakeGame } from '../src/games/snake';
@@ -62,14 +62,31 @@ describe('snake layout', () => {
     }
   });
 
+  it('draws the body at least 8% of the short side on every phone stage', () => {
+    for (const [name, w, h] of [...PORTRAIT_PHONES, ...LANDSCAPE_PHONES]) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(snake, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const grid = gridSize(size.width, size.height);
+      const { cell } = fitBoard(grid.cols, grid.rows, size.width, size.height, 0);
+      const width = bodyWidth(cell, 0, true) * scale;
+      expect(width / Math.min(stage.w, stage.h), name).toBeGreaterThanOrEqual(0.08);
+    }
+  });
+
   it('keeps the desktop head at the body width, and draws a larger head on touch', () => {
     expect(headRadius(24, 0, false)).toBeCloseTo(24 * 0.78 * 0.7);
     expect(headRadius(24, 0, true)).toBeGreaterThan(headRadius(24, 0, false));
   });
 
-  it('draws a full-cell body on touch and keeps the desktop body at 0.78 of a cell', () => {
+  it('keeps the touch head wider than the touch body, and inside the frame at the board edge', () => {
+    expect(2 * headRadius(24, 0, true)).toBeGreaterThan(bodyWidth(24, 0, true));
+    expect(headRadius(24, 0, true) - 24 / 2).toBeLessThanOrEqual(frameWidth(24));
+  });
+
+  it('draws a wider body on touch and keeps the desktop body at 0.78 of a cell', () => {
     expect(bodyWidth(24, 0, false)).toBeCloseTo(24 * 0.78);
-    expect(bodyWidth(24, 0, true)).toBeCloseTo(24);
+    expect(bodyWidth(24, 0, true)).toBeCloseTo(24 * 1.65);
     expect(bodyWidth(24, 1, false)).toBeCloseTo(24 * 0.84);
   });
 
