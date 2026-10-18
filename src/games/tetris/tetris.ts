@@ -6,7 +6,6 @@ import { Board, COLS, HIDDEN_ROWS, ROWS } from './board';
 import {
   buildLook,
   cellCentre,
-  COMPACT_LABEL_PX,
   drawFlash,
   drawGhost,
   drawPanel,
@@ -74,6 +73,7 @@ interface LayoutCache {
   readonly height: number;
   readonly bottom: number;
   readonly preview: boolean;
+  /** The smallest panel text, in logical px (see layoutTetris). */
   readonly text: number;
   readonly layout: TetrisLayout;
   readonly slots: PanelSlots | null;
@@ -243,7 +243,7 @@ export class TetrisGame extends BaseGame {
     const { W, H } = this;
     const bottom = this.insets.bottom;
     const preview = this.services.preview === true;
-    const text = Math.max(COMPACT_LABEL_PX, this.minTextPx());
+    const text = this.minTextPx();
     let cache = this.cache;
     if (
       !cache ||

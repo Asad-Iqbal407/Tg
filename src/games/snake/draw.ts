@@ -23,8 +23,8 @@ const FADE_STEPS = 8;
 const TAIL_DIM = 0.35;
 /**
  * Head radius on a touch layout, in cells: 1.8 cells across. Landscape phones draw the board at about 0.8x,
- * so this keeps the head at 8% or more of the short side of every phone stage. A radius of 0.9 reaches the
- * playfield frame at the board edge without covering it.
+ * so this keeps the head at 8% or more of the short side of every phone stage. A radius of 0.9 keeps the head
+ * inside the playfield frame when it sits on an edge cell.
  */
 const TOUCH_HEAD_CELLS = 0.9;
 /** Body width in cells on desktop, and on a touch layout. */

@@ -4,7 +4,7 @@ import { NullAudio } from '../src/core/audio';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
 import { Board, COLS, HIDDEN_ROWS, ROWS, VISIBLE_ROWS } from '../src/games/tetris/board';
-import { COMPACT_LABEL_PX, layoutTetris, panelSlots } from '../src/games/tetris/draw';
+import { buildLook, COMPACT_LABEL_PX, drawPanel, layoutTetris, panelSlots } from '../src/games/tetris/draw';
 import {
   cellsOf,
   type Kind,
@@ -1223,7 +1223,7 @@ describe('phone layout', () => {
     }
   });
 
-  it('centres the visible playfield between the top margin and the touch controls at P1 to P3', () => {
+  it('centres the whole well, buffer rows included, between the top margin and the touch controls at P1 to P3', () => {
     // The logical canvas and the touch band of each phone, as the play screen reports them.
     const cases: [number, number, number][] = [
       [540, 1036, 111],
@@ -1232,13 +1232,9 @@ describe('phone layout', () => {
     ];
     for (const [width, height, bottom] of cases) {
       const { well } = layoutTetris(width, height, bottom, true);
-      const visibleTop = well.y + HIDDEN_ROWS * well.cell;
-      const visibleBottom = visibleTop + VISIBLE_ROWS * well.cell;
-      // The room above the playfield matches the room between it and the touch band, to within a logical pixel.
-      expect(
-        Math.abs(visibleTop - (height - bottom - visibleBottom)),
-        `${width}x${height}`,
-      ).toBeLessThanOrEqual(2);
+      const wellBottom = well.y + ROWS * well.cell;
+      // The room above the buffer rows matches the room between the playfield and the touch band, to within a logical pixel.
+      expect(Math.abs(well.y - (height - bottom - wellBottom)), `${width}x${height}`).toBeLessThanOrEqual(2);
       expect(well.y).toBeGreaterThanOrEqual(16);
     }
   });
@@ -1314,13 +1310,21 @@ function fontsDrawn(coarsePointer: boolean): string[] {
 }
 
 describe('phone panel', () => {
-  it('gives the well the width a narrow touch panel leaves, so the playfield is about half a phone canvas', () => {
-    const { well, panel } = layoutTetris(540, 1036, 111, true);
-    if (!panel) throw new Error('no panel');
-    expect(panel.side).toBe(true);
-    expect(well.cell).toBeGreaterThanOrEqual(37);
-    expect((200 * well.cell * well.cell) / (540 * 1036)).toBeGreaterThanOrEqual(0.48);
-    expect(panel.x + panel.w).toBeLessThanOrEqual(540 - 16);
+  it('gives the well at least 55% of a phone canvas at P1 to P3, with a narrow touch panel beside it', () => {
+    const cases: [number, number, number][] = [
+      [540, 1036, 111],
+      [540, 1100, 109],
+      [536, 1100, 106],
+    ];
+    for (const [width, height, bottom] of cases) {
+      const { well, panel } = layoutTetris(width, height, bottom, true);
+      if (!panel) throw new Error('no panel');
+      expect(panel.side, `${width}x${height}`).toBe(true);
+      expect((200 * well.cell * well.cell) / (width * height), `${width}x${height}`).toBeGreaterThanOrEqual(
+        0.55,
+      );
+      expect(panel.x + panel.w, `${width}x${height}`).toBeLessThanOrEqual(width - 16);
+    }
   });
 
   it('keeps the full side panel on desktop, where no touch band covers the canvas', () => {
@@ -1362,5 +1366,78 @@ describe('phone panel', () => {
     const sizes = fonts.map((f) => Number(/(\d+)px/.exec(f)?.[1]));
     expect(sizes.length).toBeGreaterThan(0);
     expect(Math.min(...sizes) * scale).toBeGreaterThanOrEqual(12);
+  });
+});
+
+describe('panel values', () => {
+  /** The P1 to P3 phones: the logical canvas, its touch band, and the scale the canvas is drawn at (CSS px per logical px). */
+  const PHONES: [string, number, number, number, number][] = [
+    ['P1', 540, 1036, 111, 360 / 540],
+    ['P2', 540, 1100, 109, 390 / 540],
+    ['P3', 536, 1100, 106, 430 / 536],
+  ];
+
+  /**
+   * Draws the side panel of a touch layout with the given stat lines, as the game does (its text is at least 12 CSS px at
+   * the canvas scale). Returns the smallest text drawn in CSS px and every string drawn.
+   */
+  function drawnPanel(
+    width: number,
+    height: number,
+    bottom: number,
+    scale: number,
+    stats: [string, string][],
+  ): { smallestCss: number; strings: string[] } {
+    const { panel } = layoutTetris(width, height, bottom, true, true, Math.ceil(12 / scale));
+    if (!panel) throw new Error('no panel');
+    const fonts: string[] = [];
+    const strings: string[] = [];
+    const ctx = new Proxy(mockCtx(), {
+      get(target, key) {
+        if (key === 'fillText') return (t: string) => strings.push(t);
+        return Reflect.get(target, key);
+      },
+      set(target, key, value) {
+        if (key === 'font') fonts.push(String(value));
+        return Reflect.set(target, key, value);
+      },
+    });
+    const state = { hold: null, holdLocked: false, next: [], stats };
+    drawPanel(
+      ctx,
+      panelSlots(panel),
+      buildLook((_key, fallback) => fallback),
+      state,
+    );
+    const sizes = fonts.map((f) => Number(/(\d+)px/.exec(f)?.[1]));
+    return { smallestCss: Math.min(...sizes) * scale, strings };
+  }
+
+  it('keeps every stat value at least 12 CSS px at P1 to P3, with a score of six figures', () => {
+    for (const [name, width, height, bottom, scale] of PHONES) {
+      const stats: [string, string][] = [
+        ['SCORE', '123,456'],
+        ['LEVEL', '12'],
+        ['LINES', '345'],
+      ];
+      const { smallestCss, strings } = drawnPanel(width, height, bottom, scale, stats);
+      expect(smallestCss, name).toBeGreaterThanOrEqual(12);
+      expect(strings, name).toContain('123,456');
+    }
+  });
+
+  it('shortens a score of a million or more, so its text stays at least 12 CSS px at P1 to P3', () => {
+    for (const [name, width, height, bottom, scale] of PHONES) {
+      const { smallestCss, strings } = drawnPanel(width, height, bottom, scale, [['SCORE', '1,234,567']]);
+      expect(smallestCss, name).toBeGreaterThanOrEqual(12);
+      expect(strings, name).toContain('1.2M');
+    }
+  });
+
+  it('keeps the stat values at least 12 CSS px on a turned phone, where the canvas is scaled to 0.4333', () => {
+    const scale = 390 / 900;
+    const { smallestCss, strings } = drawnPanel(900, 800, 0, scale, [['SCORE', '123,456']]);
+    expect(smallestCss).toBeGreaterThanOrEqual(12);
+    expect(strings).toContain('123,456');
   });
 });

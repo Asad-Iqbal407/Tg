@@ -7,10 +7,20 @@ const GAP = 12;
 /** Side panel width, in cells of the well. */
 const PANEL_CELLS = 4.5;
 /**
- * Narrowest side panel a touch layout keeps, in cells. A phone is narrow, so the well takes the rest of the width; the
- * panel widens back toward PANEL_CELLS when the width leaves it room.
+ * Narrowest side panel a touch layout keeps, in cells. A phone is narrow, so the well takes most of the width (the
+ * panel ends up about 2.1 to 2.4 cells wide at P1 to P3); the panel widens back toward PANEL_CELLS when the width
+ * leaves it room.
  */
-const PANEL_CELLS_TOUCH = 3;
+const PANEL_CELLS_TOUCH = 2;
+/**
+ * Under touch the side panel's boxes sit this close to the panel's edges, and a stat's text this far inside its box
+ * (logical px). The narrow panel needs the room for its values to keep 12 CSS px.
+ */
+const COMPACT_BOX_PAD = 2;
+const COMPACT_TEXT_PAD = 6;
+/** Where a compact stat's name and value sit in its box, measured from the box's top and bottom (logical px). */
+const COMPACT_NAME_DY = 12;
+const COMPACT_VALUE_DY = 14;
 /** The smallest on-screen text, in CSS px, that the panel keeps on a touch screen (its labels, names and values). */
 export const TEXT_MIN_CSS = 12;
 /** Height of the strip above the well when there is no room for a side panel. */
@@ -52,6 +62,8 @@ export interface Panel {
   readonly compact: boolean;
   /** Label and stat-name size of a compact panel, in logical px (see layoutTetris). */
   readonly text: number;
+  /** The smallest text the panel keeps, in logical px: a stat value under touch never draws below it (see layoutTetris). */
+  readonly minText: number;
 }
 
 export interface TetrisLayout {
@@ -62,11 +74,12 @@ export interface TetrisLayout {
 
 /**
  * Where the well and its panel go. The well is fitted with the largest whole cell, centred in the area above
- * the touch controls. The panel sits to the right when the width allows, otherwise above the well.
- * Under touch controls the visible playfield is centred there, so the room over it matches the room to the controls;
- * the buffer rows, where pieces spawn, sit above it. On desktop the whole well, buffer rows included, is centred.
+ * the touch controls, buffer rows included, as on desktop. The panel sits to the right when the width allows,
+ * otherwise above the well. Under touch controls the well's cell is capped by the height of the area above the
+ * controls and by a narrow panel, which lets the well take about 55% of a phone's canvas.
  * `touch` selects the compact panel text; it is on under touch controls by default, and a touch screen passes it on
- * its own, so a canvas the controls do not reach keeps the larger text too.
+ * its own, so a canvas the controls do not reach keeps the larger text too. `minText` is the smallest text the panel
+ * keeps, in logical px (12 CSS px at the canvas scale); its labels are never smaller than COMPACT_LABEL_PX.
  */
 export function layoutTetris(
   W: number,
@@ -74,7 +87,7 @@ export function layoutTetris(
   bottom: number,
   withPanel: boolean,
   touch = bottom > 0,
-  text = COMPACT_LABEL_PX,
+  minText = COMPACT_LABEL_PX,
 ): TetrisLayout {
   const availW = W - 2 * MARGIN;
   const availH = H - 2 * MARGIN - bottom;
@@ -89,23 +102,28 @@ export function layoutTetris(
     };
   }
   if (W >= SIDE_MIN_W) {
-    // Under the touch band the visible playfield is centred between the top margin and the band, with the buffer rows
-    // above it. That fits the well only when the cell is at most availH / 24, so that is the cap there.
-    const tall = bottom > 0 ? VISIBLE_ROWS + 2 * HIDDEN_ROWS : ROWS;
+    // The whole well, buffer rows included, is centred between the top margin and the touch band (or the bottom
+    // margin when there is none), so the room above the buffer matches the room below the playfield.
     const minPanel = touch ? PANEL_CELLS_TOUCH : PANEL_CELLS;
-    const cell = Math.max(1, Math.floor(Math.min(availH / tall, (availW - GAP) / (COLS + minPanel))));
+    const cell = Math.max(1, Math.floor(Math.min(availH / ROWS, (availW - GAP) / (COLS + minPanel))));
     if (cell >= SIDE_MIN_CELL) {
       // The panel takes the width the well leaves, up to PANEL_CELLS.
       const panelW = Math.floor(Math.min(PANEL_CELLS * cell, availW - GAP - COLS * cell));
       const groupW = COLS * cell + GAP + panelW;
       const x = centred(availW, groupW);
-      const y =
-        bottom > 0
-          ? Math.max(MARGIN, centred(availH, VISIBLE_ROWS * cell) - HIDDEN_ROWS * cell)
-          : centred(availH, ROWS * cell);
+      const y = centred(availH, ROWS * cell);
       return {
         well: { x, y, cell },
-        panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true, compact: touch, text },
+        panel: {
+          x: x + COLS * cell + GAP,
+          y,
+          w: panelW,
+          h: ROWS * cell,
+          side: true,
+          compact: touch,
+          text: Math.max(COMPACT_LABEL_PX, minText),
+          minText,
+        },
       };
     }
   }
@@ -115,7 +133,16 @@ export function layoutTetris(
   const x = centred(availW, boardW);
   return {
     well: { x, y: top + STRIP_PX + GAP, cell },
-    panel: { x, y: top, w: boardW, h: STRIP_PX, side: false, compact: false, text: COMPACT_LABEL_PX },
+    panel: {
+      x,
+      y: top,
+      w: boardW,
+      h: STRIP_PX,
+      side: false,
+      compact: false,
+      text: COMPACT_LABEL_PX,
+      minText: COMPACT_LABEL_PX,
+    },
   };
 }
 
@@ -280,6 +307,8 @@ export interface PanelSlots {
   readonly compact: boolean;
   /** The label and stat-name size, in logical px, when compact. */
   readonly text: number;
+  /** The smallest a stat value draws, in logical px, when compact (see Panel.minText). */
+  readonly minText: number;
   /** Largest stat value size, in logical px. */
   readonly valueMax: number;
   readonly holdLabel: { readonly x: number; readonly y: number };
@@ -301,7 +330,7 @@ export function panelSlots(panel: Panel): PanelSlots {
  */
 function sideSlots(p: Panel): PanelSlots {
   const cellPx = p.h / ROWS;
-  const pad = Math.max(6, Math.round(cellPx * 0.25));
+  const pad = p.compact ? COMPACT_BOX_PAD : Math.max(6, Math.round(cellPx * 0.25));
   const x = p.x + pad;
   const w = p.w - 2 * pad;
   // A compact label row is as tall as its text needs (the 24 px row at the usual size), and its label sits just above its box.
@@ -323,6 +352,7 @@ function sideSlots(p: Panel): PanelSlots {
   return {
     compact: p.compact,
     text: p.text,
+    minText: p.minText,
     valueMax: p.compact ? Math.max(VALUE_MAX_PX_COMPACT, p.text + 2) : VALUE_MAX_PX,
     holdLabel: { x, y: holdY - labelDy },
     hold: { x, y: holdY, w, h: holdH },
@@ -346,6 +376,7 @@ function stripSlots(p: Panel): PanelSlots {
     // The strip's labels sit in its own top band and keep the small text.
     compact: false,
     text: COMPACT_LABEL_PX,
+    minText: p.minText,
     valueMax: VALUE_MAX_PX,
     holdLabel: { x: p.x, y: p.y + 8 },
     hold: { x: p.x, y: boxY, w: boxW, h: boxH },
@@ -404,14 +435,49 @@ function drawPreview(ctx: CanvasRenderingContext2D, kind: Kind, r: Rect, look: L
   ctx.restore();
 }
 
+/** Rough width of a stat value, in ems: a digit about 0.62, a thousands comma or point about 0.3, a letter about 0.75. */
+function valueEm(value: string): number {
+  let em = 0;
+  for (const ch of value) em += /\d/.test(ch) ? 0.62 : ch === ',' || ch === '.' ? 0.3 : 0.75;
+  return em;
+}
+
+/** A score in a short form for a box too narrow for its full digits: 123456 as 123K, 1234567 as 1.2M. */
+function shortValue(value: string): string {
+  const n = Number(value.replace(/,/g, ''));
+  if (!Number.isFinite(n) || n < 1000) return value;
+  if (n < 1e6) return `${Math.floor(n / 1000)}K`;
+  return `${(Math.floor(n / 1e5) / 10).toFixed(1)}M`;
+}
+
+/** The largest size, in logical px, at which a value fits `inner` wide (capped at the panel's largest value size). */
+function valueSize(value: string, inner: number, slots: PanelSlots): number {
+  const em = slots.compact ? valueEm(value) : 0.62 * value.length;
+  return Math.min(slots.valueMax, Math.floor(inner / em));
+}
+
 /** One stat: the name above its value in a tall box, the name beside the value in a short one. */
 function stat(ctx: CanvasRenderingContext2D, name: string, value: string, r: Rect, slots: PanelSlots): void {
-  const pad = Math.min(10, Math.round(r.w * 0.12));
+  const pad = slots.compact ? COMPACT_TEXT_PAD : Math.min(10, Math.round(r.w * 0.12));
   if (r.h >= STAT_TALL_PX) {
-    // The value shrinks in a narrow box rather than spilling out of it (a digit is about 0.62 em wide).
-    VALUE_TEXT.size = Math.min(slots.valueMax, Math.floor((r.w - 2 * pad) / (0.62 * value.length)));
-    text(ctx, name, r.x + pad, r.y + 11, slots.compact ? NAME_TEXT_COMPACT : NAME_TEXT);
-    text(ctx, value, r.x + pad, r.y + r.h - 12, VALUE_TEXT);
+    // The value shrinks in a narrow box rather than spilling out of it. Under touch it never shrinks below the panel's
+    // text size, so a value too wide for its box at that size is shortened instead (a score of a million or more).
+    const inner = r.w - 2 * pad;
+    let shown = value;
+    let size = valueSize(shown, inner, slots);
+    if (slots.compact && size < slots.minText) {
+      shown = shortValue(value);
+      size = Math.max(slots.minText, valueSize(shown, inner, slots));
+    }
+    VALUE_TEXT.size = size;
+    text(
+      ctx,
+      name,
+      r.x + pad,
+      r.y + (slots.compact ? COMPACT_NAME_DY : 11),
+      slots.compact ? NAME_TEXT_COMPACT : NAME_TEXT,
+    );
+    text(ctx, shown, r.x + pad, r.y + r.h - (slots.compact ? COMPACT_VALUE_DY : 12), VALUE_TEXT);
     return;
   }
   const mid = r.y + r.h / 2;
