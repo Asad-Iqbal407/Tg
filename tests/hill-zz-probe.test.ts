@@ -24,6 +24,7 @@ it('probe', () => {
       else { gas = r.chance(0.9); brk = !gas; }
     }
     input.setVirtual('right', gas, 'b'); input.setVirtual('left', brk, 'b');
+    if (steps > 5095) { const q = game.probe(); appendFileSync(LOG, `pre ${steps} x=${q.x} y=${q.y} vx=${q.vx} gas=${gas} brk=${brk} spawnedTo=${(game as unknown as {spawnedTo:number}).spawnedTo} maxX=${(game as unknown as {maxX:number}).maxX}\n`); }
     const t1 = Date.now();
     game.update(1 / 60); input.postUpdate();
     if (steps % 60 === 0) game.render();

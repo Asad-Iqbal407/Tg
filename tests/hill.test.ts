@@ -4,12 +4,13 @@ import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import { HillGame, type HillProbe } from '../src/games/hill/hill';
 import { BIOME_M, BIOMES, biomeIndexAt, lapAt, physicsAt } from '../src/games/hill/biomes';
+import { blendSlices, Scenery } from '../src/games/hill/scenery';
 import { PX_PER_M, Terrain } from '../src/games/hill/terrain';
 import { Vehicle, type VehicleSpec } from '../src/games/hill/vehicle';
 import { GAMES } from '../src/games/registry';
 import { type BoostId, type GameResult, type GameServices, type Insets, NO_INSETS } from '../src/games/types';
 import { defaultSkin, SKINS, toSkinData } from '../src/meta/catalog';
-import { createGame, mockCtx } from './helpers';
+import { cornerSizes, createGame, mockCtx } from './helpers';
 
 const DT = 1 / 60;
 const DEG = Math.PI / 180;
@@ -342,17 +343,59 @@ describe('Hill Rider terrain and biomes', () => {
 
 describe('Hill Rider rendering', () => {
   it('renders at the corners of the viewport range, with touch insets', () => {
-    const corners = [
-      { width: 880, height: 540 },
-      { width: 1280, height: 540 },
-      { width: 880, height: 760 },
-      { width: 1280, height: 760 },
-    ];
     const insets: Insets = { top: 0, right: 0, bottom: 120, left: 0 };
-    for (const size of corners) {
+    for (const size of cornerSizes(hillDef)) {
       const { game } = createGame(hillDef, { seed: 4, ...size, insets });
       for (let i = 0; i < 120; i++) game.update(DT);
       expect(() => game.render()).not.toThrow();
     }
+  });
+
+  // Regression: the ground blend at each biome border re-derived its slice from the last slice end; a slice end
+  // a hair below a boundary gave the same slice again and the render loop never ended (the game froze at ~770 m).
+  it('walks every biome-border blend in six contiguous slices that end at the border', () => {
+    for (let k = 0; k < 60; k++) {
+      const b1 = 200 + (k + 1) * BIOME_M * PX_PER_M;
+      const solidEnd = b1 - 40 * PX_PER_M;
+      const width = (b1 - solidEnd) / 6;
+      for (let start = 0; start < 6; start++) {
+        const from = solidEnd + start * width;
+        const spans: [number, number, number][] = [];
+        const end = blendSlices(from, Infinity, solidEnd, b1, (a, b, t) => spans.push([a, b, t]));
+        expect(end, `border ${k}`).toBe(b1);
+        expect(spans.length, `border ${k} from slice ${start}`).toBe(6 - start);
+        expect(spans[0]?.[0]).toBe(from);
+        for (let i = 1; i < spans.length; i++) expect(spans[i]?.[0]).toBe(spans[i - 1]?.[1]);
+        expect(spans[spans.length - 1]?.[1]).toBe(b1);
+      }
+      // A window that stops inside the blend stops there, and one already past the border draws nothing.
+      expect(blendSlices(solidEnd, solidEnd + 10, solidEnd, b1, () => undefined)).toBe(solidEnd + 10);
+      let calls = 0;
+      expect(blendSlices(b1 + 5, b1 + 900, solidEnd, b1, () => calls++)).toBe(b1 + 5);
+      expect(calls).toBe(0);
+    }
+  });
+
+  it('draws the ground across every biome border of the first three laps without hanging', () => {
+    const scenery = new Scenery(mockCtx(), 960, 540, 200);
+    const terrain = new Terrain(7, 330, { origin: 200 });
+    for (let k = 1; k <= 3 * BIOMES.length; k++) {
+      const border = 200 + k * BIOME_M * PX_PER_M;
+      for (let x0 = border - 1400; x0 < border + 200; x0 += 37.3) {
+        const view = { x: x0, y: 0, zoom: 0.8 };
+        expect(() => scenery.drawTerrain(terrain, view, x0, x0 + 960 / 0.8)).not.toThrow();
+      }
+    }
+  });
+
+  it('renders a run that drives through the first biome border', () => {
+    const run = runBot({
+      seed: 1,
+      seconds: 150,
+      trace: (p, step, _want, game) => {
+        if (step % 10 === 0 && p.meters < 900) game.render();
+      },
+    });
+    expect(run.meters).toBeGreaterThan(830);
   });
 });

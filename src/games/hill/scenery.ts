@@ -9,6 +9,34 @@ const BLEND_SLICES = 6;
 const STAR_COUNT = 80;
 
 /** Camera state the scenery needs: top-left world point and zoom (screen px per world px). */
+/**
+ * Walks the blend zone [solidEnd, b1) from `from` up to `end` in BLEND_SLICES flat-colour slices, calling `draw`
+ * with each slice's span and blend amount; returns where it stopped (min(end, b1), or `from` if already past).
+ * Slices are stepped by index, never re-derived from the position: re-deriving the index from a slice end that
+ * landed a hair below a boundary once returned the same slice forever and froze the game near biome borders.
+ */
+export function blendSlices(
+  from: number,
+  end: number,
+  solidEnd: number,
+  b1: number,
+  draw: (from: number, to: number, t: number) => void,
+): number {
+  const stop = Math.min(end, b1);
+  if (!(from < stop)) return from;
+  const width = (b1 - solidEnd) / BLEND_SLICES;
+  let slice = clamp(Math.floor((from - solidEnd) / width), 0, BLEND_SLICES - 1);
+  while (from < stop && slice < BLEND_SLICES) {
+    const sliceEnd = Math.min(stop, slice === BLEND_SLICES - 1 ? b1 : solidEnd + (slice + 1) * width);
+    if (sliceEnd > from) {
+      draw(from, sliceEnd, (slice + 0.5) / BLEND_SLICES);
+      from = sliceEnd;
+    }
+    slice++;
+  }
+  return Math.max(from, stop);
+}
+
 export interface View {
   x: number;
   y: number;
@@ -179,12 +207,7 @@ export class Scenery {
         this.drawRun(terrain, view, from, to, ia, ib, 0);
         from = to;
       }
-      while (from < Math.min(endX, b1)) {
-        const slice = Math.min(BLEND_SLICES - 1, Math.floor(((from - solidEnd) / BLEND_PX) * BLEND_SLICES));
-        const sliceEnd = Math.min(endX, solidEnd + ((slice + 1) * BLEND_PX) / BLEND_SLICES);
-        this.drawRun(terrain, view, from, sliceEnd, ia, ib, (slice + 0.5) / BLEND_SLICES);
-        from = sliceEnd;
-      }
+      from = blendSlices(from, endX, solidEnd, b1, (a, b, t) => this.drawRun(terrain, view, a, b, ia, ib, t));
       k++;
     }
   }
