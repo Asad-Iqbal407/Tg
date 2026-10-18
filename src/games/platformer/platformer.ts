@@ -37,6 +37,8 @@ export const HUD_H = 40;
 const HUD_ROW_GAP = 8;
 /** Strip of floor (px) kept visible above touch controls covering the bottom of the canvas. */
 const FLOOR_STRIP = 24;
+/** The usual row of question blocks and bricks (four rows above the ground): kept clear of the HUD. */
+const BLOCK_ROW = GROUND_ROW - 4;
 /**
  * World zoom: the world, HUD and banners are drawn this many times bigger than the canvas scale alone.
  * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, so it gets ZOOM_PHONE;
@@ -422,10 +424,12 @@ export class PlatformerGame extends BaseGame {
     const worldTop = ROWS * T - this.vh;
     const hudBottom = this.hud().bottom;
     const need = GROUND_ROW * T + FLOOR_STRIP - (this.vh - this.insets.bottom * k);
-    const maxShift = Math.max(worldTop, (CHUNK_TOP_ROW + 1) * T - hudBottom - 8);
-    // A zoomed-in view can be too short for both the top chunk row and the ground above the touch
-    // controls. The ground wins; the hero-follow below still keeps the hero under the HUD.
-    let y = clamp(need, worldTop, Math.max(maxShift, need));
+    // A zoomed-in view can be too short for the whole course. It sits on the bottom of the world unless
+    // the HUD would then hide the usual block row (a phone held upright, with its two-row HUD): then it
+    // rises until that row is clear, as long as the ground strip stays in view. The ground always wins;
+    // the hero-follow below still keeps the hero under the HUD.
+    const blocksClear = BLOCK_ROW * T - hudBottom - 8;
+    let y = Math.max(need, Math.min(worldTop, blocksClear));
     const p = this.player;
     if ((this.phase === 'play' || this.phase === 'flag') && !p.dead) y = Math.min(y, p.y - hudBottom - 4);
     return y;

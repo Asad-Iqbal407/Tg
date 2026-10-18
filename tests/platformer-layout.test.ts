@@ -11,7 +11,7 @@ import {
   hudLayout,
   zoomFor,
 } from '../src/games/platformer/platformer';
-import { ROWS, T } from '../src/games/platformer/level';
+import { GROUND_ROW, ROWS, T } from '../src/games/platformer/level';
 import { type GameInstance, NO_INSETS } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
 import { gameById, mockCtx } from './helpers';
@@ -212,6 +212,58 @@ describe('Pixel Quest layout', () => {
     const hudBottom = 12 + 2 * HUD_H + 8;
     expect(p.y - g.camY).toBeGreaterThanOrEqual(hudBottom);
     expect(p.y + p.h - g.camY).toBeLessThanOrEqual(g.vh - 16);
+  });
+
+  it('keeps the usual block row below the two-row HUD held upright, with the ground in view', () => {
+    // Regression: the upright view used to sit on the bottom of the world, so the second HUD row (world
+    // and lives) hid the question blocks four rows above the ground.
+    const ctx = mockCtx();
+    (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 263 };
+    const input = new Input();
+    const g = def.create({
+      ctx,
+      width: 800,
+      height: 540,
+      insets: NO_INSETS,
+      input,
+      audio: new NullAudio(),
+      rng: new Rng(1),
+      loadout: { skin: toSkinData(defaultSkin('platformer')), boosts: new Set(), powerDuration: 1 },
+      reducedMotion: false,
+      haptic: () => undefined,
+    }) as unknown as Framed;
+    const hudBottom = 12 + 2 * HUD_H + 8;
+    const check = (): void => {
+      expect((GROUND_ROW - 4) * T - g.camY).toBeGreaterThanOrEqual(hudBottom);
+      expect(GROUND_ROW * T + 16 - g.camY).toBeLessThanOrEqual(g.vh);
+    };
+    check();
+    g.enemies.length = 0;
+    input.setVirtual('right', true, 'test');
+    for (let i = 0; i < Math.round(2 * 60); i++) {
+      g.update(DT);
+      input.postUpdate();
+    }
+    check();
+  });
+
+  it('keeps the bottom-aligned framing where the HUD clears the block row', () => {
+    // An L3-sized landscape canvas without touch controls: one HUD row, so nothing changes.
+    const ctx = mockCtx();
+    (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 430 };
+    const g = def.create({
+      ctx,
+      width: 1106,
+      height: 540,
+      insets: NO_INSETS,
+      input: new Input(),
+      audio: new NullAudio(),
+      rng: new Rng(1),
+      loadout: { skin: toSkinData(defaultSkin('platformer')), boosts: new Set(), powerDuration: 1 },
+      reducedMotion: false,
+      haptic: () => undefined,
+    }) as unknown as Framed;
+    expect(g.camY).toBeCloseTo(ROWS * T - g.vh, 6);
   });
 
   it('shows the same view width held upright, whatever the run is wide', () => {

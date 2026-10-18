@@ -353,7 +353,7 @@ select {
   height: 18px;
   padding: 0 5px;
   border-radius: 99px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 18px;
   text-align: center;
   background: var(--pink);
@@ -997,7 +997,7 @@ kbd {
   animation: glow 2s infinite;
 }
 .calendar__label {
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   color: var(--muted);
   font-weight: 700;
 }
@@ -1111,7 +1111,7 @@ kbd {
   left: 8px;
   padding: 2px 8px;
   border-radius: 99px;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;

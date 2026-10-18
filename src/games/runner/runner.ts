@@ -82,6 +82,40 @@ const HINTS: Record<HintId, { touch: string; keys: string; icon: HintIcon }> = {
   oncoming: { touch: 'Oncoming train! Swipe away', keys: 'Oncoming train! Change lanes', icon: 'lr' },
 };
 
+/** Width of the power-up pills stacked under the coin counter (HUD units, times the HUD scale). */
+export const POWER_PILL_W = 170;
+/** Half the width of the CAREFUL! warning (HUD units): it is centred, so this much each side. */
+const CAREFUL_HALF_W = 70;
+
+/** Where the HUD announcements go: the centre of the milestone banner and the CAREFUL! warning. */
+export interface BannerBand {
+  y: number;
+  carefulX: number;
+  carefulY: number;
+}
+
+/**
+ * Lay out the announcements for a `w` px wide canvas whose HUD starts at `top` and `left`, at HUD scale
+ * `s`, with the power-up stack under the coin counter ending at `stackBottom`. The banner sits halfway
+ * between the HUD and `skyBottom` (just above the horizon), but always below the power-up stack, so a
+ * milestone reached with several power-ups running never draws over their timers. The CAREFUL! warning
+ * keeps its row under the score and moves right when it would touch the stack.
+ */
+export function bannerBand(
+  w: number,
+  top: number,
+  left: number,
+  stackBottom: number,
+  s: number,
+  skyBottom: number,
+): BannerBand {
+  const bandTop = top + 92 * s;
+  const size = Math.min(54 * s, w / 8);
+  const clear = stackBottom + 8 * s + 0.8 * size;
+  const carefulX = Math.max(w / 2, left + (POWER_PILL_W + 10 + CAREFUL_HALF_W) * s);
+  return { y: Math.max((bandTop + skyBottom) / 2, clear), carefulX, carefulY: bandTop + 6 * s };
+}
+
 /** Seconds the world freezes on impact before the crash animation plays. */
 const HIT_STOP = 0.12;
 /** First-encounter hints are only offered early in a run. */
@@ -1067,7 +1101,7 @@ export class RunnerGame extends BaseGame {
       const t = this.powers[k];
       if (t <= 0) continue;
       const info = POWER_INFO[k];
-      hudPill(ctx, left, y, 170 * s, 34 * s);
+      hudPill(ctx, left, y, POWER_PILL_W * s, 34 * s);
       drawPowerIcon(ctx, k, left + 20 * s, y + 17 * s, 9 * s, info.color);
       progressBar(ctx, left + 38 * s, y + 12 * s, 118 * s, 10 * s, t / this.powerTime(info.base), info.color);
       y += 40 * s;
@@ -1075,22 +1109,22 @@ export class RunnerGame extends BaseGame {
     if (this.shield) {
       hudPill(ctx, left, y, 124 * s, 34 * s);
       text(ctx, 'GUARDIAN', left + 62 * s, y + 17 * s, { size: 18 * s, align: 'center', color: '#7cf' });
+      y += 40 * s;
     }
 
     // Announcements live in the sky between the HUD and the horizon, never over the track ahead.
-    const bandTop = top + 92 * s;
-    const bandY = (bandTop + this.cam.hz - 40 * this.framing.unit) / 2;
+    const band = bannerBand(this.W, top, left, y, s, this.cam.hz - 40 * this.framing.unit);
     if (this.stumbleT > 0 && !this.crashed)
-      text(ctx, 'CAREFUL!', this.W / 2, bandTop + 6 * s, { size: 26 * s, align: 'center', color: '#ff6b6b' });
+      text(ctx, 'CAREFUL!', band.carefulX, band.carefulY, { size: 26 * s, align: 'center', color: '#ff6b6b' });
     if (this.bannerT < 1.8 && this.milestone === 0) {
-      this.drawBanner('RUN!', 'Grab coins · dodge trains', this.bannerT / 1.8, bandY, '#ffd23f');
+      this.drawBanner('RUN!', 'Grab coins · dodge trains', this.bannerT / 1.8, band.y, '#ffd23f');
     } else if (this.milestoneT < 2.8) {
       const zone = zoneDef(this.milestone);
       this.drawBanner(
         `${(this.milestone * MILESTONE_M).toLocaleString('en-US')} m`,
         `${zone.name} · SPEED UP · x${Math.min(MAX_MULTIPLIER, 1 + this.milestone)}`,
         this.milestoneT / 2.8,
-        bandY,
+        band.y,
         '#7cf6ff',
       );
     }

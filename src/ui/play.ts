@@ -46,6 +46,39 @@ export function toastLane(
   return { left: Math.round(title.left), right: Math.max(0, Math.round(pageWidth - title.right)) };
 }
 
+export interface HintInputs {
+  /** A game exists. */
+  game: boolean;
+  paused: boolean;
+  /** The results dialog is open. */
+  results: boolean;
+  /** The rotate prompt is up. */
+  prompted: boolean;
+  /** The phone is held the way the game declares. */
+  onDeclared: boolean;
+  /** The rotate prompt, not a pause, handles this game's turns on this device. */
+  gateOwnsTurns: boolean;
+  /** The player has touched the screen (the rotate hint is for touch devices). */
+  sawTouch: boolean;
+  /** The rotate hint was dismissed for the current stage orientation. */
+  dismissed: boolean;
+  refitGain: () => number;
+  rotateGain: () => number;
+}
+
+/**
+ * Which of the rotate hint and the fit chip to show (never both, and neither under the rotate prompt).
+ * The fit chip covers a run sized for the other side of a turn, now that the phone is on the declared side;
+ * the rotate hint covers every other turn that would enlarge the game. Both belong to a run in play: none
+ * while paused (the menu offers "Restart to fit" itself), while the results are open, or before a game exists.
+ */
+export function pickHint(i: HintInputs): { turn: boolean; fit: boolean } {
+  const live = i.game && !i.paused && !i.results && !i.prompted;
+  const fit = live && i.onDeclared && i.gateOwnsTurns && i.refitGain() >= REFIT_GAIN;
+  const turn = live && !fit && i.sawTouch && !i.dismissed && i.rotateGain() >= ROTATE_GAIN;
+  return { turn, fit };
+}
+
 interface TouchKey {
   el: HTMLElement;
   action: Action;
@@ -385,21 +418,20 @@ export class PlayScreen {
   private updateRotateHint(): void {
     const a = this.viewport.available();
     const key = a.width > a.height ? 'landscape' : 'portrait';
-    // The prompt, the rotate hint and the fit chip never show together. The prompt covers a touch phone
-    // held the wrong way. The fit chip covers a run sized for the other side of a turn, now that the
-    // phone is on the declared side. The rotate hint covers every other turn that would enlarge the game.
-    // Hints belong to a run on screen: none while the results are open or before a game exists.
-    const live = this.game !== null && !this.resultsOpen;
-    const prompted = this.rotateBlocked();
-    const onDeclared = orientationOf(window.innerWidth, window.innerHeight) === this.def.orientation;
-    const fit = live && !prompted && onDeclared && this.gateOwnsTurns() && this.refitGain() >= REFIT_GAIN;
-    const turn =
-      live &&
-      !prompted &&
-      !fit &&
-      this.sawTouch &&
-      !this.rotateDismissed[key] &&
-      this.rotateGain() >= ROTATE_GAIN;
+    // The prompt, the rotate hint and the fit chip never show together; the prompt covers a touch phone
+    // held the wrong way, and pickHint chooses between the other two.
+    const { turn, fit } = pickHint({
+      game: this.game !== null,
+      paused: this.paused,
+      results: this.resultsOpen,
+      prompted: this.rotateBlocked(),
+      onDeclared: orientationOf(window.innerWidth, window.innerHeight) === this.def.orientation,
+      gateOwnsTurns: this.gateOwnsTurns(),
+      sawTouch: this.sawTouch,
+      dismissed: this.rotateDismissed[key],
+      refitGain: () => this.refitGain(),
+      rotateGain: () => this.rotateGain(),
+    });
     this.rotateHint.classList.toggle('is-visible', turn);
     this.fitHint.classList.toggle('is-visible', fit);
     if (turn) this.placeHint(this.rotateHint);
@@ -547,6 +579,8 @@ export class PlayScreen {
       return;
     }
     this.resultsOpen = true;
+    // The hints belong to the run that just ended; leaving them up would float them over the results.
+    this.updateRotateHint();
     showResults(this.app, this.def, summary, {
       playAgain: () => {
         this.resultsOpen = false;
@@ -575,6 +609,7 @@ export class PlayScreen {
     this.app.audio.setMusicPaused(true);
     this.app.audio.setPaused(true);
     this.redraw();
+    this.updateRotateHint();
     const modal = new Modal(this.app.overlayHost, {
       title: 'Paused',
       className: 'modal--small modal--pause',

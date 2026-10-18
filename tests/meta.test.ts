@@ -8,6 +8,7 @@ import { applyRunToMissions, generateMissions, MISSION_TEMPLATES } from '../src/
 import { cleanName, defaultProfile, sanitizeProfile } from '../src/meta/profile';
 import { levelInfo, levelUpReward, MAX_LEVEL, xpForNext } from '../src/meta/progression';
 import { computeRewards } from '../src/meta/rewards';
+import { makeArcade } from './helpers';
 
 describe('progression', () => {
   it('maps XP to levels at exact boundaries', () => {
@@ -277,5 +278,51 @@ describe('catalog and achievements', () => {
     const ultra = ACHIEVEMENTS.find((a) => a.id === 'runner-3k')!;
     expect(achievementProgress(ultra, p)).toEqual({ current: 1200, target: 3000 });
     expect(new Set(ACHIEVEMENTS.map((a) => a.id)).size).toBe(ACHIEVEMENTS.length);
+  });
+});
+
+describe('ArcadeService robustness (shell audit)', () => {
+  it('keeps NaN and Infinity from a game out of saved totals, bests and mission progress', () => {
+    const { arcade } = makeArcade();
+    const ticket = arcade.startRun('runner');
+    const summary = arcade.finishRun(ticket, {
+      score: 120,
+      coins: Number.NaN,
+      durationSec: Number.POSITIVE_INFINITY,
+      stats: { distance: Number.NaN, jumps: Number.POSITIVE_INFINITY, slides: 4 },
+    });
+    const p = arcade.profile;
+    expect(p.games.runner.totalTime).toBe(0);
+    expect(Number.isFinite(p.games.runner.totalTime)).toBe(true);
+    expect(p.totals['runner.distance']).toBeUndefined();
+    expect(p.totals['runner.jumps']).toBeUndefined();
+    expect(p.totals['runner.slides']).toBe(4);
+    for (const m of p.missions.list) expect(Number.isFinite(m.progress)).toBe(true);
+    expect(summary.result.score).toBe(120);
+    // Saving and loading keeps the same profile (no NaN turned into null on the way).
+    expect(sanitizeProfile(JSON.parse(JSON.stringify(p)))).toEqual(p);
+  });
+
+  it('returns the boosts of an abandoned run, once', () => {
+    const { arcade } = makeArcade();
+    const before = arcade.profile.consumables['coin-doubler'] ?? 0;
+    expect(before).toBeGreaterThan(0);
+    const ticket = arcade.startRun('pong', ['coin-doubler']);
+    expect(ticket.boosts).toEqual(['coin-doubler']);
+    expect(arcade.profile.consumables['coin-doubler']).toBe(before - 1);
+    expect(arcade.abandonRun(ticket)).toEqual(['coin-doubler']);
+    expect(arcade.profile.consumables['coin-doubler']).toBe(before);
+    // A second abandon of the same ticket refunds nothing.
+    expect(arcade.abandonRun(ticket)).toEqual([]);
+    expect(arcade.profile.consumables['coin-doubler']).toBe(before);
+  });
+
+  it('does not refund a ticket that was already finished or replaced', () => {
+    const { arcade } = makeArcade();
+    const before = arcade.profile.consumables.shield ?? 0;
+    const first = arcade.startRun('snake', ['shield']);
+    arcade.finishRun(first, { score: 10, coins: 0, durationSec: 20, stats: {} });
+    expect(arcade.abandonRun(first)).toEqual([]);
+    expect(arcade.profile.consumables.shield).toBe(before - 1);
   });
 });
