@@ -3,7 +3,7 @@ import { type Action, Input, type PointerState, type SwipeDir } from '../src/cor
 import { NullAudio } from '../src/core/audio';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
-import { Board, COLS, HIDDEN_ROWS, ROWS, VISIBLE_ROWS } from '../src/games/tetris/board';
+import { Board, COLS, HIDDEN_ROWS, ROWS } from '../src/games/tetris/board';
 import { buildLook, COMPACT_LABEL_PX, drawPanel, layoutTetris, panelSlots } from '../src/games/tetris/draw';
 import {
   cellsOf,
