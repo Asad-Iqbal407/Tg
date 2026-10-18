@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
-import { hudLayout } from '../src/games/hill/hill';
+import { hudLayout, playfieldTop } from '../src/games/hill/hill';
 import { GAMES } from '../src/games/registry';
 
 /** Play-stage size (CSS px) for a browser window: a 52 px rail on short landscape screens, else a header. */
@@ -46,6 +46,25 @@ describe('hill layout', () => {
       // The smallest HUD label is 13 px at the desktop scale (the "km/h" tag).
       expect(13 * s * scale, name).toBeGreaterThanOrEqual(12);
     }
+  });
+
+  it('starts the playfield just under the fuel chip on landscape phones, keeping the chip row whole', () => {
+    for (const [name, w, h] of LANDSCAPE_PHONES) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(hill, stage.w, stage.h);
+      const lay = hudLayout(size.width, true, false, 0);
+      const top = playfieldTop(size.width, true, false, 0);
+      // The fuel chip ends 14 px from the top edge, plus the pill height, 6 s and the 26 s chip.
+      const chipBottom = 14 + lay.ph + 32 * lay.s;
+      expect(top, name).toBeGreaterThanOrEqual(chipBottom);
+      expect(top - lay.bottom, name).toBeLessThanOrEqual(4);
+      // The HUD used to reserve a top of 135 logical px on these screens.
+      expect(top, name).toBeLessThan(130);
+    }
+  });
+
+  it('keeps the desktop playfield at its original 80 px top', () => {
+    expect(playfieldTop(960, false, false, 0)).toBe(80);
   });
 
   it('stacks the HUD into two rows only when one row does not fit the canvas', () => {

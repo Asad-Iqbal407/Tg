@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { GAMES } from '../src/games/registry';
-import { headRadius, touchHudSize } from '../src/games/snake/draw';
+import { bodyWidth, headRadius, touchHudSize } from '../src/games/snake/draw';
 import { fitBoard, gridSize } from '../src/games/snake/board';
 import { cornerSizes, createGame } from './helpers';
 import { snakeGame } from '../src/games/snake';
@@ -27,7 +27,16 @@ const LANDSCAPE_PHONES: [string, number, number][] = [
 describe('snake layout', () => {
   it('takes either orientation and keeps its viewport range', () => {
     expect(snake.orientation).toBe('any');
-    expect(snake.viewport).toEqual({ minWidth: 380, maxWidth: 900, minHeight: 640, maxHeight: 800 });
+    expect(snake.viewport).toEqual({ minWidth: 380, maxWidth: 900, minHeight: 360, maxHeight: 800 });
+  });
+
+  it('fills the landscape phone stages with the board (no sideways letterbox)', () => {
+    for (const [name, w, h] of LANDSCAPE_PHONES) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(snake, stage.w, stage.h);
+      const fill = fittedArea(size, stage.w, stage.h) / (stage.w * stage.h);
+      expect(fill, name).toBeGreaterThanOrEqual(name === 'L1' ? 0.8 : 0.85);
+    }
   });
 
   it('fills the portrait phone stages with a board as tall as the design', () => {
@@ -41,15 +50,16 @@ describe('snake layout', () => {
     }
   });
 
-  it('draws the head at least 8% of the short side on the P2 phone stage', () => {
-    const [, w, h] = PORTRAIT_PHONES.find(([name]) => name === 'P2')!;
-    const stage = stageFor(w, h);
-    const size = chooseLogicalSize(snake, stage.w, stage.h);
-    const scale = Math.min(stage.w / size.width, stage.h / size.height);
-    const grid = gridSize(size.width, size.height);
-    const { cell } = fitBoard(grid.cols, grid.rows, size.width, size.height, 0);
-    const diameter = 2 * headRadius(cell, 0, true) * scale;
-    expect(diameter / Math.min(stage.w, stage.h)).toBeGreaterThanOrEqual(0.08);
+  it('draws the head at least 8% of the short side on every phone stage', () => {
+    for (const [name, w, h] of [...PORTRAIT_PHONES, ...LANDSCAPE_PHONES]) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(snake, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const grid = gridSize(size.width, size.height);
+      const { cell } = fitBoard(grid.cols, grid.rows, size.width, size.height, 0);
+      const diameter = 2 * headRadius(cell, 0, true) * scale;
+      expect(diameter / Math.min(stage.w, stage.h), name).toBeGreaterThanOrEqual(0.08);
+    }
   });
 
   it('keeps the desktop head at the body width, and draws a larger head on touch', () => {
@@ -57,13 +67,19 @@ describe('snake layout', () => {
     expect(headRadius(24, 0, true)).toBeGreaterThan(headRadius(24, 0, false));
   });
 
+  it('draws a full-cell body on touch and keeps the desktop body at 0.78 of a cell', () => {
+    expect(bodyWidth(24, 0, false)).toBeCloseTo(24 * 0.78);
+    expect(bodyWidth(24, 0, true)).toBeCloseTo(24);
+    expect(bodyWidth(24, 1, false)).toBeCloseTo(24 * 0.84);
+  });
+
   it('keeps the desktop 1280 x 800 window and the landscape phone boards inside the range', () => {
     const desk = stageFor(1280, 800);
-    expect(chooseLogicalSize(snake, desk.w, desk.h)).toEqual({ width: 900, height: 640 });
+    expect(chooseLogicalSize(snake, desk.w, desk.h)).toEqual({ width: 900, height: 524 });
     for (const [name, w, h] of LANDSCAPE_PHONES) {
       const stage = stageFor(w, h);
       const size = chooseLogicalSize(snake, stage.w, stage.h);
-      expect(size.height, name).toBeGreaterThanOrEqual(640);
+      expect(size.height, name).toBeGreaterThanOrEqual(360);
       expect(size.width, name).toBeLessThanOrEqual(900);
     }
   });

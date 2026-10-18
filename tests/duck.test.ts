@@ -273,25 +273,44 @@ function playBot(seed: number, seconds: number, bot: BotOptions): BotRun {
 
 describe('Duck Season viewport and layout', () => {
   it('declares the flexible width at a fixed height, for landscape play', () => {
-    expect(def.viewport).toEqual({ minWidth: 640, maxWidth: 1280 });
+    expect(def.viewport).toEqual({ minWidth: 480, maxWidth: 1280 });
     expect(def.height).toBe(540);
     expect(def.orientation).toBe('landscape');
   });
 
-  it.each([640, 800, 960, 1280])('keeps ducks inside the screen and spreads them over %i px', (width) => {
-    let maxX = 0;
-    for (const seed of [1, 2, 3]) {
-      const { g, input } = make({ seed, width });
-      step(g, input, 40, () => {
-        for (const d of g.ducks) {
-          if (d.state !== 'fly') continue;
-          expect(d.x).toBeGreaterThanOrEqual(0);
-          expect(d.x).toBeLessThanOrEqual(width);
-          maxX = Math.max(maxX, d.x);
-        }
-      });
+  it('takes presses across the whole play stage, so the letterbox bars aim and shoot', () => {
+    expect(def.pointerArea).toBe('stage');
+  });
+
+  it.each([480, 640, 800, 960, 1280])(
+    'keeps ducks inside the screen and spreads them over %i px',
+    (width) => {
+      let maxX = 0;
+      for (const seed of [1, 2, 3]) {
+        const { g, input } = make({ seed, width });
+        step(g, input, 40, () => {
+          for (const d of g.ducks) {
+            if (d.state !== 'fly') continue;
+            expect(d.x).toBeGreaterThanOrEqual(0);
+            expect(d.x).toBeLessThanOrEqual(width);
+            maxX = Math.max(maxX, d.x);
+          }
+        });
+      }
+      expect(maxX).toBeGreaterThan(width * 0.8);
+    },
+  );
+
+  it('takes every duck off inside the field on the narrowest width, even when wave-mates push it', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const { g, input } = make({ seed, width: 480 });
+      // The wave has just started: these are the take-off positions, before any frame has moved them.
+      until(g, input, () => g.phase === 'wave');
+      for (const d of g.ducks) {
+        expect(d.x, `seed ${seed}`).toBeGreaterThanOrEqual(34);
+        expect(d.x, `seed ${seed}`).toBeLessThanOrEqual(480 - 34);
+      }
     }
-    expect(maxX).toBeGreaterThan(width * 0.8);
   });
 
   it('lifts the bottom HUD bar above the bottom inset and keeps it on the canvas', () => {
@@ -411,12 +430,28 @@ describe('Duck Season fairness', () => {
     expect(d.state).toBe('hit');
   });
 
-  it('ignores presses that land off the canvas (letterbox bars)', () => {
+  it('fires for a press on a letterbox bar, aiming at the nearest point of the field', () => {
     const { g, input } = inWave();
     const shots = g.shots;
-    tap(input, 0, 0, { inside: false });
+    // The play stage is the pointer area, so a press above and left of the field counts. The aim clamps to the corner.
+    tap(input, -40, -30, { inside: false });
     step(g, input, DT);
-    expect(g.shots).toBe(shots);
+    expect(g.shots).toBe(shots - 1);
+    expect(g.aimX).toBe(0);
+    expect(g.aimY).toBe(0);
+  });
+
+  it('does not move the aim for a hover over a letterbox bar', () => {
+    const { g, input } = inWave();
+    const x0 = g.aimX;
+    const y0 = g.aimY;
+    input.pointer.active = true;
+    input.pointer.inside = false;
+    input.pointer.x = -40;
+    input.pointer.y = 300;
+    step(g, input, DT);
+    expect(g.aimX).toBe(x0);
+    expect(g.aimY).toBe(y0);
   });
 
   it('collects a crate by shooting its balloon, without breaking the combo', () => {
@@ -499,9 +534,11 @@ describe('Duck Season keyboard and gamepad aim', () => {
     const { g: p, input: pin } = inWave();
     const pd = p.ducks[0]!;
     parkDucks(p, pd);
+    // A mouse over the field: inside the canvas, so its movement steers the aim.
     pin.pointer.x = 500;
     pin.pointer.y = 200;
     pin.pointer.active = true;
+    pin.pointer.inside = true;
     step(p, pin, DT);
     placeDuck(pd, 540, 200, 120, 0);
     step(p, pin, 0.3);
@@ -808,6 +845,17 @@ describe('Duck Season HUD on small screens', () => {
     expect(make({ width: 800, height: 540 }).g.layoutBar().s).toBe(1);
     expect(make({ width: 1280, height: 540 }).g.layoutBar().s).toBe(1);
   });
+
+  it('scales the bar down to fit the narrowest field, and keeps its tracker label at least 12 CSS px', () => {
+    // A 390 px phone shows the 480-wide field at 0.81 CSS px per logical px.
+    const ctx = mockCtx();
+    (ctx as unknown as { canvas: unknown }).canvas = { clientWidth: 390 };
+    const narrow = make({ ctx, width: 480, height: 540 }).g;
+    const s = narrow.layoutBar().s;
+    expect(s).toBeLessThan(1);
+    // The shortest label in the bar is the 19-unit "HIT" tracker label.
+    expect(19 * s * (390 / 480)).toBeGreaterThanOrEqual(12);
+  });
 });
 
 /** The play stage (CSS px) inside a browser window, as the shell lays it out. */
@@ -847,6 +895,19 @@ describe('Duck Season phone layout', () => {
       expect(size.width, name).toBeGreaterThanOrEqual(v.minWidth ?? def.width);
       expect(size.width, name).toBeLessThanOrEqual(v.maxWidth ?? def.width);
       expect(fittedArea(size, stage.w, stage.h) / (stage.w * stage.h), name).toBeGreaterThanOrEqual(0.85);
+    }
+  });
+
+  it('fills more than half of a portrait phone in the fallback, now the field can be narrower', () => {
+    // Portrait phones play the landscape game letterboxed; the narrower floor lets the field grow on screen.
+    for (const [name, [w, h]] of Object.entries({
+      P1: [360, 740],
+      P2: [390, 844],
+      P3: [430, 932],
+    })) {
+      const stage = stageFor(w!, h!);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      expect(fittedArea(size, stage.w, stage.h) / (stage.w * stage.h), name).toBeGreaterThanOrEqual(0.5);
     }
   });
 

@@ -1,4 +1,4 @@
-import { lerp, TAU } from '../../core/math';
+import { clamp, lerp, TAU } from '../../core/math';
 import { BaseGame } from '../base';
 import type { GameResult, GameServices } from '../types';
 import { type BotEnv, stepBot } from './bots';
@@ -13,7 +13,15 @@ import {
   PILLAR,
   TILE,
 } from './grid';
-import { drawScene, type Layout, type Palette, type SceneView } from './render';
+import {
+  hudTextPx,
+  type Layout,
+  MIN_TEXT_CSS,
+  type Palette,
+  drawScene,
+  type SceneView,
+  tileForCharacters,
+} from './render';
 import {
   type Bomb,
   type Bot,
@@ -68,6 +76,10 @@ const ITEM_LABEL: Record<ItemKind, string> = {
  * of larger tiles rather than eleven small ones: the characters stay a readable share of the screen.
  */
 const TOUCH_ROWS = 7;
+/** Shorter stage sides (CSS px) are phones: only they zoom the arena in on the character. */
+const PHONE_SHORT_SIDE = 600;
+/** Space the HUD keeps around the arena, in logical px (left, right and bottom margins; the top is set by the HUD). */
+const ARENA_MARGIN = 16;
 const FIRE_COLORS = ['#fff7ed', '#fde047', '#fb923c', '#ef4444', '#7c2d12'];
 const WOOD_COLORS = ['#a16207', '#facc15', '#78350f'];
 const NO_VECTOR = { x: 0, y: 0 };
@@ -100,8 +112,10 @@ export class BombSquadGame extends BaseGame {
   private blocks = 0;
   private serial = 0;
   private dragOrigin: { x: number; y: number } | null = null;
-  private layoutKey = -1;
-  private lay: Layout = { ts: 1, ox: 0, oy: 0 };
+  /** CSS px per logical px of the canvas on screen, read once a frame (1 until the canvas is measured). */
+  private cssScale = 1;
+  /** The play stage's short side in CSS px, read once a frame (0 until measured: nothing is zoomed). */
+  private stageShort = 0;
 
   constructor(services: GameServices) {
     super(services);
@@ -162,6 +176,7 @@ export class BombSquadGame extends BaseGame {
 
   render(): void {
     const ctx = this.ctx;
+    this.measureScreen();
     ctx.save();
     ctx.translate(this.shake.x, this.shake.y);
     drawScene(ctx, this.view());
@@ -205,6 +220,7 @@ export class BombSquadGame extends BaseGame {
       ammo: this.player.ammo,
       ammoMax: this.player.ammoMax,
       compact: this.touchLayout(),
+      hudPx: hudTextPx(this.cssScale),
     };
   }
 
@@ -217,23 +233,57 @@ export class BombSquadGame extends BaseGame {
     return this.services.preview !== true && (this.insets.bottom > 0 || this.touch);
   }
 
-  /** Where the arena sits on screen: the largest whole tile size that fits, centred. */
+  /**
+   * Reads the on-screen size once a frame: CSS px per logical px, and the short side of the play stage (the canvas's
+   * parent). A canvas that is not on screen (card art, tests) leaves the defaults, so nothing is zoomed.
+   */
+  private measureScreen(): void {
+    const canvas = this.ctx.canvas as HTMLCanvasElement | undefined;
+    const box = canvas?.getBoundingClientRect?.();
+    if (!box || box.width <= 0 || this.W <= 0) return;
+    this.cssScale = box.width / this.W;
+    const stage = canvas?.parentElement?.getBoundingClientRect?.();
+    this.stageShort = stage && stage.width > 0 && stage.height > 0 ? Math.min(stage.width, stage.height) : 0;
+  }
+
+  /** A floating label's size: its base size, or larger where the canvas is scaled down, so it stays MIN_TEXT_CSS. */
+  private labelPx(base: number): number {
+    return Math.max(base, Math.ceil(MIN_TEXT_CSS / this.cssScale));
+  }
+
+  /**
+   * Where the arena sits on screen: the largest whole tile size that fits, centred. On a phone the arena zooms in until
+   * the character is a readable share of the screen; the arena then runs past its room, and the camera keeps the
+   * player in view (clamped to the arena's edges). The simulation does not depend on any of this.
+   */
   private layout(): Layout {
-    const key = this.insets.bottom;
-    if (key !== this.layoutKey) {
-      this.layoutKey = key;
-      // On a touch screen the HUD is taller (its score pill has two lines), so the arena starts lower.
-      const top = this.touchLayout() ? 64 : 56;
-      const rectW = this.W - 32;
-      const rectH = this.H - top - 8 - key;
-      const ts = Math.max(4, Math.floor(Math.min(rectW / this.arena.cols, rectH / this.arena.rows)));
-      this.lay = {
-        ts,
-        ox: 16 + (rectW - this.arena.cols * ts) / 2,
-        oy: top + (rectH - this.arena.rows * ts) / 2,
-      };
-    }
-    return this.lay;
+    const compact = this.touchLayout();
+    // On a touch screen the HUD is taller (its score pill has two lines), so the arena starts lower.
+    const px = compact ? hudTextPx(this.cssScale) : 0;
+    const top = compact ? 2 * px + 22 : 56;
+    const rectW = this.W - 2 * ARENA_MARGIN;
+    const rectH = this.H - top - 8 - this.insets.bottom;
+    const fit = Math.max(4, Math.floor(Math.min(rectW / this.arena.cols, rectH / this.arena.rows)));
+    const phone = this.stageShort > 0 && this.stageShort < PHONE_SHORT_SIDE;
+    const zoom = compact && phone ? tileForCharacters(this.stageShort, this.cssScale) : 0;
+    const ts = Math.max(fit, zoom);
+    const aw = this.arena.cols * ts;
+    const ah = this.arena.rows * ts;
+    const ox =
+      aw <= rectW
+        ? ARENA_MARGIN + (rectW - aw) / 2
+        : clamp(ARENA_MARGIN + rectW / 2 - this.player.x * ts, ARENA_MARGIN + rectW - aw, ARENA_MARGIN);
+    const oy =
+      ah <= rectH
+        ? top + (rectH - ah) / 2
+        : clamp(top + rectH / 2 - this.player.y * ts, top + rectH - ah, top);
+    const overflows = aw > rectW || ah > rectH;
+    return {
+      ts,
+      ox,
+      oy,
+      clip: overflows ? { x: ARENA_MARGIN, y: top, w: rectW, h: rectH } : undefined,
+    };
   }
 
   // ---- player -------------------------------------------------------------------------------
@@ -445,7 +495,7 @@ export class BombSquadGame extends BaseGame {
     this.score += 50;
     this.audio.play('powerup');
     const s = this.screenOf(item.x + 0.5, item.y + 0.5);
-    this.texts.add(s.x, s.y - 12, ITEM_LABEL[item.kind], '#fef08a', 16);
+    this.texts.add(s.x, s.y - 12, ITEM_LABEL[item.kind], '#fef08a', this.labelPx(16));
   }
 
   private refreshAmmoMax(): void {
@@ -736,7 +786,7 @@ export class BombSquadGame extends BaseGame {
       const points = bot.kind === 'bomber' ? 250 : 100;
       this.score += points;
       const s = this.screenOf(bot.x, bot.y);
-      this.texts.add(s.x, s.y - 14, `+${points}`, '#fde68a', 18);
+      this.texts.add(s.x, s.y - 14, `+${points}`, '#fde68a', this.labelPx(18));
       this.particles.emit({
         x: s.x,
         y: s.y,

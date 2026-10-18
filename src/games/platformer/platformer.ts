@@ -20,6 +20,8 @@ import { themeFor, type Theme } from './themes';
 import { ENEMY_SPEED, enemySpeedScale, HURRY_TIME, levelTimeLimit, PHYS, worldLabel } from './tuning';
 
 const PX = 2.25;
+/** Height (logical px) of the small hero as drawn: 16 sprite rows of PX (its collision box is 32). */
+export const HERO_DRAW_H = HERO.small.stand.length * PX;
 const STOMP_POINTS = [100, 200, 400, 500, 800, 1000, 2000, 4000, 5000, 8000];
 /** The hero lands on an enemy when its feet were at most this far below the enemy's top last step. */
 const STOMP_TOLERANCE = 10;
@@ -29,16 +31,24 @@ const SHELL_KICK_POINTS = 400;
 const RESPAWN_INVULN = 1.2;
 const BANNER_TIME = 2;
 const HUD_PAD = 12;
-const HUD_H = 40;
+/** Height of one HUD pill, in logical px. */
+export const HUD_H = 40;
+/** Vertical gap between the two HUD rows (see hudLayout). */
+const HUD_ROW_GAP = 8;
 /** Strip of floor (px) kept visible above touch controls covering the bottom of the canvas. */
 const FLOOR_STRIP = 24;
 /**
- * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, which leaves the
- * 32 px hero under 6% of the screen. There the world is drawn ZOOM_PHONE times bigger (the HUD and
- * banners with it), easing back to the design framing as the canvas grows to ZOOM_DESKTOP_H px tall.
+ * World zoom: the world, HUD and banners are drawn this many times bigger than the canvas scale alone.
+ * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, so it gets ZOOM_PHONE;
+ * the zoom eases back to the design framing as the canvas grows to ZOOM_DESKTOP_H px tall. A phone held
+ * upright (Play anyway) shows the 800 px view in a 243-290 CSS px tall canvas, where the 36 px hero would
+ * be under 7% of the short side, so it gets ZOOM_UPRIGHT, which keeps it at about 8.5%.
  */
 const ZOOM_PHONE = 1.4;
+const ZOOM_PHONE_MIN_H = 360;
 const ZOOM_PHONE_H = 430;
+const ZOOM_UPRIGHT = 1.9;
+const ZOOM_UPRIGHT_H = 300;
 const ZOOM_DESKTOP_H = 500;
 /** HUD labels are drawn at least this many CSS px tall, however small the canvas (see hudFloorPx). */
 const HUD_MIN_CSS = 12.5;
@@ -46,8 +56,64 @@ const HUD_MIN_CSS = 12.5;
 /** World zoom for a canvas this many CSS px tall: 1 on desktops and when the size is unknown. */
 export function zoomFor(cssHeight: number): number {
   if (!(cssHeight > 0)) return 1;
+  if (cssHeight < ZOOM_PHONE_MIN_H) {
+    const t = clamp((cssHeight - ZOOM_UPRIGHT_H) / (ZOOM_PHONE_MIN_H - ZOOM_UPRIGHT_H), 0, 1);
+    return ZOOM_UPRIGHT + (ZOOM_PHONE - ZOOM_UPRIGHT) * t;
+  }
   const t = clamp((ZOOM_DESKTOP_H - cssHeight) / (ZOOM_DESKTOP_H - ZOOM_PHONE_H), 0, 1);
   return 1 + (ZOOM_PHONE - 1) * t;
+}
+
+/** A HUD pill in view px: its left edge, its top edge and its width (every pill is HUD_H tall). */
+export interface HudBox {
+  x: number;
+  y: number;
+  w: number;
+}
+
+export interface HudLayout {
+  score: HudBox;
+  coins: HudBox;
+  clock: HudBox;
+  lives: HudBox;
+  world: HudBox;
+  /** Lowest view px the HUD covers: the level's top rows are hidden behind it. */
+  bottom: number;
+}
+
+/** Width the one-row HUD needs, from its left edge to its right edge (view px). */
+const HUD_ONE_ROW_W = 552;
+
+/**
+ * Where the HUD pills sit in a view from `left` to `right`, starting at `top`. A wide view keeps the
+ * one-row design (the world pill drops to a second row only when it would touch the clock). A narrow
+ * view (a phone held upright) puts score, coins and clock on the first row and world and lives on a
+ * second, so no pill overlaps another and the labels keep their size.
+ */
+export function hudLayout(left: number, right: number, top: number): HudLayout {
+  const row2 = top + HUD_H + HUD_ROW_GAP;
+  if (right - left >= HUD_ONE_ROW_W) {
+    const lives = right - 104;
+    const clock = lives - 10 - 120;
+    const worldX = left + 320;
+    const dropWorld = worldX + 150 > clock - 10;
+    return {
+      score: { x: left, y: top, w: 196 },
+      coins: { x: left + 206, y: top, w: 104 },
+      clock: { x: clock, y: top, w: 120 },
+      lives: { x: lives, y: top, w: 104 },
+      world: dropWorld ? { x: left, y: row2, w: 150 } : { x: worldX, y: top, w: 150 },
+      bottom: dropWorld ? row2 + HUD_H : top + HUD_H,
+    };
+  }
+  return {
+    score: { x: left, y: top, w: 140 },
+    coins: { x: left + 148, y: top, w: 104 },
+    clock: { x: right - 120, y: top, w: 120 },
+    world: { x: left, y: row2, w: 150 },
+    lives: { x: right - 104, y: row2, w: 104 },
+    bottom: row2 + HUD_H,
+  };
 }
 
 /**
@@ -322,6 +388,15 @@ export class PlatformerGame extends BaseGame {
     this.vh = this.H / this.zoom;
   }
 
+  /** Where the HUD sits in the current view, inside the insets (see hudLayout). */
+  private hud(): HudLayout {
+    const k = 1 / this.zoom;
+    const top = this.insets.top * k + HUD_PAD;
+    const left = this.insets.left * k + HUD_PAD;
+    const right = this.vw - this.insets.right * k - HUD_PAD;
+    return hudLayout(left, right, top);
+  }
+
   private cameraTargetX(): number {
     // Narrow views keep the hero a little further left, so ~1.5 s of run-speed lookahead stays visible.
     const anchor = clamp(0.4 - (1000 - this.vw) * 0.0003, 0.33, 0.4);
@@ -337,7 +412,7 @@ export class PlatformerGame extends BaseGame {
   private cameraTargetY(): number {
     const k = 1 / this.zoom;
     const worldTop = ROWS * T - this.vh;
-    const hudBottom = this.insets.top * k + HUD_PAD + HUD_H;
+    const hudBottom = this.hud().bottom;
     const need = GROUND_ROW * T + FLOOR_STRIP - (this.vh - this.insets.bottom * k);
     const maxShift = Math.max(worldTop, (CHUNK_TOP_ROW + 1) * T - hudBottom - 8);
     // A zoomed-in view can be too short for both the top chunk row and the ground above the touch
@@ -1571,43 +1646,34 @@ export class PlatformerGame extends BaseGame {
       this.H,
     );
     const fit = (px: number): number => Math.max(px, minPx);
-    const top = this.insets.top * k + HUD_PAD;
-    const left = this.insets.left * k + HUD_PAD;
-    const right = this.vw - this.insets.right * k - HUD_PAD;
-    const cy = top + HUD_H / 2 + 1;
-    hudPill(ctx, left, top, 196, HUD_H);
-    text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, left + 18, cy, { size: fit(22) });
-    hudPill(ctx, left + 206, top, 104, HUD_H);
-    drawCoin(ctx, left + 228, cy - 1, 11);
-    text(ctx, `× ${this.coins}`, left + 246, cy, { size: fit(20) });
-    const livesX = right - 104;
-    const clockX = livesX - 10 - 120;
-    hudPill(ctx, clockX, top, 120, HUD_H);
+    const hud = this.hud();
+    // Text sits on the vertical middle of its own pill, so the second row centres its labels too.
+    const midY = (b: HudBox): number => b.y + HUD_H / 2 + 1;
+    hudPill(ctx, hud.score.x, hud.score.y, hud.score.w, HUD_H);
+    text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, hud.score.x + 18, midY(hud.score), {
+      size: fit(22),
+    });
+    hudPill(ctx, hud.coins.x, hud.coins.y, hud.coins.w, HUD_H);
+    drawCoin(ctx, hud.coins.x + 22, midY(hud.coins) - 1, 11);
+    text(ctx, `× ${this.coins}`, hud.coins.x + 40, midY(hud.coins), { size: fit(20) });
+    hudPill(ctx, hud.clock.x, hud.clock.y, hud.clock.w, HUD_H);
     const low = this.timeLeft < HURRY_TIME && this.phase === 'play';
-    text(ctx, `⏱ ${Math.ceil(this.timeLeft)}`, clockX + 60, cy, {
+    text(ctx, `⏱ ${Math.ceil(this.timeLeft)}`, hud.clock.x + 60, midY(hud.clock), {
       size: fit(20),
       align: 'center',
       color: low ? '#ff6b6b' : '#fff',
     });
-    hudPill(ctx, livesX, top, 104, HUD_H);
-    this.heart(livesX + 24, cy - 1, 10);
-    text(ctx, `× ${Math.max(0, this.lives)}`, livesX + 42, cy, { size: fit(20) });
-    // The world pill follows the coins when there is room, else it drops below the score.
-    const worldW = 150;
-    let wx = left + 320;
-    let wy = top;
-    if (wx + worldW > clockX - 10) {
-      wx = left;
-      wy = top + HUD_H + 8;
-    }
-    hudPill(ctx, wx, wy, worldW, HUD_H);
-    text(ctx, `WORLD ${worldLabel(this.levelNum)}`, wx + worldW / 2, wy + HUD_H / 2 + 1, {
+    hudPill(ctx, hud.lives.x, hud.lives.y, hud.lives.w, HUD_H);
+    this.heart(hud.lives.x + 24, midY(hud.lives) - 1, 10);
+    text(ctx, `× ${Math.max(0, this.lives)}`, hud.lives.x + 42, midY(hud.lives), { size: fit(20) });
+    hudPill(ctx, hud.world.x, hud.world.y, hud.world.w, HUD_H);
+    text(ctx, `WORLD ${worldLabel(this.levelNum)}`, hud.world.x + hud.world.w / 2, midY(hud.world), {
       size: fit(18),
       align: 'center',
     });
 
     // Banners sit in the open sky under the HUD, clear of the rows the hero plays in.
-    const sky = wy + HUD_H;
+    const sky = hud.bottom;
     const mid = this.insets.top * k + (this.vh - (this.insets.top + this.insets.bottom) * k) * 0.38;
     if (this.phase === 'play' && this.showBanner && this.bannerT < BANNER_TIME) {
       const t = this.bannerT / BANNER_TIME;

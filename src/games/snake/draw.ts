@@ -21,8 +21,14 @@ const DEATH_FLASH = '#fb7185';
 const FADE_STEPS = 8;
 /** How much darker the tail is than the body colour, as a blend toward black. */
 const TAIL_DIM = 0.35;
-/** Head radius on a touch layout, in cells: about 1.36 cells across, so the head reads on a small screen. */
-const TOUCH_HEAD_CELLS = 0.68;
+/**
+ * Head radius on a touch layout, in cells: 1.7 cells across. Landscape phones draw the board at about 0.8x,
+ * so this keeps the head at 8% or more of the short side of every phone stage.
+ */
+const TOUCH_HEAD_CELLS = 0.85;
+/** Body width in cells on desktop, and on a touch layout (a full cell, so the snake reads on a phone). */
+const BODY_CELLS = 0.78;
+const TOUCH_BODY_CELLS = 1;
 
 const HEX = /^#?([0-9a-f]{6})$/i;
 
@@ -185,13 +191,18 @@ export function appleBlinkedOff(apple: Apple, time: number): boolean {
   return apple.golden && apple.left < GOLDEN_BLINK_SEC && Math.floor(time * 10) % 2 === 0;
 }
 
+/** Width of the body stroke in logical px. A touch layout draws it a full cell wide (see TOUCH_BODY_CELLS). */
+export function bodyWidth(cell: number, thick: number, touch: boolean): number {
+  return cell * ((touch ? TOUCH_BODY_CELLS : BODY_CELLS) + 0.06 * thick);
+}
+
 /**
  * Radius of the snake's head in logical px. Desktop keeps the head at 70% of the body width. A touch layout
  * draws a larger head, so the character is easy to find on a phone. The head is drawn only: the snake still
  * moves, eats and crashes on whole cells.
  */
 export function headRadius(cell: number, thick: number, touch: boolean): number {
-  const r = cell * (0.78 + 0.06 * thick) * 0.7;
+  const r = bodyWidth(cell, thick, false) * 0.7;
   return touch ? Math.max(r, cell * TOUCH_HEAD_CELLS) : r;
 }
 
@@ -221,7 +232,7 @@ export function drawSnake(
 ): void {
   const { cell } = rect;
   const n = body.length;
-  const width = cell * (0.78 + 0.06 * look.thick);
+  const width = bodyWidth(cell, look.thick, look.touch);
   // The body fades toward the tail in a few steps: one stroke colour per step, from the cached shades.
   const shades = bodyShades(pal.body);
   const cx = (c: Cell): number => rect.x + (c.x + 0.5) * cell;

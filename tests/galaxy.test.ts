@@ -65,6 +65,8 @@ interface Probe {
   hpScale(): number;
   groupHover(): void;
   hudScale(): number;
+  shipScale(): number;
+  waveBannerT: number;
 }
 
 function probe(game: GameInstance): Probe {
@@ -357,10 +359,12 @@ describe('Galaxy War controls', () => {
     input.pointer.pressed = false;
     input.pointer.x = -200;
     step(game, input, 240);
-    expect(g.shipX).toBeCloseTo(26, 6);
+    // The wing tips reach 26 * cos(0.2) + 14 * sin(0.2) hull units at the steepest bank the ship draws.
+    const reach = 26 * Math.cos(0.2) + 14 * Math.sin(0.2);
+    expect(g.shipX).toBeCloseTo(reach, 6);
     input.pointer.x = 740;
     step(game, input, 240);
-    expect(g.shipX).toBeCloseTo(540 - 26, 6);
+    expect(g.shipX).toBeCloseTo(540 - reach, 6);
   });
 
   it('keeps a popup earned at the wall on the field', () => {
@@ -444,12 +448,18 @@ function hudRecorder(cssWidth: number): {
   const bombs: { x: number; y: number; r: number }[] = [];
   const base = mockCtx();
   (base as unknown as { canvas: unknown }).canvas = { clientWidth: cssWidth };
+  // Track the drawing scale in force (save / scale / restore), so sizes are in logical px as drawn.
+  let scale = 1;
+  const saved: number[] = [];
   const ctx = new Proxy(base, {
     get(target, key) {
+      if (key === 'save') return () => saved.push(scale);
+      if (key === 'restore') return () => (scale = saved.pop() ?? 1);
+      if (key === 'scale') return (sx: number) => (scale *= sx);
       if (key === 'fillText') {
         return () => {
           const m = /(\d+(?:\.\d+)?)px/.exec(target.font);
-          if (m) sizes.push(Number(m[1]));
+          if (m) sizes.push(Number(m[1]) * scale);
         };
       }
       if (key === 'arc') {
@@ -563,5 +573,53 @@ describe('Galaxy War phone layout', () => {
       }
     }
     expect(checked).toBeGreaterThan(100);
+  });
+
+  it('draws the ship at least 8% of the short side on a letterboxed landscape phone', () => {
+    // The hull is 52 units wide. Share = its CSS width / the stage's short side, as the shell lays it out.
+    const share = (cssWidth: number, stageW: number, stageH: number, w: number, h: number) => {
+      const ctx = mockCtx();
+      (ctx as unknown as { canvas: unknown }).canvas = {
+        clientWidth: cssWidth,
+        parentElement: { clientWidth: stageW, clientHeight: stageH },
+      };
+      const scale = probe(drawnRun({ width: w, height: h }, ctx)).shipScale();
+      return { scale, share: (52 * scale * (cssWidth / w)) / Math.min(stageW, stageH) };
+    };
+    // Landscape fallback: the 720 x 900 run is 288 / 312 / 344 CSS px wide on the 360 / 390 / 430 px stages.
+    for (const [name, cssW, stageW, stageH] of [
+      ['L1', 288, 688, 360],
+      ['L2', 312, 792, 390],
+      ['L3', 344, 880, 430],
+    ] as const) {
+      const r = share(cssW, stageW, stageH, 720, 900);
+      expect(r.share, name).toBeGreaterThanOrEqual(0.08);
+      expect(r.scale, name).toBeGreaterThan(1);
+    }
+    // The preferred portrait phone already shows the hull at about 9.6%: it keeps its design size.
+    expect(share(390, 390, 794, 540, 1098).scale).toBe(1);
+    // Desktop and tablet stages keep the design size.
+    expect(share(595, 1280, 744, 720, 900).scale).toBe(1);
+    expect(share(768, 1024, 712, 720, 900).scale).toBe(1);
+  });
+
+  it('keeps the wave banner subtitle at least 12 CSS px on the landscape fallback', () => {
+    for (const [w, h] of [
+      [740, 360],
+      [844, 390],
+      [932, 430],
+    ] as const) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const { ctx, sizes } = hudRecorder(size.width * scale);
+      const game = drawnRun(size, ctx);
+      probe(game).wave = 1;
+      probe(game).waveBannerT = 0.5;
+      game.render();
+      // Every text in the frame, the banner subtitle included, stays readable.
+      expect(sizes.length, `${w}x${h}`).toBeGreaterThan(0);
+      expect(Math.min(...sizes) * scale, `${w}x${h}`).toBeGreaterThanOrEqual(12);
+    }
   });
 });

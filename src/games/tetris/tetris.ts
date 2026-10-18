@@ -6,6 +6,7 @@ import { Board, COLS, HIDDEN_ROWS, ROWS } from './board';
 import {
   buildLook,
   cellCentre,
+  COMPACT_LABEL_PX,
   drawFlash,
   drawGhost,
   drawPanel,
@@ -16,6 +17,7 @@ import {
   type Look,
   type PanelSlots,
   panelSlots,
+  TEXT_MIN_CSS,
   type TetrisLayout,
   type Well,
 } from './draw';
@@ -66,12 +68,13 @@ const TETRIS_PX = 24;
 /** Rough width of a popup label in ems a character (the digits are the widest). It only keeps the text in the well. */
 const POPUP_EM_PER_CHAR = 0.65;
 
-/** The layout for one size, touch inset and preview flag, with the side panel's slots built from it. */
+/** The layout for one size, touch inset, preview flag and panel text size, with the side panel's slots built from it. */
 interface LayoutCache {
   readonly width: number;
   readonly height: number;
   readonly bottom: number;
   readonly preview: boolean;
+  readonly text: number;
   readonly layout: TetrisLayout;
   readonly slots: PanelSlots | null;
 }
@@ -100,8 +103,9 @@ function newPiece(kind: Kind): Piece {
 }
 
 /** Size of a score popup's text in a well of this cell size. Full size in the usual well, smaller in a small one. */
-function popupSize(cell: number, tetris: boolean): number {
-  return clamp(Math.round(cell * POPUP_CELL_SHARE), POPUP_MIN_PX, tetris ? TETRIS_PX : POPUP_PX);
+function popupSize(cell: number, tetris: boolean, minPx: number): number {
+  const top = Math.max(tetris ? TETRIS_PX : POPUP_PX, minPx);
+  return clamp(Math.round(cell * POPUP_CELL_SHARE), Math.max(POPUP_MIN_PX, minPx), top);
 }
 
 export class TetrisGame extends BaseGame {
@@ -143,8 +147,10 @@ export class TetrisGame extends BaseGame {
   private readonly touch: boolean;
   /** A finger on the well is dragging down far enough to soft drop this step. */
   private dragSoft = false;
-  /** The layout and panel slots, rebuilt only when the size, the touch inset or the preview flag changes. */
+  /** The layout and panel slots, rebuilt only when the size, the touch inset, the preview flag or the text size changes. */
   private cache: LayoutCache | null = null;
+  /** CSS px per logical px of the canvas on screen, read once a frame (1 until the canvas is measured). Drawing only. */
+  private cssScale = 1;
   /** The panel's contents, refreshed in place each frame. Stat lines are rebuilt only when a number changes. */
   private readonly hud: {
     hold: Kind | null;
@@ -184,6 +190,7 @@ export class TetrisGame extends BaseGame {
   render(): void {
     const ctx = this.ctx;
     const preview = this.services.preview === true;
+    this.measureScreen();
     const { layout, slots } = this.current();
     const { well } = layout;
     ctx.fillStyle = this.look.backdrop;
@@ -212,25 +219,47 @@ export class TetrisGame extends BaseGame {
     }
   }
 
-  /** Well and panel placement for the current size and touch inset, reused until one of them changes. */
+  /**
+   * Reads the on-screen scale once a frame: CSS px per logical px. A canvas that is not on screen (card art, tests)
+   * keeps the scale of 1, so the text keeps its usual size there.
+   */
+  private measureScreen(): void {
+    const canvas = this.ctx.canvas as HTMLCanvasElement | undefined;
+    const box = canvas?.getBoundingClientRect?.();
+    if (!box || box.width <= 0 || this.W <= 0) return;
+    this.cssScale = box.width / this.W;
+  }
+
+  /**
+   * Smallest text the game keeps, in logical px at the current scale: TEXT_MIN_CSS on screen. Where the canvas is
+   * scaled down (a turned phone, or a portrait phone running the game anyway) the panel text and popups grow to keep it.
+   */
+  private minTextPx(): number {
+    return Math.ceil(TEXT_MIN_CSS / this.cssScale);
+  }
+
+  /** Well and panel placement for the current size, touch inset, preview flag and text size, reused until one changes. */
   private current(): LayoutCache {
     const { W, H } = this;
     const bottom = this.insets.bottom;
     const preview = this.services.preview === true;
+    const text = Math.max(COMPACT_LABEL_PX, this.minTextPx());
     let cache = this.cache;
     if (
       !cache ||
       cache.width !== W ||
       cache.height !== H ||
       cache.bottom !== bottom ||
-      cache.preview !== preview
+      cache.preview !== preview ||
+      cache.text !== text
     ) {
-      const layout = layoutTetris(W, H, bottom, !preview, this.touch || bottom > 0);
+      const layout = layoutTetris(W, H, bottom, !preview, this.touch || bottom > 0, text);
       cache = {
         width: W,
         height: H,
         bottom,
         preview,
+        text,
         layout,
         slots: layout.panel ? panelSlots(layout.panel) : null,
       };
@@ -451,7 +480,7 @@ export class TetrisGame extends BaseGame {
     this.shake.add(0.35);
     this.audio.play('bump');
     const at = cellCentre(well, Math.floor(COLS / 2), HIDDEN_ROWS);
-    this.texts.add(at.x, at.y, 'GUARDIAN!', '#67e8f9', 20, 1.2);
+    this.texts.add(at.x, at.y, 'GUARDIAN!', '#67e8f9', Math.max(20, this.minTextPx()), 1.2);
     return true;
   }
 
@@ -480,7 +509,7 @@ export class TetrisGame extends BaseGame {
     this.popupSlot = (this.popupSlot + 1) % POPUP_COLUMNS.length;
     const tetris = n === TETRIS_LINES;
     const label = tetris ? 'TETRIS!' : `+${points}`;
-    const size = popupSize(well.cell, tetris);
+    const size = popupSize(well.cell, tetris, this.minTextPx());
     // The text is centred on its column, so it moves in where it would run past either side of the well.
     const half = (label.length * POPUP_EM_PER_CHAR * size) / 2;
     const at = cellCentre(well, column, rows[0] ?? 0);

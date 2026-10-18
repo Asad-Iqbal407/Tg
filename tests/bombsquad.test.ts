@@ -10,9 +10,11 @@ import {
   COMPACT_HUD_PX,
   COMPACT_PLAYER_SCALE,
   drawScene,
+  hudTextPx,
   PLAYER_HEIGHT_TILES,
   type Palette,
   type SceneView,
+  tileForCharacters,
 } from '../src/games/bombsquad/render';
 import type { Bomb, Bot, BotKind, Explosion, Item, Player } from '../src/games/bombsquad/types';
 import { BOT_TOUCH_GRACE, FUSE, LIVES, WALKER_SPEED } from '../src/games/bombsquad/types';
@@ -36,7 +38,7 @@ interface Internals {
   spawnTimer: number;
   wave: number;
   lives: number;
-  layout(): { ts: number; ox: number; oy: number };
+  layout(): { ts: number; ox: number; oy: number; clip?: { x: number; y: number; w: number; h: number } };
   addBomb(owner: Bomb['owner'], tx: number, ty: number, power: number, fuse: number): void;
 }
 
@@ -498,6 +500,7 @@ describe('rendering', () => {
       ammo: 0,
       ammoMax: 1,
       compact: false,
+      hudPx: COMPACT_HUD_PX,
     };
     drawScene(ctx, view);
     return fills;
@@ -971,3 +974,91 @@ function phoneRun(
   const button = Math.min(72, Math.max(48, 0.16 * Math.min(width, height)));
   return { size, scale, bottom: Math.ceil((button + 14) / scale) };
 }
+
+describe('phone zoom and text', () => {
+  const def = gameById('bombsquad');
+
+  /**
+   * A run drawn on a canvas scaled to `scale` CSS px per logical px, inside a play stage of `stage` CSS px, as a phone
+   * draws it under touch controls. Returns the run and the font size of every text draw in one frame.
+   */
+  function screenRun(
+    width: number,
+    height: number,
+    scale: number,
+    stage: { w: number; h: number },
+  ): { game: GameInstance; fonts: number[] } {
+    const fonts: number[] = [];
+    const ctx = new Proxy(mockCtx(), {
+      set(target, key, value) {
+        if (key === 'font') fonts.push(Number(/(\d+)px/.exec(String(value))?.[1]));
+        return Reflect.set(target, key, value);
+      },
+    });
+    Object.assign(ctx, {
+      canvas: {
+        getBoundingClientRect: () => ({ width: width * scale, height: height * scale }),
+        parentElement: { getBoundingClientRect: () => ({ width: stage.w, height: stage.h }) },
+      },
+    });
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    let game: GameInstance;
+    try {
+      game = def.create({
+        ctx,
+        width,
+        height,
+        input: new Input(),
+        audio: new NullAudio(),
+        rng: new Rng(1),
+        loadout: { skin: toSkinData(defaultSkin(def.id)), boosts: new Set(), powerDuration: 1 },
+        insets: NO_INSETS,
+        reducedMotion: false,
+        haptic: () => undefined,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    game.render();
+    return { game, fonts };
+  }
+
+  it('finds the smallest tile at which the character and a walker reach 8% of a 390 px stage side', () => {
+    expect(tileForCharacters(390, 0.4875)).toBe(74);
+    expect(tileForCharacters(0, 0.4875)).toBe(0);
+  });
+
+  it('zooms the arena in on a portrait phone, so the character and a walker are at least 8% of the short side', () => {
+    const { game } = screenRun(800, 760, 0.4875, { w: 390, h: 788 });
+    const { ts } = internals(game).layout();
+    expect((PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * ts * 0.4875) / 390).toBeGreaterThanOrEqual(0.08);
+    expect((0.6 * COMPACT_BOT_SCALE * ts * 0.4875) / 390).toBeGreaterThanOrEqual(0.08);
+  });
+
+  it('keeps the HUD text at least 12 CSS px at a portrait phone scale and at a turned phone under the controls', () => {
+    for (const scale of [0.4875, 0.5133]) {
+      const { fonts } = screenRun(800, 760, scale, { w: 390, h: 788 });
+      expect(Math.min(...fonts) * scale, `scale ${scale}`).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('runs the camera on the player when the zoomed arena is larger than its room, and clips it to the room', () => {
+    const { game } = screenRun(800, 760, 0.4875, { w: 390, h: 788 });
+    const i = internals(game);
+    const lay = i.layout();
+    const clip = lay.clip;
+    expect(clip).toBeDefined();
+    if (!clip) return;
+    const playerX = lay.ox + i.player.x * lay.ts;
+    expect(playerX).toBeGreaterThanOrEqual(clip.x);
+    expect(playerX).toBeLessThanOrEqual(clip.x + clip.w);
+    // The arena still covers the room at its far edge.
+    expect(lay.ox + i.arena.cols * lay.ts).toBeGreaterThanOrEqual(clip.x + clip.w);
+  });
+
+  it('keeps the usual HUD text on a landscape phone and on a desktop', () => {
+    expect(hudTextPx(0.6)).toBe(COMPACT_HUD_PX);
+    expect(hudTextPx(0.93)).toBe(COMPACT_HUD_PX);
+    expect(hudTextPx(0)).toBe(COMPACT_HUD_PX);
+  });
+});

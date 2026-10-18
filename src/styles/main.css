@@ -2366,16 +2366,22 @@ body.is-playing .toast__text span {
   input[type='range'] {
     min-height: 44px;
   }
+  /* Off-screen until it takes keyboard focus; once shown it is a link like any other. */
+  .skip-link {
+    min-height: 44px;
+  }
   /* Inline text links: a taller and wider hit area that leaves the line's layout as it was. */
   .link {
     padding: 12px 14px;
     margin: -12px -14px;
   }
-  /* The switch's own box is 48 by 28 px; this extends its hit area to 60 by 44 px without moving it. */
+  /* The switch's own box is 48 by 28 px with a 1 px border. An absolute child is placed from the padding
+     edge inside that border, so these insets give 8 px above and below and 6 px to each side: a 60 by 44 px
+     hit area, with the switch itself where it was. */
   .switch::before {
     content: '';
     position: absolute;
-    inset: -8px -6px;
+    inset: -9px -7px;
   }
   .small,
   small,
@@ -2392,6 +2398,7 @@ body.is-playing .toast__text span {
   .mini-stat span,
   .achievement__reward,
   .daily-card__text span,
+  .effects,
   .unlock span,
   .toast__text span,
   .board th,
@@ -2400,10 +2407,19 @@ body.is-playing .toast__text span {
   kbd {
     font-size: 0.875rem;
   }
-  /* Six labels share a 360 px bar, so the bottom navigation stays at 12 px. */
+  /* Six labels fit a 360 px bar at 14 px (one line each), so the bottom navigation takes the menu size. */
   .tabbar__link,
   .tabbar__badge {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
+  }
+  /* Toasts raised during play shrink to one line in the header; their text keeps the menu size. */
+  body.is-playing .toast,
+  body.is-playing .toast__text span {
+    font-size: 0.875rem;
+  }
+  /* The rotate hint is a prompt on touch screens, so its text takes the menu size too. */
+  .rotate-hint {
+    font-size: 0.875rem;
   }
 }
 

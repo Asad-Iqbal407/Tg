@@ -80,6 +80,8 @@ const CHIP_W = 150;
  */
 const TOUCH_TEXT = 1.4;
 const TOUCH_PILLS = 1.15;
+/** Logical px kept between the bottom of the HUD block and the top of the playfield. */
+const HUD_CLEARANCE = 4;
 
 interface HudLayout {
   /** Text and pill height scale. */
@@ -103,11 +105,23 @@ export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: 
   const row = 2 * HUD_EDGE + k * (FUEL_W + COIN_W + SPEED_W + DIST_W + gaps * HUD_GAP) + (shield ? ph : 0);
   const stacked = row > W;
   const chipH = 26 * s;
-  // One row: the next-fuel chip sits under the fuel pill. Two rows: the chip sits under the second row.
+  // One row: the next-fuel chip sits under the fuel pill, and the score line under the distance pill
+  // (its text is centred 16 s below the pill, so its lower edge is about 8 s further down).
+  // Two rows: the chip sits under the second row.
   const bottom = stacked
     ? top + ph + 8 * s + ph + 6 * s + chipH
-    : Math.max(top + ph + 6 * s + chipH, top + ph + 16 * s + 21 * s);
+    : Math.max(top + ph + 6 * s + chipH, top + ph + 24 * s);
   return { s, k, ph, stacked, bottom };
+}
+
+/**
+ * Top of the playfield in logical px, below the HUD. A one-row desktop HUD keeps its original 80 px. Touch and
+ * two-row layouts start just under the lowest HUD element, the next-fuel chip, which is drawn almost all the time.
+ */
+export function playfieldTop(W: number, touch: boolean, shield: boolean, insetTop: number): number {
+  const lay = hudLayout(W, touch, shield, insetTop);
+  if (!touch && !lay.stacked) return insetTop + 80;
+  return lay.bottom + HUD_CLEARANCE;
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -604,11 +618,9 @@ export class HillGame extends BaseGame {
 
   // ------------------------------------------------------------------ camera & effects
 
-  /** Top of the playfield, below the HUD. A one-row desktop HUD keeps its original 80 px. */
+  /** Top of the playfield, below the HUD (see playfieldTop). */
   private hudTop(): number {
-    const lay = hudLayout(this.W, this.touchUi, this.shield, this.insets.top);
-    if (!this.touchUi && !lay.stacked) return this.insets.top + 80;
-    return lay.bottom + 8;
+    return playfieldTop(this.W, this.touchUi, this.shield, this.insets.top);
   }
 
   private snapCamera(): void {

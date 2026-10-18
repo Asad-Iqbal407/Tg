@@ -86,12 +86,19 @@ interface BarLayout {
 }
 
 const HOLE_LIFE = 0.4;
+/**
+ * Logical px the bottom bar's contents take at HUD scale 1: four shells, a six-figure score and the ten-duck
+ * tracker at its minimum spacing.
+ */
+const BAR_WIDTH = 540;
 /** Status pill widths (logical px at HUD scale 1). */
 const PILL = { power: 210, guardian: 140, combo: 118, gap: 8 } as const;
 /** Zig-zag ducks climb or dive at this angle (radians) from the horizontal. */
 const ZIGZAG_ANGLE = 0.55;
 /** Minimum horizontal gap between ducks of the same wave when they take off. */
 const MIN_SPAWN_GAP = 110;
+/** Ducks turn back this far (logical px) from either side of the field. */
+const WALL_MARGIN = 34;
 /** Seconds between ambient quacks while ducks are in the air. */
 const QUACK_EVERY = 2.2;
 
@@ -244,8 +251,11 @@ export class DuckGame extends BaseGame {
     let x = this.rng.range(lo, hi);
     // Keep wave-mates apart at take-off (no extra RNG draws, so seeds play the same).
     for (const other of this.ducks) {
-      if (Math.abs(other.x - x) < MIN_SPAWN_GAP)
-        x = x + MIN_SPAWN_GAP * 2 > hi ? x - MIN_SPAWN_GAP * 2 : x + MIN_SPAWN_GAP * 2;
+      if (Math.abs(other.x - x) < MIN_SPAWN_GAP) {
+        const shifted = x + MIN_SPAWN_GAP * 2 > hi ? x - MIN_SPAWN_GAP * 2 : x + MIN_SPAWN_GAP * 2;
+        // A narrow field cannot keep the gap on both sides: stay on the field, not past a wall.
+        x = clamp(shifted, WALL_MARGIN, this.W - WALL_MARGIN);
+      }
     }
     const y = this.grassTop + 30;
     return {
@@ -287,8 +297,9 @@ export class DuckGame extends BaseGame {
     this.updateDogVoice();
 
     const ptr = this.input.pointer;
-    // Presses off the canvas (letterbox bars) never fire.
-    const ptrPress = ptr.pressed && ptr.inside;
+    // The pointer area decides which presses count. This game takes presses on the whole play stage, so a
+    // tap on a letterbox bar fires too, at the nearest point of the field (the aim is clamped below).
+    const ptrPress = ptr.pressed;
     const fire = ptrPress || this.input.wasPressed('primary');
     this.updateAim(dt, ptrPress);
     const slow = this.powers.slowmo > 0 ? SLOWMO_SCALE : 1;
@@ -331,8 +342,10 @@ export class DuckGame extends BaseGame {
 
   private updateAim(dt: number, ptrPress: boolean): void {
     const ptr = this.input.pointer;
-    // The pointer steers whenever it moves or presses; keys take over until it does again.
-    if (ptr.active && (ptrPress || ptr.x !== this.lastPtrX || ptr.y !== this.lastPtrY)) {
+    // The pointer steers whenever it presses, or moves over the field (a held pointer also steers out over
+    // the bars). A hover over a bar leaves the aim where it was; keys take over until the pointer moves again.
+    const moved = ptr.x !== this.lastPtrX || ptr.y !== this.lastPtrY;
+    if (ptr.active && (ptrPress || (moved && (ptr.inside || ptr.down)))) {
       this.aimByKeys = false;
       this.touchAim = ptr.touch;
       this.aimX = ptr.x;
@@ -594,8 +607,8 @@ export class DuckGame extends BaseGame {
     }
     d.x += d.vx * dt;
     d.y += d.vy * dt;
-    if (d.x < 34 && d.vx < 0) d.vx = -d.vx;
-    if (d.x > this.W - 34 && d.vx > 0) d.vx = -d.vx;
+    if (d.x < WALL_MARGIN && d.vx < 0) d.vx = -d.vx;
+    if (d.x > this.W - WALL_MARGIN && d.vx > 0) d.vx = -d.vx;
     if (d.y < 44 && d.vy < 0) d.vy = -d.vy;
     if (!emerging && d.y > this.grassTop - 50 && d.vy > 0) d.vy = -Math.abs(d.vy);
   }
@@ -899,10 +912,12 @@ export class DuckGame extends BaseGame {
 
   /**
    * Extra HUD size on small screens. A phone draws the canvas at few CSS px per logical px, so the
-   * text needs more logical px to stay readable.
+   * text needs more logical px to stay readable. A narrow field leaves the bottom bar less room, so the
+   * scale stops where the bar's widest contents would run past its edges.
    */
   private phoneScale(): number {
-    return clamp(0.8 / this.cssPerLogical(), 1, 1.2);
+    const room = (this.W - 20 - this.insets.left - this.insets.right) / BAR_WIDTH;
+    return Math.min(clamp(0.8 / this.cssPerLogical(), 1, 1.2), room);
   }
 
   /** Bottom HUD bar: anchored to the canvas edges and lifted above the bottom inset. */

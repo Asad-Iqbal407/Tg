@@ -12,10 +12,12 @@ export const duckGame: GameDefinition = {
   width: 960,
   height: 540,
   // Wider screens show more sky; the flight band, scenery and HUD all follow the width. The floor
-  // keeps ducks large on a narrow canvas (portrait phones, tablets) and the HUD readable there.
-  viewport: { minWidth: 640, maxWidth: 1280 },
+  // keeps ducks large on a narrow canvas (portrait phones, tablets); the HUD scales down to fit it.
+  viewport: { minWidth: 480, maxWidth: 1280 },
   // The sky is wide and the ducks cross it, so a portrait phone is asked to rotate.
   orientation: 'landscape',
+  // Taps on the letterbox bars aim and shoot too: on a phone the sky can be letterboxed to a narrow band.
+  pointerArea: 'stage',
   accent: '#7CFC00',
   gradient: ['#4caf50', '#1b5e20'],
   controls: [

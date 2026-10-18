@@ -212,6 +212,18 @@ const BOSS_RAM_PAD = 8;
 const SHIP_HIT = 6;
 /** Mouse steering keeps the ship this far above the cursor so the cursor never covers it. */
 const MOUSE_LIFT = 60;
+/** Steepest bank tilt the ship is drawn at, in radians (the bank runs from -1 to 1). */
+const BANK_TILT = 0.2;
+/** On a phone the hull is drawn at least this share of the stage's short side (the 8% floor, with margin). */
+const SHIP_MIN_SHARE = 0.09;
+/** Largest hull scale used to reach that share on a small stage. */
+const SHIP_MAX_SCALE = 2;
+/** A stage with a shorter side than this (CSS px) is a phone, as the shell counts them. */
+const PHONE_SHORT_CSS = 600;
+/** Subtitle size of the shared wave banner (logical px); the banner caps it at this value. */
+const BANNER_SUBTITLE = 24;
+/** The wave banner's subtitle is at least this tall on screen (CSS px). */
+const BANNER_MIN_CSS = 12.5;
 
 /** Pick the ship hull for a skin style. */
 function shipHull(style: number): readonly Point[] {
@@ -219,6 +231,18 @@ function shipHull(style: number): readonly Point[] {
   if (style === 2) return SHIP_TITAN;
   if (style === 3) return SHIP_PHANTOM;
   return SHIP_HULL;
+}
+
+/**
+ * Half the width a hull reaches at its steepest bank, in hull units. The steering clamp uses it, so a
+ * banked wing tip never leaves the field.
+ */
+function hullReach(hull: readonly Point[]): number {
+  const c = Math.cos(BANK_TILT);
+  const s = Math.sin(BANK_TILT);
+  let reach = 0;
+  for (const [x, y] of hull) reach = Math.max(reach, Math.abs(x * c - y * s), Math.abs(x * c + y * s));
+  return reach;
 }
 
 /** Fill and outline a closed polygon in the current transform. */
@@ -277,8 +301,10 @@ export class GalaxyGame extends BaseGame {
   private boss: Enemy | null = null;
   /** Hull scale for the Mothership: 1 on the narrowest layout, up to 1.33 on the widest. */
   private readonly bossScale: number;
-  /** Half the width of this skin's hull: the steering clamp, so no wing tip leaves the field. */
-  private readonly shipHalf: number;
+  /** This skin's hull, in hull units, and its full width and lowest point (for the sizing and clamps). */
+  private readonly hull: readonly Point[];
+  private readonly hullWidth: number;
+  private readonly hullBottom: number;
   private readonly bgGradient: CanvasGradient;
   /** Radial nebula gradients centred on the origin; drawn translated to each nebula's position. */
   private readonly nebulae: CanvasGradient[] = [];
@@ -294,7 +320,9 @@ export class GalaxyGame extends BaseGame {
     this.weapon = clamp(this.skinParam('weapon', 1) + (this.hasBoost('head-start') ? 2 : 0), 1, MAX_WEAPON);
     this.shield = this.hasBoost('shield');
     this.bossScale = clamp(this.W / 540, 1, 1.33);
-    this.shipHalf = Math.max(...shipHull(this.skinParam('style', 0)).map(([x]) => Math.abs(x)));
+    this.hull = shipHull(this.skinParam('style', 0));
+    this.hullWidth = 2 * Math.max(...this.hull.map(([x]) => Math.abs(x)));
+    this.hullBottom = Math.max(...this.hull.map(([, y]) => y));
     // Starfield is cosmetic: it draws from the forked RNG so gameplay randomness is untouched.
     for (let i = 0; i < 140; i++)
       this.stars.push({
@@ -335,11 +363,47 @@ export class GalaxyGame extends BaseGame {
    * when the canvas is not laid out (tests).
    */
   private hudScale(): number {
-    const css = (this.ctx.canvas as HTMLCanvasElement | undefined)?.clientWidth ?? 0;
+    const { perLogical } = this.screenPx();
     // The top row takes 316 HUD units (score pill, and a coin pill for up to four digits) plus 32 px
     // of margins and gap.
     const room = (this.W - 32 - this.insets.left - this.insets.right) / 316;
-    return css > 0 ? clamp(0.9 / (css / this.W), 1, Math.max(1, room)) : 1;
+    return perLogical > 0 ? clamp(0.9 / perLogical, 1, Math.max(1, room)) : 1;
+  }
+
+  /** CSS px per logical px, and the play stage's short side in CSS px, as laid out now (0 when unknown). */
+  private screenPx(): { perLogical: number; stageShort: number } {
+    const canvas = this.ctx.canvas as HTMLCanvasElement | undefined;
+    const css = canvas?.clientWidth ?? 0;
+    const stage = canvas?.parentElement;
+    return {
+      perLogical: css > 0 ? css / this.W : 0,
+      stageShort: stage ? Math.min(stage.clientWidth, stage.clientHeight) : 0,
+    };
+  }
+
+  /**
+   * Drawing scale of the ship. On a phone the canvas can be letterboxed small (the landscape fallback), so
+   * the hull is drawn larger, in logical units, until it is SHIP_MIN_SHARE of the stage's short side. Desktop
+   * and tablet stages keep the design size. The collision radius does not change.
+   */
+  private shipScale(): number {
+    const { perLogical, stageShort } = this.screenPx();
+    if (perLogical <= 0 || stageShort <= 0 || stageShort >= PHONE_SHORT_CSS) return 1;
+    return clamp((SHIP_MIN_SHARE * stageShort) / (this.hullWidth * perLogical), 1, SHIP_MAX_SCALE);
+  }
+
+  /**
+   * Lowest y the hull's bottom may reach: above the bottom HUD row, whose weapon pill tops out 48 HUD
+   * units above the bottom inset, with a 6-unit gap.
+   */
+  private hullFloor(): number {
+    return this.H - this.insets.bottom - 54 * this.hudScale();
+  }
+
+  /** Scale of the wave banner, so its subtitle stays at least BANNER_MIN_CSS CSS px tall. */
+  private bannerScale(): number {
+    const { perLogical } = this.screenPx();
+    return perLogical > 0 ? clamp(BANNER_MIN_CSS / (BANNER_SUBTITLE * perLogical), 1, 2) : 1;
   }
 
   /**
@@ -613,10 +677,13 @@ export class GalaxyGame extends BaseGame {
       this.shipX += ax * speed * dt;
       this.shipY += ay * speed * dt;
     }
-    // Keep the hull on the field, above the bottom HUD row and touch controls, and out of the top
-    // quarter so formations never spawn on top of it.
-    this.shipX = clamp(this.shipX, this.shipHalf, this.W - this.shipHalf);
-    this.shipY = clamp(this.shipY, this.H * 0.25, this.H - 96 - this.insets.bottom);
+    // Keep the whole hull on the field, wing tips included at the steepest bank, above the bottom HUD row
+    // and touch controls, and out of the top quarter so formations never spawn on top of it.
+    const s = this.shipScale();
+    const half = hullReach(this.hull) * s;
+    this.shipX = clamp(this.shipX, half, this.W - half);
+    const floor = Math.min(this.H - 96 - this.insets.bottom, this.hullFloor() - this.hullBottom * s);
+    this.shipY = clamp(this.shipY, this.H * 0.25, floor);
     if (dt > 0) this.bank += (clamp((this.shipX - prevX) / dt / 300, -1, 1) - this.bank) * damp(10, dt);
     this.invuln = Math.max(0, this.invuln - dt);
 
@@ -1216,17 +1283,19 @@ export class GalaxyGame extends BaseGame {
     const ctx = this.ctx;
     const body = this.skinColor('body', '#4dd9ff');
     const accent = this.skinColor('accent', '#ffffff');
-    const hull = shipHull(this.skinParam('style', 0));
+    const s = this.shipScale();
     // Engine glow, pulsing with the flame
     ctx.save();
-    ctx.translate(x, y + 26);
+    ctx.translate(x, y + 26 * s);
+    ctx.scale(s, s);
     ctx.globalAlpha = 0.6 + 0.4 * Math.sin(this.time * 40);
     ctx.fillStyle = this.engineGlow;
     ctx.fillRect(-30, -26, 60, 52);
     ctx.restore();
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(this.bank * 0.2);
+    ctx.rotate(this.bank * BANK_TILT);
+    ctx.scale(s, s);
     if (this.overdriveT > 0) {
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = `rgba(255,210,63,${0.14 + 0.08 * Math.sin(this.time * 14)})`;
@@ -1235,7 +1304,7 @@ export class GalaxyGame extends BaseGame {
       ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
     }
-    paintPolygon(ctx, hull, body, accent, 2);
+    paintPolygon(ctx, this.hull, body, accent, 2);
     ctx.fillStyle = '#0b1d3a';
     ctx.beginPath();
     ctx.ellipse(0, -6, 5, 10, 0, 0, TAU);
@@ -1249,7 +1318,7 @@ export class GalaxyGame extends BaseGame {
       ctx.strokeStyle = `rgba(120,200,255,${0.5 + 0.2 * Math.sin(this.time * 6)})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(x, y, 38, 0, TAU);
+      ctx.arc(x, y, 38 * s, 0, TAU);
       ctx.stroke();
       ctx.fillStyle = 'rgba(120,200,255,0.1)';
       ctx.fill();
@@ -1533,15 +1602,20 @@ export class GalaxyGame extends BaseGame {
     }
     if (this.waveBannerT < 2.2 && this.wave > 0) {
       const isBoss = this.wave % 5 === 0;
+      // The shared banner caps its subtitle, so on a small canvas the whole banner is drawn larger.
+      const m = this.bannerScale();
+      ctx.save();
+      ctx.scale(m, m);
       banner(
         ctx,
-        W,
-        this.H,
+        W / m,
+        this.H / m,
         isBoss ? 'WARNING!' : `WAVE ${this.wave}`,
         isBoss ? 'Mothership approaching' : 'Get ready',
         this.waveBannerT / 2.2,
         isBoss ? '#ff4d6d' : '#4dd9ff',
       );
+      ctx.restore();
     }
   }
 

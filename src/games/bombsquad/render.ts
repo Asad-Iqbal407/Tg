@@ -27,11 +27,23 @@ export interface Palette {
   floor2: string;
 }
 
-/** Logical px per tile and the screen position of tile (0, 0). */
+/** A rectangle in logical px. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Logical px per tile and the screen position of tile (0, 0). `clip` is set when the arena runs past its room
+ * (a zoomed phone view with the camera on the player): the arena is drawn inside it, under the HUD.
+ */
 export interface Layout {
   ts: number;
   ox: number;
   oy: number;
+  clip?: Rect;
 }
 
 export interface SceneView {
@@ -55,11 +67,42 @@ export interface SceneView {
   ammoMax: number;
   /** Touch controls are on: the game is drawn small on a phone, so the HUD text is set larger. */
   compact: boolean;
+  /** HUD text size under touch controls (logical px), from hudTextPx. */
+  hudPx: number;
 }
 
 const BG = '#0b1020';
 /** HUD text size under touch controls (logical px): at a phone's scale it stays at least 12 CSS px. */
 export const COMPACT_HUD_PX = 21;
+/** The smallest on-screen text, in CSS px, that the HUD and the floating labels keep. */
+export const MIN_TEXT_CSS = 12;
+/** The controlled character, and a walker, are each drawn at least this share of a phone's short side. */
+export const MIN_CHARACTER_SHARE = 0.08;
+/** A walker's diameter in tile units at the normal size (its radius is 0.3 tile). */
+const WALKER_TILES = 0.6;
+
+/**
+ * HUD text size (logical px) under touch controls. It is COMPACT_HUD_PX where the canvas is drawn at a phone's usual
+ * scale, and larger where the canvas is scaled down (a portrait phone running the game anyway, a turned phone under
+ * the controls), so the text stays at MIN_TEXT_CSS CSS px. `cssScale` is CSS px per logical px.
+ */
+export function hudTextPx(cssScale: number): number {
+  if (!(cssScale > 0)) return COMPACT_HUD_PX;
+  return Math.max(COMPACT_HUD_PX, Math.ceil(MIN_TEXT_CSS / cssScale));
+}
+
+/**
+ * The smallest tile (logical px) at which the controlled character and a walker are each at least MIN_CHARACTER_SHARE
+ * of the stage's short side. `stageShortCss` is that side in CSS px and `cssScale` is CSS px per logical px. Both sizes
+ * scale with the tile, so the zoom that meets the share is the same on any canvas size at a given stage.
+ */
+export function tileForCharacters(stageShortCss: number, cssScale: number): number {
+  if (!(stageShortCss > 0 && cssScale > 0)) return 0;
+  const need = (tallTiles: number) => (MIN_CHARACTER_SHARE * stageShortCss) / (tallTiles * cssScale);
+  return Math.ceil(
+    Math.max(need(PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE), need(WALKER_TILES * COMPACT_BOT_SCALE)),
+  );
+}
 /**
  * Bots are drawn this much larger under touch controls, so a walker is about 8% of a phone's short side (the bots'
  * collision size is unchanged).
@@ -93,6 +136,13 @@ export function drawScene(ctx: CanvasRenderingContext2D, v: SceneView): void {
   const cols = arena.cols;
   const rows = arena.rows;
 
+  // A zoomed arena runs past its room: it is drawn inside the room, so it never shows under the HUD or the controls.
+  if (lay.clip) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(lay.clip.x, lay.clip.y, lay.clip.w, lay.clip.h);
+    ctx.clip();
+  }
   fillRoundRect(ctx, ox - 6, oy - 6, cols * ts + 12, rows * ts + 12, 10, shade(v.palette.stone, -0.5));
   // Ground layer: floor, blast scorch and flames, pick-ups and shadows.
   drawFloor(ctx, v);
@@ -111,6 +161,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, v: SceneView): void {
     }
     drawRowEntities(ctx, v, row);
   }
+  if (lay.clip) ctx.restore();
 
   if (!v.preview) {
     drawHud(ctx, v);
@@ -505,6 +556,9 @@ function drawPlayer(ctx: CanvasRenderingContext2D, v: SceneView): void {
 function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
   const p = v.player;
   const big = v.compact;
+  // Under touch controls the text is hudPx (see hudTextPx), and the pills grow with it. At the usual size they are the
+  // pills they always were.
+  const px = big ? v.hudPx : COMPACT_HUD_PX;
   hudPill(ctx, 8, 6, 176, 44);
   for (let i = 0; i < LIVES; i++) drawHeart(ctx, 26 + i * 26, 22, 18, i < v.lives);
   // Ammo: small bombs (up to ten shown, then a count).
@@ -533,24 +587,25 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
   }
   if (v.ammoMax > shown)
     text(ctx, `+${v.ammoMax - shown}`, 24 + shown * 15, 41, {
-      size: big ? COMPACT_HUD_PX : 11,
+      size: big ? px : 11,
       color: '#e2e8f0',
     });
 
-  hudPill(ctx, v.W / 2 - 62, 6, 124, 36);
+  const waveW = big ? Math.round((124 * px) / COMPACT_HUD_PX) : 124;
+  hudPill(ctx, v.W / 2 - waveW / 2, 6, waveW, 36);
   text(ctx, `WAVE ${v.wave}`, v.W / 2, 24, {
-    size: big ? COMPACT_HUD_PX : 18,
+    size: big ? px : 18,
     align: 'center',
     color: '#fde68a',
   });
 
   // Under touch controls the score pill has two lines (score, then power-ups), each at the larger text size, set in
   // from the right so the rounded end of the pill keeps clear of them.
-  const pillW = big ? 224 : 188;
+  const pillW = big ? Math.round((224 * px) / COMPACT_HUD_PX) : 188;
   const right = v.W - (big ? 20 : 14);
-  hudPill(ctx, v.W - pillW - 8, 6, pillW, big ? 50 : 44);
-  text(ctx, formatNumber(v.score), right, big ? 20 : 22, {
-    size: big ? COMPACT_HUD_PX : 20,
+  hudPill(ctx, v.W - pillW - 8, 6, pillW, big ? 2 * px + 8 : 44);
+  text(ctx, formatNumber(v.score), right, big ? px - 1 : 22, {
+    size: big ? px : 20,
     align: 'right',
     color: '#ffffff',
   });
@@ -559,8 +614,8 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
   if (p.bombUps > 0) chips.push(`B${p.bombUps}`);
   if (p.speedUps > 0) chips.push(`S${p.speedUps}`);
   if (p.shielded) chips.push('SH');
-  text(ctx, chips.length > 0 ? chips.join('  ') : 'no power-ups', right, big ? 42 : 41, {
-    size: big ? COMPACT_HUD_PX : 12,
+  text(ctx, chips.length > 0 ? chips.join('  ') : 'no power-ups', right, big ? 2 * px : 41, {
+    size: big ? px : 12,
     align: 'right',
     weight: 700,
     color: chips.length > 0 ? '#bae6fd' : 'rgba(255,255,255,0.45)',

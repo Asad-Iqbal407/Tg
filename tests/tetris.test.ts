@@ -1312,3 +1312,55 @@ function fontsDrawn(coarsePointer: boolean): string[] {
   }
   return fonts;
 }
+
+describe('phone panel', () => {
+  it('gives the well the width a narrow touch panel leaves, so the playfield is about half a phone canvas', () => {
+    const { well, panel } = layoutTetris(540, 1036, 111, true);
+    if (!panel) throw new Error('no panel');
+    expect(panel.side).toBe(true);
+    expect(well.cell).toBeGreaterThanOrEqual(37);
+    expect((200 * well.cell * well.cell) / (540 * 1036)).toBeGreaterThanOrEqual(0.48);
+    expect(panel.x + panel.w).toBeLessThanOrEqual(540 - 16);
+  });
+
+  it('keeps the full side panel on desktop, where no touch band covers the canvas', () => {
+    const { well, panel } = layoutTetris(900, 800, 0, true, false);
+    if (!panel) throw new Error('no panel');
+    expect(panel.w).toBe(Math.floor(4.5 * well.cell));
+  });
+
+  it('draws the panel text at least 12 CSS px on a turned phone, where the canvas is scaled to 0.4874', () => {
+    const scale = 0.4874;
+    const fonts: string[] = [];
+    const ctx = new Proxy(mockCtx(), {
+      set(target, key, value) {
+        if (key === 'font') fonts.push(String(value));
+        return Reflect.set(target, key, value);
+      },
+    });
+    Object.assign(ctx, {
+      canvas: { getBoundingClientRect: () => ({ width: 900 * scale, height: 800 * scale }) },
+    });
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    try {
+      const game = tetrisGame.create({
+        ctx,
+        width: 900,
+        height: 800,
+        input: new Input(),
+        audio: new NullAudio(),
+        rng: new Rng(1),
+        loadout: { skin: toSkinData(defaultSkin('tetris')), boosts: new Set(), powerDuration: 1 },
+        insets: NO_INSETS,
+        reducedMotion: false,
+        haptic: () => undefined,
+      });
+      game.render();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const sizes = fonts.map((f) => Number(/(\d+)px/.exec(f)?.[1]));
+    expect(sizes.length).toBeGreaterThan(0);
+    expect(Math.min(...sizes) * scale).toBeGreaterThanOrEqual(12);
+  });
+});
