@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
-import { hudLayout, playfieldTop } from '../src/games/hill/hill';
+import { hudLayout, playfieldTop, speedPillWidth } from '../src/games/hill/hill';
 import { GAMES } from '../src/games/registry';
 
 /** Play-stage size (CSS px) for a browser window: a 52 px rail on short landscape screens, else a header. */
@@ -72,5 +72,15 @@ describe('hill layout', () => {
     expect(hudLayout(960, false, false, 0).stacked).toBe(false);
     expect(hudLayout(602, true, true, 0).stacked).toBe(true);
     expect(hudLayout(520, true, false, 0).stacked).toBe(true);
+  });
+
+  // Regression: the touch speed pill grew by 1.15 while its type grew by 1.4, so "km/h" ran past the pill's end.
+  it('fits a three-digit speed and its unit inside the speed pill, on touch and desktop', () => {
+    for (const touch of [true, false]) {
+      const { s } = hudLayout(960, touch, false, 0);
+      // Bold digits are about 0.62 em wide and "km/h" about 2.2 em; 14 s of padding at the end, 4 s between.
+      const needed = 3 * 0.62 * 22 * s + 4 * s + 2.2 * 13 * s + 14 * s + 10 * s;
+      expect(speedPillWidth(touch), String(touch)).toBeGreaterThanOrEqual(needed);
+    }
   });
 });

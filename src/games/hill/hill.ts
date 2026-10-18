@@ -2,7 +2,7 @@ import type { EngineSound } from '../../core/audio';
 import { FloatingTexts } from '../../core/fx';
 import { clamp, damp, lerp, TAU, wrapAngle } from '../../core/math';
 import { BaseGame } from '../base';
-import { drawCoin, fillRoundRect, hudPill, progressBar, text } from '../draw';
+import { drawCoin, fillRoundRect, FONT, hudPill, progressBar, text } from '../draw';
 import type { GameServices } from '../types';
 import { carStyle, type CarPaint, type CarPose, type CarStyle, drawCar, drawJerrycan } from './art';
 import { BIOME_M, biomeAt, biomeIndexAt, biomeSerial, lapAt, physicsAt } from './biomes';
@@ -65,6 +65,8 @@ const TIP_END = 2;
 const FLIP_SLACK = 0.95;
 const LAND_TOLERANCE = 0.6;
 const BANNER_TIME = 2.6;
+/** A fuel can this far (px) behind the car's centre has been passed and no longer counts as the next one. */
+const FUEL_PASSED_PX = 60;
 
 /** HUD pill sizes at the desktop scale, in logical px. */
 const HUD_EDGE = 14;
@@ -95,6 +97,14 @@ interface HudLayout {
   bottom: number;
 }
 
+/**
+ * Width of the speed pill. It grows with the text scale (not just the pill scale), so a three-digit speed and its
+ * "km/h" unit fit inside the pill at the larger touch type.
+ */
+export function speedPillWidth(touch: boolean): number {
+  return SPEED_W * (touch ? TOUCH_TEXT : 1);
+}
+
 /** Layout for a canvas `W` wide: one row of pills when they fit, two rows when they do not. */
 export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: number): HudLayout {
   const s = touch ? TOUCH_TEXT : 1;
@@ -102,7 +112,8 @@ export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: 
   const ph = 44 * s;
   const top = HUD_EDGE + insetTop;
   const gaps = shield ? 4 : 3;
-  const row = 2 * HUD_EDGE + k * (FUEL_W + COIN_W + SPEED_W + DIST_W + gaps * HUD_GAP) + (shield ? ph : 0);
+  const row =
+    2 * HUD_EDGE + k * (FUEL_W + COIN_W + DIST_W + gaps * HUD_GAP) + speedPillWidth(touch) + (shield ? ph : 0);
   const stacked = row > W;
   const chipH = 26 * s;
   // One row: the next-fuel chip sits under the fuel pill, and the score line under the distance pill
@@ -569,6 +580,7 @@ export class HillGame extends BaseGame {
 
   private collectPickups(): void {
     if (this.crashed) return;
+    const carX = this.car.center().x;
     let nextFuel = Infinity;
     for (const pk of this.pickups) {
       if (pk.taken) continue;
@@ -583,7 +595,8 @@ export class HillGame extends BaseGame {
         }
       }
       if (!hit) {
-        if (pk.kind === 'fuel') nextFuel = Math.min(nextFuel, pk.x);
+        // Only cans still ahead count for the "next fuel" chip; one the car has passed is left behind.
+        if (pk.kind === 'fuel' && pk.x > carX - FUEL_PASSED_PX) nextFuel = Math.min(nextFuel, pk.x);
         continue;
       }
       pk.taken = true;
@@ -906,14 +919,18 @@ export class HillGame extends BaseGame {
     }
     // Speed
     const kmh = Math.round((this.car.speed() / PX_PER_M) * 3.6);
-    const spW = SPEED_W * k;
+    const spW = speedPillWidth(this.touchUi);
     const spRight = stacked ? right - 124 * s - HUD_GAP * k : right - distW - HUD_GAP * k;
     const spX = spRight - spW;
     const spY = stacked ? row2 : top;
     const spCy = spY + ph / 2;
     hudPill(ctx, spX, spY, spW, ph);
-    text(ctx, `${kmh}`, spX + 58 * k, spCy + 1, { size: 22 * s, align: 'right' });
-    text(ctx, 'km/h', spX + 62 * k, spCy + 3 * s, { size: 13 * s, color: '#aab', weight: 600 });
+    // The unit sits at the pill's right end and the number right-aligns against it, so neither leaves the pill.
+    const unitRight = spX + spW - 14 * s;
+    ctx.font = `600 ${13 * s}px ${FONT}`;
+    const unitW = Math.max(ctx.measureText('km/h').width, 13 * s * 2.2);
+    text(ctx, 'km/h', unitRight, spCy + 3 * s, { size: 13 * s, color: '#aab', weight: 600, align: 'right' });
+    text(ctx, `${kmh}`, unitRight - unitW - 4 * s, spCy + 1, { size: 22 * s, align: 'right' });
 
     const bannerY = Math.max(this.hudTop() + 30, this.H * 0.24);
     if (this.crashed && this.crashReason) {
@@ -937,7 +954,7 @@ export class HillGame extends BaseGame {
       ctx.save();
       ctx.globalAlpha = clamp(a, 0, 1);
       const y = this.H - ins.bottom - 34 * s;
-      ctx.font = `700 ${16 * s}px system-ui, sans-serif`;
+      ctx.font = `700 ${16 * s}px ${FONT}`;
       const w = Math.min(this.W - 40, 520 * s);
       // Shrink the line on narrow canvases so it stays inside its pill.
       const fit = Math.min(1, (w - 32 * s) / Math.max(1, ctx.measureText(this.hint).width));

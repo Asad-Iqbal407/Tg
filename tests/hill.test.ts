@@ -341,6 +341,25 @@ describe('Hill Rider terrain and biomes', () => {
   });
 });
 
+describe('Hill Rider fuel cans', () => {
+  // Regression: a can the car drove past stayed the "next" can, so the chip read "next 0 m" until it was pruned.
+  it('counts only cans still ahead of the car for the next-fuel distance', () => {
+    const { game } = createGame(hillDef, { seed: 2 });
+    const hill = game as HillGame;
+    const g = hill as unknown as {
+      pickups: { kind: 'coin' | 'fuel'; value: number; x: number; y: number; taken: boolean }[];
+      nextFuelX: number;
+    };
+    const x = hill.probe().x;
+    g.pickups = [
+      { kind: 'fuel', value: 0, x: x - 400, y: -5000, taken: false },
+      { kind: 'fuel', value: 0, x: x + 1500, y: -5000, taken: false },
+    ];
+    game.update(DT);
+    expect(g.nextFuelX).toBe(x + 1500);
+  });
+});
+
 describe('Hill Rider rendering', () => {
   it('renders at the corners of the viewport range, with touch insets', () => {
     const insets: Insets = { top: 0, right: 0, bottom: 120, left: 0 };

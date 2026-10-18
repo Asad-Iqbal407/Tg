@@ -5,7 +5,7 @@ it('flips', () => {
   const out: string[] = [];
   for (const skinId of ['car-jeep', 'car-monster', 'car-racer', 'car-rover']) for (let seed = 1; seed <= 6; seed++) {
     let lost = 0, awarded = 0, prevPending = 0, prevFlips = 0, overwritten = 0;
-    const run = runBot({ seed, skinId, mode: 'spin', seconds: 200, trace: (_p, _s, _w, g) => {
+    const run = runBot({ seed, skinId, mode: 'flip', seconds: 200, trace: (_p, _s, _w, g) => {
       const gi = g as unknown as { pendingFlips: number; stats: Record<string, number>; landT: number };
       const flips = gi.stats['flips'] ?? 0;
       if (flips > prevFlips) awarded += flips - prevFlips;
