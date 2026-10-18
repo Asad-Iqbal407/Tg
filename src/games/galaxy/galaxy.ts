@@ -224,6 +224,11 @@ const PHONE_SHORT_CSS = 600;
 const BANNER_SUBTITLE = 24;
 /** The wave banner's subtitle is at least this tall on screen (CSS px). */
 const BANNER_MIN_CSS = 12.5;
+/** A popup lands above any other popup shown this recently at the same spot. */
+const POPUP_STACK_SEC = 0.35;
+/** Drop box size and label size (logical px at world scale 1). */
+const DROP_BOX = 28;
+const DROP_LABEL = 20;
 
 /** Pick the ship hull for a skin style. */
 function shipHull(style: number): readonly Point[] {
@@ -289,6 +294,8 @@ export class GalaxyGame extends BaseGame {
   private chain = 0;
   private chainT = 0;
   private bombFlash = 0;
+  /** Popups shown in the last POPUP_STACK_SEC seconds, so new ones nearby stack above them. */
+  private recentPopups: { x: number; y: number; h: number; t: number }[] = [];
   private dead = false;
   private enemies: Enemy[] = [];
   private shots: Bullet[] = [];
@@ -415,7 +422,15 @@ export class GalaxyGame extends BaseGame {
     // About 0.8 em per glyph covers the widest capitals and the popup's grow-in scale.
     const half = label.length * 0.4 * size * k;
     const px = clamp(x, Math.min(half + 4, this.W / 2), Math.max(this.W - half - 4, this.W / 2));
-    this.texts.add(px, y, label, color, size * k);
+    // Popups earned together at one spot (two kills from one volley) stack instead of printing over each other.
+    let py = y;
+    for (const p of this.recentPopups) {
+      if (this.time - p.t < POPUP_STACK_SEC && Math.abs(p.x - px) < 60 && Math.abs(p.y - py) < p.h)
+        py = p.y - p.h;
+    }
+    this.recentPopups = this.recentPopups.filter((p) => this.time - p.t < POPUP_STACK_SEC);
+    this.recentPopups.push({ x: px, y: py, h: size * k * 1.1, t: this.time });
+    this.texts.add(px, py, label, color, size * k);
   }
 
   private hpScale(): number {
@@ -436,10 +451,6 @@ export class GalaxyGame extends BaseGame {
   private fireInterval(): number {
     const base = this.weapon >= 5 ? 0.09 : this.weapon >= 3 ? 0.11 : 0.13;
     return this.overdriveT > 0 ? base * 0.65 : base;
-  }
-
-  private inField(x: number, y: number): boolean {
-    return x >= 0 && x <= this.W && y >= 0 && y <= this.H;
   }
 
   /** Whether a circle of radius `rad` at (x, y) touches enemy `e`'s hit shape. */
@@ -554,15 +565,17 @@ export class GalaxyGame extends BaseGame {
       const e = this.makeEnemy('scout', 'curve', fromLeft ? -40 : this.W + 40, 120);
       const s = fromLeft ? 1 : -1;
       const cx = this.W / 2;
+      // The swoop's depth follows the field height, so a short field is not swept down onto the ship.
+      const b = this.band();
       e.c = [
         cx - s * (this.W / 2 + 40),
-        80,
+        80 * b,
         cx - s * 50,
-        700,
+        700 * b,
         cx + s * 120,
-        -100,
+        -100 * b,
         cx + s * (this.W / 2 + 60),
-        500,
+        500 * b,
       ];
       e.dur = 4.2;
       e.t = -i * 0.28;
@@ -657,9 +670,11 @@ export class GalaxyGame extends BaseGame {
         if (!this.touchDrag) this.touchDrag = { dx: this.shipX - ptr.x, dy: this.shipY - ptr.y };
         target = { x: ptr.x + this.touchDrag.dx, y: ptr.y + this.touchDrag.dy, rate: 24 };
       }
-    } else if (ptr.active && ptr.inside && this.inField(ptr.x, ptr.y)) {
-      // Mouse: hover just above the cursor, so the pointer never covers the ship.
-      target = { x: ptr.x, y: ptr.y - MOUSE_LIFT, rate: 14 };
+    } else if (ptr.active) {
+      // Mouse: hover just above the cursor, so the pointer never covers the ship. Over a letterbox bar the
+      // ship heads for the nearest point of the field, so a fast swing past the edge reaches the wall
+      // instead of stopping short. The pointer turns inactive once it leaves the play stage.
+      target = { x: clamp(ptr.x, 0, this.W), y: clamp(ptr.y, 0, this.H) - MOUSE_LIFT, rate: 14 };
     }
 
     if (target) {
@@ -1498,19 +1513,22 @@ export class GalaxyGame extends BaseGame {
   private drawDrop(d: Drop): void {
     const ctx = this.ctx;
     if (d.kind === 'coin') {
-      drawCoin(ctx, d.x, d.y, 10, Math.cos(this.time * 6 + d.x));
+      drawCoin(ctx, d.x, d.y, 10 * this.shipScale(), Math.cos(this.time * 6 + d.x));
       return;
     }
     const color = d.kind === 'power' ? '#4dd9ff' : d.kind === 'bomb' ? '#ff9f1c' : '#7cf';
     const label = d.kind === 'power' ? 'P' : d.kind === 'bomb' ? 'B' : 'S';
+    // Pickups grow with the ship on a small phone stage, so the box and its letter stay readable.
+    const k = this.shipScale();
+    const half = (DROP_BOX / 2) * k;
     ctx.save();
     ctx.translate(d.x, d.y);
     ctx.rotate(Math.sin(this.time * 3) * 0.3);
-    fillRoundRect(ctx, -14, -14, 28, 28, 7, color);
+    fillRoundRect(ctx, -half, -half, 2 * half, 2 * half, 7 * k, color);
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
-    ctx.strokeRect(-11, -11, 22, 22);
-    text(ctx, label, 0, 1, { size: 18, align: 'center', color: '#0b1d3a', stroke: null });
+    ctx.strokeRect(-half + 3 * k, -half + 3 * k, 2 * half - 6 * k, 2 * half - 6 * k);
+    text(ctx, label, 0, k, { size: DROP_LABEL * k, align: 'center', color: '#0b1d3a', stroke: null });
     ctx.restore();
   }
 

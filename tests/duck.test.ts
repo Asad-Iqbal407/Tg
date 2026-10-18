@@ -634,6 +634,28 @@ describe('Duck Season round transitions', () => {
     expect(g.phase).toBe('over');
   });
 
+  it('words the skip prompt for the device: tap on touch, click with a mouse', () => {
+    for (const touch of [true, false]) {
+      const said: string[] = [];
+      const ctx = new Proxy(mockCtx(), {
+        get(target, key) {
+          if (key === 'fillText') return (t: string) => said.push(String(t));
+          return Reflect.get(target, key);
+        },
+      });
+      const { g, input } = make({ ctx });
+      failRound(g, input);
+      tap(input, 300, 200, { touch });
+      step(g, input, DT);
+      input.pointer.pressed = false;
+      // Past the skip delay, before the banner fades: the prompt shows.
+      while (g.phaseT < PACE.roundSkip + 0.05) step(g, input, DT);
+      g.render();
+      const prompt = said.find((t) => t.endsWith('to continue'));
+      expect(prompt).toBe(touch ? 'Tap or shoot to continue' : 'Click or shoot to continue');
+    }
+  });
+
   it('starts the next pair shortly after a wave is decided, while shot ducks still fall', () => {
     const { g, input } = inWave(3);
     const [a, b] = g.ducks;

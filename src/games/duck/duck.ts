@@ -1092,7 +1092,9 @@ export class DuckGame extends BaseGame {
         pass ? '#ffd23f' : '#ff6b6b',
       );
       if (this.phaseT >= PACE.roundSkip && t < 0.8) {
-        text(ctx, 'Click or shoot to continue', this.W / 2, this.H * 0.38 + 92, {
+        // Worded for the device in hand: a finger taps, a mouse clicks.
+        const verb = this.input.pointer.touch ? 'Tap' : 'Click';
+        text(ctx, `${verb} or shoot to continue`, this.W / 2, this.H * 0.38 + 92, {
           // Keeps at least 13 CSS px on a phone.
           size: Math.max(17, 13 / this.cssPerLogical()),
           align: 'center',

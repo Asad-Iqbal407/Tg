@@ -291,11 +291,24 @@ describe('Galaxy War enemies', () => {
 });
 
 describe('Galaxy War controls', () => {
-  it('steers with the mouse only while the cursor is over the canvas', () => {
+  it('steers with the mouse over a letterbox bar towards the nearest point of the field', () => {
+    // A fast swing past the canvas edge used to stop the ship short of the wall: the bar is part of the stage.
+    const { game, input, g } = fresh();
+    input.pointer.active = true;
+    input.pointer.inside = false;
+    input.pointer.x = -150;
+    input.pointer.y = 600;
+    step(game, input, 180);
+    const reach = 26 * Math.cos(0.2) + 14 * Math.sin(0.2);
+    expect(g.shipX).toBeCloseTo(reach, 3);
+    expect(g.shipY).toBeCloseTo(540, 0);
+  });
+
+  it('holds still once the mouse has left the play stage', () => {
     const { game, input, g } = fresh();
     const x0 = g.shipX;
     const y0 = g.shipY;
-    input.pointer.active = true;
+    input.pointer.active = false;
     input.pointer.inside = false;
     input.pointer.x = 20;
     input.pointer.y = 100;
@@ -621,5 +634,106 @@ describe('Galaxy War phone layout', () => {
       expect(sizes.length, `${w}x${h}`).toBeGreaterThan(0);
       expect(Math.min(...sizes) * scale, `${w}x${h}`).toBeGreaterThanOrEqual(12);
     }
+  });
+});
+
+describe('Galaxy War landscape phone fallback', () => {
+  const def = gameById('galaxy');
+  /** The definition the shell sizes a run with on a touch phone held landscape ("Play anyway"). */
+  const landscape = { ...def, viewport: def.landscapeViewport };
+  const PHONES = { L1: [740, 360], L2: [844, 390], L3: [932, 430] } as const;
+
+  it('declares a landscape range that fills far more of a sideways phone than the portrait range', () => {
+    expect(def.landscapeViewport).toBeDefined();
+    for (const [name, [w, h]] of Object.entries(PHONES)) {
+      const stage = stageFor(w, h);
+      const before = chooseLogicalSize(def, stage.w, stage.h);
+      const after = chooseLogicalSize(landscape, stage.w, stage.h);
+      const fill = (s: { width: number; height: number }) => fittedArea(s, stage.w, stage.h) / (stage.w * stage.h);
+      expect(fill(before), name).toBeLessThan(0.45);
+      expect(fill(after), name).toBeGreaterThanOrEqual(0.64);
+      // Enough height is kept for the vertical reaction distance the waves are tuned for.
+      expect(after.height, name).toBeGreaterThanOrEqual(780);
+    }
+    // Portrait phones and desktop never use it: their sizes are unchanged.
+    expect(chooseLogicalSize(def, 1280, 744)).toEqual({ width: 720, height: 900 });
+  });
+
+  it('keeps HUD text at least 12 CSS px and the ship at least 8% of the short side', () => {
+    for (const [name, [w, h]] of Object.entries(PHONES)) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(landscape, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const { ctx, sizes } = hudRecorder(size.width * scale);
+      (ctx as unknown as { canvas: unknown }).canvas = {
+        clientWidth: size.width * scale,
+        parentElement: { clientWidth: stage.w, clientHeight: stage.h },
+      };
+      const game = drawnRun(size, ctx);
+      probe(game).wave = 1;
+      probe(game).waveBannerT = 0.5;
+      game.render();
+      expect(Math.min(...sizes) * scale, name).toBeGreaterThanOrEqual(12);
+      const shipCss = 52 * probe(game).shipScale() * scale;
+      expect(shipCss / Math.min(stage.w, stage.h), name).toBeGreaterThanOrEqual(0.08);
+    }
+  });
+
+  it('keeps every curve swoop clear of the bottom HUD on the short landscape field', () => {
+    const { game, input, g } = fresh({ width: 1040, height: 780 });
+    (g as unknown as { groupCurve(): void }).groupCurve();
+    let deepest = 0;
+    for (let i = 0; i < 6 * 60; i++) {
+      step(game, input, 1);
+      for (const e of g.enemies) if (e.behavior === 'curve' && e.t > 0) deepest = Math.max(deepest, e.y);
+    }
+    // At the 960 design height the swoop bottoms out near y=430; it scales with the field height.
+    expect(deepest).toBeGreaterThan(200);
+    expect(deepest).toBeLessThan(780 * 0.5);
+  });
+});
+
+describe('Galaxy War pickups and popups', () => {
+  it('draws pickup letters at least 12 CSS px on a letterboxed phone stage', () => {
+    const def = gameById('galaxy');
+    for (const [w, h, landscapeRange] of [
+      [360, 740, false],
+      [844, 390, true],
+      [844, 390, false],
+    ] as const) {
+      const stage = stageFor(w, h);
+      const spec = landscapeRange ? { ...def, viewport: def.landscapeViewport } : def;
+      const size = chooseLogicalSize(spec, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const { ctx, sizes } = hudRecorder(size.width * scale);
+      (ctx as unknown as { canvas: unknown }).canvas = {
+        clientWidth: size.width * scale,
+        parentElement: { clientWidth: stage.w, clientHeight: stage.h },
+      };
+      const game = drawnRun(size, ctx);
+      const g = probe(game) as unknown as { drops: { kind: string; x: number; y: number; vy: number; alive: boolean }[] };
+      g.drops = [{ kind: 'power', x: 200, y: 300, vy: 0, alive: true }];
+      sizes.length = 0;
+      (game as unknown as { drawDrop(d: unknown): void }).drawDrop(g.drops[0]);
+      expect(sizes, `${w}x${h}`).toHaveLength(1);
+      // The box sways by up to 0.3 rad, which shrinks the glyph's on-screen height by cos(0.3).
+      expect(sizes[0]! * scale * Math.cos(0.3), `${w}x${h}`).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('stacks popups earned together at one spot instead of printing them over each other', () => {
+    const { game, g } = fresh();
+    const e1 = g.makeEnemy('scout', 'sine', 270, 400);
+    const e2 = g.makeEnemy('scout', 'sine', 272, 402);
+    // Build a chain so both kills show score popups.
+    (g as unknown as { chain: number }).chain = 6;
+    g.damage(e1, 99);
+    g.damage(e2, 99);
+    const items = (game as unknown as { texts: { items: { x: number; y: number; text: string; size: number }[] } })
+      .texts.items;
+    const scores = items.filter((t) => /x\d$/.test(t.text) && !t.text.startsWith('CHAIN'));
+    expect(scores).toHaveLength(2);
+    const [a, b] = scores as [(typeof scores)[0], (typeof scores)[0]];
+    expect(Math.abs(a.y - b.y)).toBeGreaterThanOrEqual(a.size);
   });
 });

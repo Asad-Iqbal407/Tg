@@ -12,6 +12,8 @@ export const galaxyGame: GameDefinition = {
   width: 540,
   height: 960,
   viewport: { minWidth: 540, maxWidth: 720, minHeight: 900, maxHeight: 1200 },
+  // A phone held sideways after "Play anyway" trades some height for width, so the field is not a sliver.
+  landscapeViewport: { minWidth: 540, maxWidth: 1040, minHeight: 780, maxHeight: 960 },
   // A vertical shooter: held sideways it would show a sliver of the field, so it asks for portrait.
   orientation: 'portrait',
   // Right-drags and mouse steering keep working over the letterbox, so the ship never stops mid-fight.
