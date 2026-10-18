@@ -952,3 +952,61 @@ describe('Duck Season phone layout', () => {
     }
   });
 });
+
+describe('Duck Season status pills on a narrow field', () => {
+  /** Records each fillText with its font size (logical px) and position. */
+  function labelRecorder(cssWidth: number) {
+    const labels: { text: string; size: number; x: number; y: number }[] = [];
+    const base = mockCtx();
+    (base as unknown as { canvas: unknown }).canvas = { clientWidth: cssWidth };
+    const ctx = new Proxy(base, {
+      get(target, key) {
+        if (key !== 'fillText') return Reflect.get(target, key);
+        return (t: string, x: number, y: number) => {
+          const m = /(\d+(?:\.\d+)?)px/.exec(target.font);
+          labels.push({ text: String(t), size: m ? Number(m[1]) : 0, x, y });
+        };
+      },
+    });
+    return { ctx, labels };
+  }
+
+  it('keeps every pill label at least 12 CSS px, stacking Guardian and combo above the power timers', () => {
+    // Portrait phone after "Play anyway": the 480-wide field is drawn 390 CSS px wide.
+    const css = 390 / 480;
+    const { ctx, labels } = labelRecorder(390);
+    const { g, input } = inWave(1, { ctx, width: 480, boosts: ['shield'] });
+    g.powers.slowmo = 3;
+    g.powers.scatter = 3;
+    g.combo = 6;
+    g.waveT = g.waveFly - 0.5; // HURRY! shows too
+    labels.length = 0;
+    g.render();
+    void input;
+    const pills = ['SLOW-MO', 'SCATTER', 'GUARDIAN', 'COMBO x3'].map((t) => labels.find((l) => l.text === t));
+    for (const [i, l] of pills.entries()) {
+      expect(l, String(i)).toBeDefined();
+      expect(l!.size * css, l!.text).toBeGreaterThanOrEqual(12);
+    }
+    const [slow, , guardian, combo] = pills as { y: number; size: number }[];
+    // The right-hand pills sit a full row above the power timers instead of on top of them.
+    expect(slow!.y - guardian!.y).toBeGreaterThanOrEqual(30);
+    expect(guardian!.y).toBeCloseTo(combo!.y, 6);
+    // HURRY! stays above the highest pill row.
+    const hurry = labels.find((l) => l.text === 'HURRY!');
+    expect(hurry).toBeDefined();
+    expect(hurry!.y + hurry!.size / 2).toBeLessThan(guardian!.y - guardian!.size);
+  });
+
+  it('keeps a single row on a wide field', () => {
+    const { ctx, labels } = labelRecorder(1280);
+    const { g } = inWave(1, { ctx, width: 960, boosts: ['shield'] });
+    g.powers.slowmo = 3;
+    g.combo = 6;
+    labels.length = 0;
+    g.render();
+    const slow = labels.find((l) => l.text === 'SLOW-MO');
+    const guardian = labels.find((l) => l.text === 'GUARDIAN');
+    expect(Math.abs(slow!.y - 14 - (guardian!.y - 20))).toBeLessThan(1e-6);
+  });
+});

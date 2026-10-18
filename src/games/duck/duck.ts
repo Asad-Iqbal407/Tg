@@ -959,14 +959,15 @@ export class DuckGame extends BaseGame {
     text(ctx, scoreLabel, right - 16 * s, cy, { size: 30 * s, align: 'right' });
     const rightStart = right - 16 * s - Math.max(ctx.measureText(scoreLabel).width, 90 * s) - 16 * s;
     this.drawTracker(leftEnd, rightStart, cy, s);
-    this.drawStatusRow(b);
+    const rowTop = this.drawStatusRow(b);
     if (
       this.phase === 'wave' &&
       this.waveT > this.waveFly - PACE.hurry &&
       countState(this.ducks, 'fly') > 0
     ) {
       const pulse = 1 + 0.08 * Math.sin(this.time * 14);
-      text(ctx, 'HURRY!', this.W / 2, b.y - 66 * s, {
+      // Above the status pills, which can stack two rows high on a narrow field.
+      text(ctx, 'HURRY!', this.W / 2, Math.min(b.y - 66 * s, rowTop - 18 * s), {
         size: 30 * s * pulse,
         align: 'center',
         color: '#ff6b6b',
@@ -1014,9 +1015,10 @@ export class DuckGame extends BaseGame {
 
   /**
    * Power timers (left), combo and Guardian (right), just above the bar and below the flight band.
-   * The whole row shrinks when its pills would not fit the bar.
+   * The whole row shrinks when its pills would not fit the bar, down to a readable floor. Returns the top
+   * of the highest pill row (the bar's top when no pill shows).
    */
-  private drawStatusRow(b: BarLayout): void {
+  private drawStatusRow(b: BarLayout): number {
     const ctx = this.ctx;
     const mult = this.multiplier;
     // Scatter also shows while the Power Start runs, even with no crate timer.
@@ -1028,11 +1030,18 @@ export class DuckGame extends BaseGame {
       ...(this.guardian ? [PILL.guardian] : []),
       ...(mult > 1 ? [PILL.combo] : []),
     ];
-    if (widths.length === 0) return;
+    if (widths.length === 0) return b.y;
     const total = widths.reduce((a, w) => a + w, 0) + PILL.gap * (widths.length - 1);
-    const s = Math.min(b.s, b.w / total);
+    // Shrink to fit one row, but never below 12 CSS px for the smallest (15-unit) label: past that the
+    // Guardian and combo pills move up onto a second row instead of colliding with the power timers.
+    const minS = 12 / (15 * this.cssPerLogical());
+    // The floor still leaves the two power timers room side by side on the narrowest (480) field.
+    const s = Math.max(Math.min(b.s, b.w / total), Math.min(minS, b.w / (2 * (PILL.power + PILL.gap))));
     const h = 40 * s;
     const y = b.y - h - PILL.gap * s;
+    const leftW = kinds.length * (PILL.power + PILL.gap) * s;
+    const rightW = ((this.guardian ? PILL.guardian + PILL.gap : 0) + (mult > 1 ? PILL.combo : 0)) * s;
+    const ry = kinds.length > 0 && leftW + rightW > b.w ? y - h - PILL.gap * s : y;
     let x = b.x;
     for (const k of kinds) {
       const v = this.powers[k];
@@ -1052,16 +1061,21 @@ export class DuckGame extends BaseGame {
     if (this.guardian) {
       const w = PILL.guardian * s;
       rx -= w;
-      hudPill(ctx, rx, y, w, h);
-      text(ctx, 'GUARDIAN', rx + w / 2, y + h / 2, { size: 16 * s, align: 'center', color: '#7cf' });
+      hudPill(ctx, rx, ry, w, h);
+      text(ctx, 'GUARDIAN', rx + w / 2, ry + h / 2, { size: 16 * s, align: 'center', color: '#7cf' });
       rx -= PILL.gap * s;
     }
     if (mult > 1) {
       const w = PILL.combo * s;
       rx -= w;
-      hudPill(ctx, rx, y, w, h);
-      text(ctx, `COMBO x${mult}`, rx + w / 2, y + h / 2, { size: 16 * s, align: 'center', color: '#ffb703' });
+      hudPill(ctx, rx, ry, w, h);
+      text(ctx, `COMBO x${mult}`, rx + w / 2, ry + h / 2, {
+        size: 16 * s,
+        align: 'center',
+        color: '#ffb703',
+      });
     }
+    return Math.min(y, ry);
   }
 
   private drawBanners(): void {

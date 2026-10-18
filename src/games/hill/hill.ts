@@ -113,7 +113,10 @@ export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: 
   const top = HUD_EDGE + insetTop;
   const gaps = shield ? 4 : 3;
   const row =
-    2 * HUD_EDGE + k * (FUEL_W + COIN_W + DIST_W + gaps * HUD_GAP) + speedPillWidth(touch) + (shield ? ph : 0);
+    2 * HUD_EDGE +
+    k * (FUEL_W + COIN_W + DIST_W + gaps * HUD_GAP) +
+    speedPillWidth(touch) +
+    (shield ? ph : 0);
   const stacked = row > W;
   const chipH = 26 * s;
   // One row: the next-fuel chip sits under the fuel pill, and the score line under the distance pill
