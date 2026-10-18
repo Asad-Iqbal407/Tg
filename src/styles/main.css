@@ -2423,6 +2423,37 @@ body.is-playing .toast__text span {
   }
 }
 
+/* Portrait phones: the in-play toast sits between the header buttons, about 170 px wide at 360 px, too
+   narrow for the title and the reward side by side. The title keeps the row beside the icon and the
+   reward line takes the full width under it, so both lines fit the 50 px header at the menu size. */
+@media (pointer: coarse) and (max-width: 720px) and (orientation: portrait) {
+  body.is-playing .toast {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: center;
+    gap: 0 8px;
+    line-height: 1.2;
+    padding: 1px 12px 1px 6px;
+  }
+  body.is-playing .toast__text {
+    display: contents;
+  }
+  body.is-playing .toast__icon {
+    grid-column: 1;
+    grid-row: 1;
+    width: 20px;
+    height: 20px;
+  }
+  body.is-playing .toast__text strong {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  body.is-playing .toast__text span {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
 /* Phones and short screens: the results actions stay in view while the stats scroll above them. The
    footer sits on the dialog's bottom edge and keeps the body's 18 px padding below the buttons. */
 @media (pointer: coarse), (max-height: 500px) {
