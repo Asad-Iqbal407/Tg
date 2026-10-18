@@ -31,7 +31,11 @@ import {
 const START_LENGTH = 4;
 const HEAD_START_LENGTH = 6;
 const BASE_INTERVAL = 0.14;
-const INTERVAL_STEP = 0.004;
+/**
+ * Seconds taken off the move interval per apple. The top speed arrives at about 47 apples (level 8), so every
+ * level feels a little faster instead of the snake hitting top speed by level 3.
+ */
+const INTERVAL_STEP = 0.0015;
 const MIN_INTERVAL = 0.07;
 const SLOW_FACTOR = 1.8;
 const SLOW_SEC = 4;

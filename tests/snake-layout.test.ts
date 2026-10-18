@@ -33,10 +33,10 @@ const LANDSCAPE_PHONES: [string, number, number][] = [
 describe('snake layout', () => {
   it('takes either orientation and keeps its viewport range', () => {
     expect(snake.orientation).toBe('any');
-    expect(snake.viewport).toEqual({ minWidth: 380, maxWidth: 900, minHeight: 640, maxHeight: 800 });
+    expect(snake.viewport).toEqual({ minWidth: 380, maxWidth: 1000, minHeight: 640, maxHeight: 800 });
     expect(snake.landscapeViewport).toEqual({
       minWidth: 380,
-      maxWidth: 1200,
+      maxWidth: 900,
       minHeight: 360,
       maxHeight: 800,
     });
@@ -62,9 +62,9 @@ describe('snake layout', () => {
     }
   });
 
-  // Skipped: head and body reach about 7.5% and 6.9% of the short side on phones with the current cell
-  // size. Reaching 8% needs a cell or drawing decision, so this stays visible here until it is made.
-  it.skip('draws the head at least 8% of the short side on every phone stage', () => {
+  // Regression: the landscape range once reached 1200 px wide, so a landscape phone drew a 48 x 21 board
+  // whose head and body were under 7% of the short side.
+  it('draws the head at least 8% of the short side on every phone stage', () => {
     for (const [name, w, h] of [...PORTRAIT_PHONES, ...LANDSCAPE_PHONES]) {
       const stage = stageFor(w, h);
       const size = sizeFor(stage.w, stage.h);
@@ -76,9 +76,9 @@ describe('snake layout', () => {
     }
   });
 
-  // Skipped: head and body reach about 7.5% and 6.9% of the short side on phones with the current cell
-  // size. Reaching 8% needs a cell or drawing decision, so this stays visible here until it is made.
-  it.skip('draws the body at least 8% of the short side on every phone stage', () => {
+  // Regression: the landscape range once reached 1200 px wide, so a landscape phone drew a 48 x 21 board
+  // whose head and body were under 7% of the short side.
+  it('draws the body at least 8% of the short side on every phone stage', () => {
     for (const [name, w, h] of [...PORTRAIT_PHONES, ...LANDSCAPE_PHONES]) {
       const stage = stageFor(w, h);
       const size = sizeFor(stage.w, stage.h);
@@ -106,14 +106,24 @@ describe('snake layout', () => {
     expect(bodyWidth(24, 1, false)).toBeCloseTo(24 * 0.84);
   });
 
-  it('keeps the desktop 1280 x 800 window and the landscape phone boards inside the range', () => {
+  it('keeps the desktop board 640 px tall and fills a 1280 x 800 window to 85% or more', () => {
     const desk = stageFor(1280, 800);
-    expect(chooseLogicalSize(snake, desk.w, desk.h)).toEqual({ width: 900, height: 640 });
+    const size = chooseLogicalSize(snake, desk.w, desk.h);
+    expect(size).toEqual({ width: 1000, height: 640 });
+    expect(fittedArea(size, desk.w, desk.h) / (desk.w * desk.h)).toBeGreaterThanOrEqual(0.85);
+    expect(gridSize(size.width, size.height)).toEqual({ cols: 40, rows: 22 });
+  });
+
+  it('keeps the landscape phone boards inside the landscape range, with cells of 18 CSS px or more', () => {
     for (const [name, w, h] of LANDSCAPE_PHONES) {
       const stage = stageFor(w, h);
       const size = sizeFor(stage.w, stage.h);
       expect(size.height, name).toBeGreaterThanOrEqual(360);
-      expect(size.width, name).toBeLessThanOrEqual(1200);
+      expect(size.width, name).toBeLessThanOrEqual(900);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const grid = gridSize(size.width, size.height);
+      const { cell } = fitBoard(grid.cols, grid.rows, size.width, size.height, 0);
+      expect(cell * scale, name).toBeGreaterThanOrEqual(18);
     }
   });
 

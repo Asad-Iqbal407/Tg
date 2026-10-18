@@ -356,7 +356,7 @@ describe('snake rules', () => {
     placeApple(s, front(s), true);
     untilMove(game, input);
     expect(s.slowT).toBeCloseTo(4, 1);
-    expect(s.stepInterval()).toBeCloseTo((0.14 - 0.004) * 1.8, 6);
+    expect(s.stepInterval()).toBeCloseTo((0.14 - 0.0015) * 1.8, 6);
     // Walk a bent path (down, then left) so the snake stays on the board while the timer runs out.
     tap(game, input, 'down');
     for (let i = 0; i < 8 && s.slowT > 0; i++) untilMove(game, input);
@@ -364,7 +364,7 @@ describe('snake rules', () => {
     for (let i = 0; i < 9 && s.slowT > 0 && !game.isOver(); i++) untilMove(game, input);
     expect(game.isOver()).toBe(false);
     expect(s.slowT).toBe(0);
-    expect(s.stepInterval()).toBeCloseTo(Math.max(0.07, 0.14 - 0.004 * s.applesEaten), 6);
+    expect(s.stepInterval()).toBeCloseTo(Math.max(0.07, 0.14 - 0.0015 * s.applesEaten), 6);
   });
 
   it('moves fewer times per second in slow motion', () => {
@@ -389,12 +389,19 @@ describe('snake rules', () => {
     expect(movesIn(true)).toBeLessThan(movesIn(false));
   });
 
-  it('speeds up with apples eaten, never below 0.07 s per move', () => {
+  it('speeds up with apples eaten across the levels, never below 0.07 s per move', () => {
     const { game } = start(12);
     const s = peek(game);
     s.applesEaten = 10;
-    expect(s.stepInterval()).toBeCloseTo(0.1, 6);
+    expect(s.stepInterval()).toBeCloseTo(0.125, 6);
     s.applesEaten = 30;
+    expect(s.stepInterval()).toBeCloseTo(0.095, 6);
+    // Top speed is reached around level 8, not by level 3 as it once was (0.004 s per apple).
+    s.applesEaten = 18;
+    expect(s.stepInterval()).toBeGreaterThan(0.1);
+    s.applesEaten = 47;
+    expect(s.stepInterval()).toBeCloseTo(0.07, 6);
+    s.applesEaten = 200;
     expect(s.stepInterval()).toBeCloseTo(0.07, 6);
   });
 
