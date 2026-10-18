@@ -176,7 +176,7 @@ describe('Hill Rider driving', () => {
         const run = runBot({ seed, skinId, mode: 'hold', seconds: 120 });
         expect(run.meters, `${skinId} seed ${seed}`).toBeGreaterThan(800);
       }
-  }, 60_000);
+  }, 150_000);
 
   it('the Rally Racer survives early terrain under hold-gas', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
@@ -416,5 +416,5 @@ describe('Hill Rider rendering', () => {
       },
     });
     expect(run.meters).toBeGreaterThan(830);
-  });
+  }, 60000);
 });

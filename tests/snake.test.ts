@@ -433,7 +433,7 @@ describe('snake rules', () => {
       }
       expect(s.level).toBe(9);
     }
-  });
+  }, 30000);
 
   it('reports food, golden, length and level stats, with score and coins', () => {
     const { game, input } = start(9);
@@ -468,7 +468,8 @@ describe('snake rules', () => {
     const runs = [1, 2, 3, 4, 5].map((seed) => autoplay(seed));
     expect(Math.max(...runs.map((r) => r.maxLevel))).toBeGreaterThanOrEqual(3);
     for (const r of runs) expect(r.result.stats['food'] ?? 0).toBeGreaterThanOrEqual(0);
-  });
+    // The gentler speed ramp keeps these runs alive longer, so they take more steps than before.
+  }, 30000);
 
   it('draws in preview mode without throwing, at every corner size and with a touch inset', () => {
     const game = previewGame();

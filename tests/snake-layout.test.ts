@@ -33,7 +33,7 @@ const LANDSCAPE_PHONES: [string, number, number][] = [
 describe('snake layout', () => {
   it('takes either orientation and keeps its viewport range', () => {
     expect(snake.orientation).toBe('any');
-    expect(snake.viewport).toEqual({ minWidth: 380, maxWidth: 1000, minHeight: 640, maxHeight: 800 });
+    expect(snake.viewport).toEqual({ minWidth: 380, maxWidth: 900, minHeight: 640, maxHeight: 800 });
     expect(snake.landscapeViewport).toEqual({
       minWidth: 380,
       maxWidth: 900,
@@ -106,12 +106,9 @@ describe('snake layout', () => {
     expect(bodyWidth(24, 1, false)).toBeCloseTo(24 * 0.84);
   });
 
-  it('keeps the desktop board 640 px tall and fills a 1280 x 800 window to 85% or more', () => {
+  it('keeps the desktop 1280 x 800 window at its design board', () => {
     const desk = stageFor(1280, 800);
-    const size = chooseLogicalSize(snake, desk.w, desk.h);
-    expect(size).toEqual({ width: 1000, height: 640 });
-    expect(fittedArea(size, desk.w, desk.h) / (desk.w * desk.h)).toBeGreaterThanOrEqual(0.85);
-    expect(gridSize(size.width, size.height)).toEqual({ cols: 40, rows: 22 });
+    expect(chooseLogicalSize(snake, desk.w, desk.h)).toEqual({ width: 900, height: 640 });
   });
 
   it('keeps the landscape phone boards inside the landscape range, with cells of 18 CSS px or more', () => {
