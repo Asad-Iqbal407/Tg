@@ -9,6 +9,38 @@ export interface ToastOptions {
   ms?: number;
 }
 
+/** Pause before a line that does not fit starts to scroll, and the pause it holds at its end (ms). */
+const RUN_DELAY_MS = 900;
+const RUN_HOLD_MS = 1200;
+/** Scroll speed of a line that does not fit (CSS px per second). */
+const RUN_SPEED = 55;
+
+export interface TextRun {
+  /** How far the text moves left (CSS px, negative). */
+  shift: number;
+  /** Length of the scroll itself (ms). */
+  ms: number;
+  /** Shortest time the toast must stay up so the whole line can be read (ms). */
+  minShowMs: number;
+}
+
+/**
+ * How a one-line toast text that is `overflow` CSS px too wide scrolls to show its end: after a short
+ * pause it slides left at a steady reading speed, then holds. Null when it fits, or when motion is
+ * reduced (the line keeps its ellipsis then).
+ */
+export function textRun(overflow: number, reducedMotion: boolean): TextRun | null {
+  if (!(overflow > 1) || reducedMotion) return null;
+  const shift = Math.ceil(overflow) + 4;
+  const ms = Math.round((shift / RUN_SPEED) * 1000);
+  return { shift: -shift, ms, minShowMs: RUN_DELAY_MS + ms + RUN_HOLD_MS };
+}
+
+function motionReduced(): boolean {
+  if (document.documentElement.classList.contains('reduced-motion')) return true;
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 /** Non-blocking notifications announced to screen readers via a polite live region. */
 export class Toaster {
   private readonly root: HTMLElement;
@@ -32,12 +64,35 @@ export class Toaster {
     );
     this.root.appendChild(el);
     while (this.root.children.length > 4) this.root.firstElementChild?.remove();
+    let timer = 0;
     const close = () => {
+      clearTimeout(timer);
       el.classList.add('toast--out');
       setTimeout(() => el.remove(), 300);
     };
     el.addEventListener('click', close);
-    setTimeout(close, o.ms ?? 3600);
+    const shown = Date.now();
+    const ms = o.ms ?? 3600;
+    timer = window.setTimeout(close, ms);
+    // A line squeezed to one row (the in-play toast) scrolls to show its end instead of hiding it.
+    requestAnimationFrame(() => {
+      if (!el.isConnected || el.classList.contains('toast--out')) return;
+      let need = 0;
+      for (const line of Array.from(el.querySelectorAll<HTMLElement>('.toast__text > *'))) {
+        const run = textRun(line.scrollWidth - line.clientWidth, motionReduced());
+        if (!run) continue;
+        const inner = h('em', { class: 'toast__run', text: line.textContent ?? '' });
+        inner.style.setProperty('--run-shift', `${run.shift}px`);
+        inner.style.setProperty('--run-ms', `${run.ms}ms`);
+        line.replaceChildren(inner);
+        line.classList.add('is-running');
+        need = Math.max(need, run.minShowMs);
+      }
+      if (need > ms) {
+        clearTimeout(timer);
+        timer = window.setTimeout(close, need - (Date.now() - shown));
+      }
+    });
   }
 }
 

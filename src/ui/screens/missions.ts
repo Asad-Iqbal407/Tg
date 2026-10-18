@@ -90,7 +90,7 @@ function dailyCalendar(app: App, rerender: () => void): HTMLElement {
             app.sfx('reward');
             app.toaster.show({
               title: `Day ${res.streak} reward claimed!`,
-              body: `+${fmt(res.reward.coins)} coins${res.reward.gems ? ` · +${res.reward.gems} gems` : ''}`,
+              body: `+${fmt(res.reward.coins)} coins${res.reward.gems ? ` · +${res.reward.gems} gems` : ''}${res.reward.boost ? ' · +1 boost' : ''}`,
               icon: 'gift',
               tone: 'gold',
             });

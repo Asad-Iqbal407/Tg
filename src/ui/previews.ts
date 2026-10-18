@@ -9,8 +9,20 @@ import { drawSprite } from '../games/sprite';
 import { type GameDefinition, NO_INSETS, type SkinData } from '../games/types';
 import type { SkinItem } from '../meta/catalog';
 
-/** Seed, simulated seconds and vertical crop focus (0 = top, 1 = bottom) for card art. */
-const PREVIEW: Record<string, { seed: number; seconds: number; focus: number }> = {
+interface PreviewConfig {
+  seed: number;
+  seconds: number;
+  /** Vertical crop focus for 'cover' art (0 = top, 1 = bottom). */
+  focus: number;
+  /**
+   * 'contain' shows the whole frame (over a dimmed, cropped copy of itself) and keeps it clear of the
+   * card's genre pill: for tall boards whose top rows a crop would hide under the pill.
+   */
+  fit?: 'cover' | 'contain';
+}
+
+/** Seed, simulated seconds and framing for card art. */
+const PREVIEW: Record<string, PreviewConfig> = {
   snake: { seed: 4, seconds: 1.6, focus: 0.5 },
   bombsquad: { seed: 6, seconds: 1.5, focus: 0.5 },
   tetris: { seed: 8, seconds: 2.0, focus: 0.5 },
@@ -19,7 +31,7 @@ const PREVIEW: Record<string, { seed: number; seconds: number; focus: number }> 
   duck: { seed: 3, seconds: 2.4, focus: 0.5 },
   hill: { seed: 5, seconds: 2.8, focus: 0.5 },
   galaxy: { seed: 2, seconds: 7.5, focus: 0.3 },
-  bubble: { seed: 5, seconds: 1.2, focus: 0.5 },
+  bubble: { seed: 5, seconds: 1.2, focus: 0.5, fit: 'contain' },
   pong: { seed: 7, seconds: 3.2, focus: 0.5 },
 };
 
@@ -78,18 +90,70 @@ function renderFrame(
   return off;
 }
 
-/** Draw a game preview into `target` using object-fit: cover. */
+/** Part of the card width, from the left, that the genre pill may cover (it is about 100 of 356 px). */
+export const PILL_ZONE = 0.37;
+/** Widest share of the card a 'contain' frame may take, so it stays clear of the pill and the play button. */
+const CONTAIN_MAX_WIDTH = 0.5;
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Where a `fw` x `fh` frame is drawn on a `tw` x `th` card. 'cover' fills the card (cropped about the
+ * focus). 'contain' fits the whole frame, at most half the card wide, centred but moved right where it
+ * would reach under the genre pill in the top-left corner.
+ */
+export function previewRect(
+  fw: number,
+  fh: number,
+  tw: number,
+  th: number,
+  fit: 'cover' | 'contain',
+  focus = 0.5,
+): Rect {
+  if (fit === 'cover') {
+    const s = Math.max(tw / fw, th / fh);
+    const w = fw * s;
+    const h = fh * s;
+    return { x: (tw - w) / 2, y: (th - h) * focus, w, h };
+  }
+  const s = Math.min(th / fh, (tw * CONTAIN_MAX_WIDTH) / fw);
+  const w = fw * s;
+  const h = fh * s;
+  const x = Math.min(Math.max((tw - w) / 2, tw * PILL_ZONE), tw - w);
+  return { x, y: (th - h) / 2, w, h };
+}
+
+/** Draw a game preview into `target` (cropped to fill it, or whole for 'contain' games). */
 export function drawGamePreview(def: GameDefinition, skin: SkinData, target: HTMLCanvasElement): void {
   const frame = renderFrame(def, skin, target.width, target.height);
   const ctx = target.getContext('2d');
   if (!frame || !ctx) return;
   const tw = target.width;
   const th = target.height;
-  const s = Math.max(tw / frame.width, th / frame.height);
-  const w = frame.width * s;
-  const hgt = frame.height * s;
-  const oy = (th - hgt) * (PREVIEW[def.id]?.focus ?? 0.5);
-  ctx.drawImage(frame, (tw - w) / 2, oy, w, hgt);
+  const cfg = PREVIEW[def.id];
+  const cover = previewRect(frame.width, frame.height, tw, th, 'cover', cfg?.focus ?? 0.5);
+  if (cfg?.fit !== 'contain') {
+    ctx.drawImage(frame, cover.x, cover.y, cover.w, cover.h);
+    return;
+  }
+  // A dimmed crop fills the card behind the whole board, so the art keeps the game's colours edge to edge.
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.drawImage(frame, cover.x, cover.y, cover.w, cover.h);
+  ctx.restore();
+  ctx.fillStyle = 'rgba(5, 6, 15, 0.45)';
+  ctx.fillRect(0, 0, tw, th);
+  const r = previewRect(frame.width, frame.height, tw, th, 'contain');
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+  ctx.shadowBlur = th * 0.06;
+  ctx.drawImage(frame, r.x, r.y, r.w, r.h);
+  ctx.restore();
 }
 
 /** Queue preview rendering during idle time so the arcade paints instantly. */

@@ -1802,8 +1802,9 @@ body.is-playing .main {
    below moves them to the bottom centre, above the touch controls). */
 body.is-playing .toasts {
   top: calc(env(safe-area-inset-top, 0px) + 8px);
-  right: calc(112px + env(safe-area-inset-right, 0px));
-  left: calc(60px + env(safe-area-inset-left, 0px));
+  /* The play screen measures the lane between its header buttons (title area) into these variables. */
+  right: var(--play-toast-right, calc(126px + env(safe-area-inset-right, 0px)));
+  left: var(--play-toast-left, calc(66px + env(safe-area-inset-left, 0px)));
   bottom: auto;
   transform: none;
   width: auto;
@@ -1849,6 +1850,31 @@ body.is-playing .toast__text span {
 body.is-playing .toast__text span {
   flex: 0 100 auto;
   font-size: 0.8rem;
+}
+/* A one-line toast text too long for its lane scrolls once to show its end (see Toaster.show). */
+.toast__run {
+  display: inline-block;
+  font: inherit;
+  font-style: normal;
+}
+.toast__text .is-running {
+  text-overflow: clip;
+}
+.is-running > .toast__run {
+  animation: toast-run var(--run-ms, 2s) linear 0.9s both;
+}
+@keyframes toast-run {
+  to {
+    transform: translateX(var(--run-shift, 0));
+  }
+}
+.reduced-motion .is-running > .toast__run {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-running > .toast__run {
+    animation: none;
+  }
 }
 .play {
   display: flex;
@@ -2417,9 +2443,13 @@ body.is-playing .toast__text span {
   body.is-playing .toast__text span {
     font-size: 0.875rem;
   }
-  /* The rotate hint is a prompt on touch screens, so its text takes the menu size too. */
+  /* The rotate hint and the fit chip are buttons on touch screens: menu-size text and a 44 px hit area. */
   .rotate-hint {
+    min-height: 44px;
     font-size: 0.875rem;
+  }
+  .rotate-hint--side {
+    min-width: 44px;
   }
 }
 

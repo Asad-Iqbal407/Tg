@@ -30,6 +30,22 @@ const SLIDE_REACH = 28;
 /** Sustained frame rate below which the backing-store resolution is lowered. */
 const LOW_FPS = 48;
 
+/** Narrowest lane (CSS px) worth showing an in-play toast in; below it the default placement is used. */
+const MIN_TOAST_LANE = 120;
+
+/**
+ * The lane for in-play toasts, as left and right offsets from the page edges, from the box of the header
+ * title (which fills the space between the header's buttons). Null when the title is not laid out (the
+ * landscape rail hides it) or the gap is too narrow to use.
+ */
+export function toastLane(
+  title: { left: number; right: number; width: number; height: number },
+  pageWidth: number,
+): { left: number; right: number } | null {
+  if (!(title.width >= MIN_TOAST_LANE) || !(title.height > 0) || !(pageWidth > 0)) return null;
+  return { left: Math.round(title.left), right: Math.max(0, Math.round(pageWidth - title.right)) };
+}
+
 interface TouchKey {
   el: HTMLElement;
   action: Action;
@@ -45,6 +61,8 @@ export class PlayScreen {
   readonly el: HTMLElement;
   private readonly stage: HTMLElement;
   private readonly fpsEl: HTMLElement;
+  /** The header title; its box is the lane toasts use while playing (between the header buttons). */
+  private readonly titleEl: HTMLElement;
   private readonly muteBtn: HTMLButtonElement;
   private readonly fullscreenBtn: HTMLButtonElement | null;
   private readonly rotateHint: HTMLButtonElement;
@@ -93,11 +111,12 @@ export class PlayScreen {
       ? this.headerButton('Toggle fullscreen', 'expand', () => this.toggleFullscreen())
       : null;
     this.fullscreenBtn?.setAttribute('aria-pressed', 'false');
+    this.titleEl = h('h1', { class: 'play__title', text: def.title });
     const header = h(
       'div',
       { class: 'play__header' },
       this.headerButton('Pause', 'pause', () => this.pause()),
-      h('h1', { class: 'play__title', text: def.title }),
+      this.titleEl,
       this.fpsEl,
       this.muteBtn,
       this.fullscreenBtn,
@@ -296,6 +315,20 @@ export class PlayScreen {
   private updateLayout(): void {
     this.updateInsets();
     this.updateRotateHint();
+    this.updateToastLane();
+  }
+
+  /** Keep in-play toasts between the header buttons, whichever buttons this device shows. */
+  private updateToastLane(): void {
+    const root = document.documentElement.style;
+    const lane = toastLane(this.titleEl.getBoundingClientRect(), document.documentElement.clientWidth);
+    if (!lane) {
+      root.removeProperty('--play-toast-left');
+      root.removeProperty('--play-toast-right');
+      return;
+    }
+    root.setProperty('--play-toast-left', `${lane.left}px`);
+    root.setProperty('--play-toast-right', `${lane.right}px`);
   }
 
   /** Report the part of the canvas covered by touch buttons, in logical px. */
@@ -483,8 +516,17 @@ export class PlayScreen {
     const ticket = this.ticket;
     this.ticket = null;
     const result: GameResult = this.game.getResult();
-    if (result.durationSec < TRIVIAL_RUN_SECONDS && result.score === 0) {
-      this.app.arcade.abandonRun(ticket);
+    if (!(result.durationSec >= TRIVIAL_RUN_SECONDS) && !(result.score > 0)) {
+      const refunded = this.app.arcade.abandonRun(ticket);
+      if (refunded.length > 0) {
+        this.app.toaster.show({
+          title: 'Boosts returned',
+          body: "A run this short doesn't use them up",
+          icon: 'bolt',
+          tone: 'info',
+          ms: 2500,
+        });
+      }
       return null;
     }
     return this.app.arcade.finishRun(ticket, result);
@@ -894,6 +936,8 @@ export class PlayScreen {
     window.removeEventListener('blur', this.onBlur);
     window.removeEventListener('gamepadconnected', this.onGamepadConnected);
     this.stage.removeEventListener('pointerdown', this.onFirstTouch, true);
+    document.documentElement.style.removeProperty('--play-toast-left');
+    document.documentElement.style.removeProperty('--play-toast-right');
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
   }
 }

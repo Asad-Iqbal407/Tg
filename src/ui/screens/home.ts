@@ -11,6 +11,13 @@ import { drawGamePreview, schedulePreview } from '../previews';
 import { openAccountDialog, syncPhaseText } from './account';
 import { missionList } from './missions';
 
+const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+
+/** "Ten" for 10: how the hero line counts the games (digits past twelve). */
+export function countWord(n: number): string {
+  return COUNT_WORDS[n] ?? String(n);
+}
+
 export function homeScreen(app: App): Screen {
   const el = h('section', { class: 'screen home' });
   const account = accountCard(app);
@@ -91,7 +98,7 @@ function hero(app: App, rerender: () => void): HTMLElement {
       h('h1', { class: 'hero__title' }, 'Neon ', h('span', { class: 'gradient-text', text: 'Arcade' })),
       h('p', {
         class: 'hero__subtitle',
-        text: 'Five classic-inspired games. One shared reward system. Earn coins, level up, unlock skins and climb your Hall of Fame.',
+        text: `${countWord(GAMES.length)} classic-inspired games. One shared reward system. Earn coins, level up, unlock skins and climb your Hall of Fame.`,
       }),
     ),
     daily,

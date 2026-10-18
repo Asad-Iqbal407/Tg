@@ -222,9 +222,19 @@ export class ArcadeService {
     return ticket;
   }
 
-  /** Abandoning a run forfeits rewards; boosts already consumed stay consumed. */
-  abandonRun(ticket: RunTicket): void {
-    if (this.activeTicket?.id === ticket.id) this.activeTicket = null;
+  /**
+   * Abandon a run that never really started (quit at once, or left from behind the rotate prompt): it earns
+   * nothing and records nothing, and the boosts it consumed go back to the inventory. Returns the refunded
+   * boosts. A ticket that is no longer active refunds nothing, so a run can never be refunded twice.
+   */
+  abandonRun(ticket: RunTicket): BoostId[] {
+    if (this.activeTicket?.id !== ticket.id) return [];
+    this.activeTicket = null;
+    if (ticket.boosts.length === 0) return [];
+    this.store.update((p) => {
+      for (const id of ticket.boosts) p.consumables[id] = (p.consumables[id] ?? 0) + 1;
+    });
+    return [...ticket.boosts];
   }
 
   finishRun(ticket: RunTicket, result: GameResult): RunSummary {
