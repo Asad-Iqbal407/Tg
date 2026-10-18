@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { textRun } from '../src/ui/overlay';
-import { type HintInputs, pickHint, toastLane } from '../src/ui/play';
+import { boostNames, type HintInputs, pickHint, toastLane } from '../src/ui/play';
 import { PILL_ZONE, previewRect } from '../src/ui/previews';
 import { countWord } from '../src/ui/screens/home';
 import { GAMES } from '../src/games/registry';
@@ -69,7 +69,10 @@ describe('rotate hint and fit chip', () => {
 describe('in-play toasts', () => {
   it('use the lane between the header buttons', () => {
     // P1 (360 px): pause 12-56, title 66-240, mute 250-294, fullscreen 304-348.
-    expect(toastLane({ left: 66, right: 240, width: 174, height: 21 }, 360)).toEqual({ left: 66, right: 120 });
+    expect(toastLane({ left: 66, right: 240, width: 174, height: 21 }, 360)).toEqual({
+      left: 66,
+      right: 120,
+    });
     // Without the fullscreen button (iPhone Safari) the lane grows to the right.
     expect(toastLane({ left: 66, right: 294, width: 228, height: 21 }, 360)).toEqual({ left: 66, right: 66 });
   });
@@ -104,10 +107,11 @@ describe('in-play toasts', () => {
 describe('game card art', () => {
   it('shows the whole Bubble Shooter board clear of the genre pill', () => {
     // Regression: the cropped board put its top rows under the pill in the top-left corner.
-    for (const [tw, th] of [
+    const cards: [number, number][] = [
       [480, 270],
       [640, 300],
-    ]) {
+    ];
+    for (const [tw, th] of cards) {
       const r = previewRect(720, 800, tw, th, 'contain');
       expect(r.x).toBeGreaterThanOrEqual(tw * PILL_ZONE - 0.01);
       expect(r.x + r.w).toBeLessThanOrEqual(tw + 0.01);
@@ -132,5 +136,22 @@ describe('home copy', () => {
     expect(countWord(GAMES.length)).toBe('Ten');
     expect(countWord(5)).toBe('Five');
     expect(countWord(20)).toBe('20');
+  });
+});
+
+describe('boost toast', () => {
+  it('names boosts as the shop does', () => {
+    // Regression: the toast read "shield · head start" for the boosts the shop sells as Guardian and Power Start.
+    expect(boostNames(['coin-doubler', 'shield', 'head-start'])).toBe(
+      'Coin Doubler · Guardian · Power Start',
+    );
+    expect(boostNames([])).toBe('');
+  });
+});
+
+describe('lobby art', () => {
+  it('centres whole-board art when no pill sits in the top-left corner', () => {
+    const r = previewRect(720, 800, 640, 300, 'contain', 0.5, 0);
+    expect(r.x + r.w / 2).toBeCloseTo(320, 5);
   });
 });

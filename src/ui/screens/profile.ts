@@ -1,5 +1,5 @@
 import { GAMES } from '../../games/registry';
-import { ACHIEVEMENTS } from '../../meta/achievements';
+import { ACHIEVEMENTS, unlockedCount } from '../../meta/achievements';
 import { getSkin } from '../../meta/catalog';
 import { levelInfo } from '../../meta/progression';
 import { NAME_MAX } from '../../meta/profile';
@@ -72,7 +72,7 @@ export function profileScreen(app: App): Screen {
       tile('Games played', fmt(p.totals['all.plays'] ?? 0)),
       tile('Time played', duration(totalTime)),
       tile('Coins earned', compact(p.totals['all.coinsEarned'] ?? 0)),
-      tile('Achievements', `${Object.keys(p.achievements).length}/${ACHIEVEMENTS.length}`),
+      tile('Achievements', `${unlockedCount(p)}/${ACHIEVEMENTS.length}`),
       tile('Best streak', `${p.daily.best} days`),
       tile('Skins owned', String(p.owned.length)),
     );

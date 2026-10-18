@@ -105,7 +105,7 @@ export interface Rect {
 /**
  * Where a `fw` x `fh` frame is drawn on a `tw` x `th` card. 'cover' fills the card (cropped about the
  * focus). 'contain' fits the whole frame, at most half the card wide, centred but moved right where it
- * would reach under the genre pill in the top-left corner.
+ * would reach under a pill in the top-left corner (the left `pillZone` share of the card).
  */
 export function previewRect(
   fw: number,
@@ -114,6 +114,7 @@ export function previewRect(
   th: number,
   fit: 'cover' | 'contain',
   focus = 0.5,
+  pillZone = PILL_ZONE,
 ): Rect {
   if (fit === 'cover') {
     const s = Math.max(tw / fw, th / fh);
@@ -124,12 +125,20 @@ export function previewRect(
   const s = Math.min(th / fh, (tw * CONTAIN_MAX_WIDTH) / fw);
   const w = fw * s;
   const h = fh * s;
-  const x = Math.min(Math.max((tw - w) / 2, tw * PILL_ZONE), tw - w);
+  const x = Math.min(Math.max((tw - w) / 2, tw * pillZone), tw - w);
   return { x, y: (th - h) / 2, w, h };
 }
 
-/** Draw a game preview into `target` (cropped to fill it, or whole for 'contain' games). */
-export function drawGamePreview(def: GameDefinition, skin: SkinData, target: HTMLCanvasElement): void {
+/**
+ * Draw a game preview into `target` (cropped to fill it, or whole for 'contain' games). `pillZone` is the
+ * share of the width, from the left, that a top-left pill covers (0 when the art has none there).
+ */
+export function drawGamePreview(
+  def: GameDefinition,
+  skin: SkinData,
+  target: HTMLCanvasElement,
+  pillZone = PILL_ZONE,
+): void {
   const frame = renderFrame(def, skin, target.width, target.height);
   const ctx = target.getContext('2d');
   if (!frame || !ctx) return;
@@ -148,7 +157,7 @@ export function drawGamePreview(def: GameDefinition, skin: SkinData, target: HTM
   ctx.restore();
   ctx.fillStyle = 'rgba(5, 6, 15, 0.45)';
   ctx.fillRect(0, 0, tw, th);
-  const r = previewRect(frame.width, frame.height, tw, th, 'contain');
+  const r = previewRect(frame.width, frame.height, tw, th, 'contain', 0.5, pillZone);
   ctx.save();
   ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
   ctx.shadowBlur = th * 0.06;

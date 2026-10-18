@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GAMES } from '../src/games/registry';
 import { GAME_IDS } from '../src/games/types';
-import { ACHIEVEMENTS, achievementProgress, newlyCompleted } from '../src/meta/achievements';
+import { ACHIEVEMENTS, achievementProgress, newlyCompleted, unlockedCount } from '../src/meta/achievements';
 import { BOOSTS, SKINS, UPGRADES } from '../src/meta/catalog';
 import { DAILY_REWARDS, dailyStatus, dayKey, shiftDay } from '../src/meta/daily';
 import { applyRunToMissions, generateMissions, MISSION_TEMPLATES } from '../src/meta/missions';
@@ -324,5 +324,23 @@ describe('ArcadeService robustness (shell audit)', () => {
     arcade.finishRun(first, { score: 10, coins: 0, durationSec: 20, stats: {} });
     expect(arcade.abandonRun(first)).toEqual([]);
     expect(arcade.profile.consumables.shield).toBe(before - 1);
+  });
+});
+
+describe('achievement unlocks (shell audit)', () => {
+  it('never pays an achievement twice, even one recorded at time 0', () => {
+    const p = defaultProfile(0);
+    p.games.snake.plays = 1;
+    expect(newlyCompleted(p).map((a) => a.id)).toContain('first-run');
+    p.achievements['first-run'] = 0;
+    expect(newlyCompleted(p).map((a) => a.id)).not.toContain('first-run');
+    expect(unlockedCount(p)).toBe(1);
+  });
+
+  it('counts only the arcade’s own achievements', () => {
+    const p = defaultProfile(0);
+    p.achievements['first-run'] = 5;
+    p.achievements['not-an-achievement'] = 5;
+    expect(unlockedCount(p)).toBe(1);
   });
 });

@@ -15,7 +15,8 @@ export function openLobby(app: App, def: GameDefinition): void {
   const art = h('canvas', { class: 'lobby__art', attrs: { width: 640, height: 300, 'aria-hidden': 'true' } });
   const renderArt = () => {
     const skin = getSkin(profile().equipped[def.id]);
-    if (skin) schedulePreview(() => drawGamePreview(def, toSkinData(skin), art));
+    // The lobby's pill sits along the bottom edge, so whole-board art stays centred here.
+    if (skin) schedulePreview(() => drawGamePreview(def, toSkinData(skin), art, 0));
   };
   renderArt();
 

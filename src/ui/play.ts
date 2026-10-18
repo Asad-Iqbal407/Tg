@@ -3,6 +3,7 @@ import { type Action, Input } from '../core/input';
 import { Rng } from '../core/rng';
 import type { BoostId, GameDefinition, GameInstance, GameResult, Insets } from '../games/types';
 import type { RunSummary, RunTicket } from '../meta/arcade';
+import { getBoost } from '../meta/catalog';
 import type { App } from './app';
 import { fmt, h, isTouchDevice } from './dom';
 import { icon, type IconName } from './icons';
@@ -29,6 +30,11 @@ const INSET_MARGIN = 6;
 const SLIDE_REACH = 28;
 /** Sustained frame rate below which the backing-store resolution is lowered. */
 const LOW_FPS = 48;
+
+/** The boosts of a run as the shop names them ("Coin Doubler · Guardian"). */
+export function boostNames(ids: readonly BoostId[]): string {
+  return ids.map((id) => getBoost(id)?.name ?? id).join(' · ');
+}
 
 /** Narrowest lane (CSS px) worth showing an in-play toast in; below it the default placement is used. */
 const MIN_TOAST_LANE = 120;
@@ -227,7 +233,7 @@ export class PlayScreen {
     if (this.ticket.boosts.length > 0) {
       this.app.toaster.show({
         title: 'Boosts active',
-        body: this.ticket.boosts.map((b) => b.replace('-', ' ')).join(' · '),
+        body: boostNames(this.ticket.boosts),
         icon: 'bolt',
         tone: 'info',
         ms: 2500,

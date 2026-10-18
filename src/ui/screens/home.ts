@@ -1,6 +1,6 @@
 import { GAMES } from '../../games/registry';
 import type { GameDefinition } from '../../games/types';
-import { ACHIEVEMENTS } from '../../meta/achievements';
+import { ACHIEVEMENTS, unlockedCount } from '../../meta/achievements';
 import { getSkin, toSkinData } from '../../meta/catalog';
 import { DAILY_REWARDS } from '../../meta/daily';
 import { levelInfo, levelUpReward } from '../../meta/progression';
@@ -11,7 +11,21 @@ import { drawGamePreview, schedulePreview } from '../previews';
 import { openAccountDialog, syncPhaseText } from './account';
 import { missionList } from './missions';
 
-const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+const COUNT_WORDS = [
+  'No',
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+];
 
 /** "Ten" for 10: how the hero line counts the games (digits past twelve). */
 export function countWord(n: number): string {
@@ -215,7 +229,7 @@ function sidePanels(app: App, rerender: () => void, accountEl: HTMLElement): HTM
   const p = app.arcade.profile;
   const info = levelInfo(p.xp);
   const next = levelUpReward(info.level + 1);
-  const unlocked = Object.keys(p.achievements).length;
+  const unlocked = unlockedCount(p);
   const progress = h(
     'div',
     { class: 'panel' },

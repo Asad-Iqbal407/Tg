@@ -33,6 +33,8 @@ const BANNER_TIME = 2;
 const HUD_PAD = 12;
 /** Height of one HUD pill, in logical px. */
 export const HUD_H = 40;
+/** Extra backing under each HUD pill, so labels stay readable over bright sky and clouds. */
+export const HUD_BACKING = 'rgba(8, 10, 30, 0.3)';
 /** Vertical gap between the two HUD rows (see hudLayout). */
 const HUD_ROW_GAP = 8;
 /** Strip of floor (px) kept visible above touch controls covering the bottom of the canvas. */
@@ -1645,6 +1647,15 @@ export class PlatformerGame extends BaseGame {
     }
   }
 
+  /**
+   * A HUD pill. The shared pill is see-through, which reads well over the dark skies of the other
+   * games but washes out over this game's bright sky and white clouds, so it gets a darker backing.
+   */
+  private pill(b: HudBox): void {
+    fillRoundRect(this.ctx, b.x, b.y, b.w, HUD_H, HUD_H / 2, HUD_BACKING);
+    hudPill(this.ctx, b.x, b.y, b.w, HUD_H);
+  }
+
   /** HUD anchored to the canvas edges inside the insets: score, coins, world on the left; clock, lives on the right. */
   private drawHud(): void {
     const ctx = this.ctx;
@@ -1661,24 +1672,24 @@ export class PlatformerGame extends BaseGame {
     const hud = this.hud();
     // Text sits on the vertical middle of its own pill, so the second row centres its labels too.
     const midY = (b: HudBox): number => b.y + HUD_H / 2 + 1;
-    hudPill(ctx, hud.score.x, hud.score.y, hud.score.w, HUD_H);
+    this.pill(hud.score);
     text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, hud.score.x + 18, midY(hud.score), {
       size: fit(22),
     });
-    hudPill(ctx, hud.coins.x, hud.coins.y, hud.coins.w, HUD_H);
+    this.pill(hud.coins);
     drawCoin(ctx, hud.coins.x + 22, midY(hud.coins) - 1, 11);
     text(ctx, `× ${this.coins}`, hud.coins.x + 40, midY(hud.coins), { size: fit(20) });
-    hudPill(ctx, hud.clock.x, hud.clock.y, hud.clock.w, HUD_H);
+    this.pill(hud.clock);
     const low = this.timeLeft < HURRY_TIME && this.phase === 'play';
     text(ctx, `⏱ ${Math.ceil(this.timeLeft)}`, hud.clock.x + 60, midY(hud.clock), {
       size: fit(20),
       align: 'center',
       color: low ? '#ff6b6b' : '#fff',
     });
-    hudPill(ctx, hud.lives.x, hud.lives.y, hud.lives.w, HUD_H);
+    this.pill(hud.lives);
     this.heart(hud.lives.x + 24, midY(hud.lives) - 1, 10);
     text(ctx, `× ${Math.max(0, this.lives)}`, hud.lives.x + 42, midY(hud.lives), { size: fit(20) });
-    hudPill(ctx, hud.world.x, hud.world.y, hud.world.w, HUD_H);
+    this.pill(hud.world);
     text(ctx, `WORLD ${worldLabel(this.levelNum)}`, hud.world.x + hud.world.w / 2, midY(hud.world), {
       size: fit(18),
       align: 'center',

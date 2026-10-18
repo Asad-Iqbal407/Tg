@@ -466,11 +466,19 @@ export function achievementProgress(def: AchievementDef, p: Profile): { current:
   return { current: Math.min(current, g.target), target: g.target };
 }
 
-/** Achievements whose goal is met but which are not yet recorded as unlocked. */
+/**
+ * Achievements whose goal is met but which are not yet recorded as unlocked. Any recorded unlock time
+ * counts, 0 included (an imported save or a clock at the epoch), so a reward is never paid twice.
+ */
 export function newlyCompleted(p: Profile): AchievementDef[] {
   return ACHIEVEMENTS.filter(
-    (a) => !p.achievements[a.id] && achievementProgress(a, p).current >= a.goal.target,
+    (a) => p.achievements[a.id] === undefined && achievementProgress(a, p).current >= a.goal.target,
   );
+}
+
+/** How many of the arcade's achievements are unlocked (ids a save may carry from elsewhere don't count). */
+export function unlockedCount(p: Profile): number {
+  return ACHIEVEMENTS.filter((a) => p.achievements[a.id] !== undefined).length;
 }
 
 export function getAchievement(id: string): AchievementDef | undefined {

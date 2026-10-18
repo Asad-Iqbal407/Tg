@@ -1,6 +1,6 @@
 import { GAMES, gameTitle } from '../../games/registry';
 import type { GameId } from '../../games/types';
-import { ACHIEVEMENTS, achievementProgress } from '../../meta/achievements';
+import { ACHIEVEMENTS, achievementProgress, unlockedCount } from '../../meta/achievements';
 import type { App, Screen } from '../app';
 import { fmt, h } from '../dom';
 import { icon } from '../icons';
@@ -10,7 +10,7 @@ export function achievementsScreen(app: App): Screen {
   const el = h('section', { class: 'screen' });
   const render = () => {
     const p = app.arcade.profile;
-    const unlocked = ACHIEVEMENTS.filter((a) => p.achievements[a.id]).length;
+    const unlocked = unlockedCount(p);
     const pct = Math.round((unlocked / ACHIEVEMENTS.length) * 100);
     const ring = h(
       'div',
@@ -45,15 +45,15 @@ export function achievementsScreen(app: App): Screen {
     );
     // Unlocked first, then by closeness to completion.
     const sorted = [...items].sort((a, b) => {
-      const ua = p.achievements[a.id] ? 1 : 0;
-      const ub = p.achievements[b.id] ? 1 : 0;
+      const ua = p.achievements[a.id] !== undefined ? 1 : 0;
+      const ub = p.achievements[b.id] !== undefined ? 1 : 0;
       if (ua !== ub) return ub - ua;
       const pa = achievementProgress(a, p);
       const pb = achievementProgress(b, p);
       return pb.current / pb.target - pa.current / pa.target;
     });
     for (const a of sorted) {
-      const done = !!p.achievements[a.id];
+      const done = p.achievements[a.id] !== undefined;
       const prog = achievementProgress(a, p);
       const fill = h('span', { class: 'xpbar__fill' });
       fill.style.width = `${Math.round((prog.current / prog.target) * 100)}%`;
