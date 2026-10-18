@@ -40,12 +40,23 @@ const FLOOR_STRIP = 24;
 const ZOOM_PHONE = 1.4;
 const ZOOM_PHONE_H = 430;
 const ZOOM_DESKTOP_H = 500;
+/** HUD labels are drawn at least this many CSS px tall, however small the canvas (see hudFloorPx). */
+const HUD_MIN_CSS = 12.5;
 
 /** World zoom for a canvas this many CSS px tall: 1 on desktops and when the size is unknown. */
 export function zoomFor(cssHeight: number): number {
   if (!(cssHeight > 0)) return 1;
   const t = clamp((ZOOM_DESKTOP_H - cssHeight) / (ZOOM_DESKTOP_H - ZOOM_PHONE_H), 0, 1);
   return 1 + (ZOOM_PHONE - 1) * t;
+}
+
+/**
+ * Smallest HUD font size (logical px) that still draws at HUD_MIN_CSS CSS px. The HUD is drawn at `zoom`
+ * on a canvas `cssHeight` CSS px tall, which shows `logicalHeight` logical px. 0 when the size is unknown.
+ */
+export function hudFloorPx(cssHeight: number, zoom: number, logicalHeight = ROWS * T): number {
+  if (!(cssHeight > 0)) return 0;
+  return HUD_MIN_CSS / (zoom * (cssHeight / logicalHeight));
 }
 
 interface Box {
@@ -1551,27 +1562,36 @@ export class PlatformerGame extends BaseGame {
   private drawHud(): void {
     const ctx = this.ctx;
     const k = 1 / this.zoom;
+    // On a short canvas (a narrow phone held upright) a label would draw below HUD_MIN_CSS, so it grows.
+    // At design zoom the floor is far below every label, so the HUD is unchanged.
+    const canvas = ctx.canvas as HTMLCanvasElement | undefined;
+    const minPx = hudFloorPx(
+      typeof canvas?.clientHeight === 'number' ? canvas.clientHeight : 0,
+      this.zoom,
+      this.H,
+    );
+    const fit = (px: number): number => Math.max(px, minPx);
     const top = this.insets.top * k + HUD_PAD;
     const left = this.insets.left * k + HUD_PAD;
     const right = this.vw - this.insets.right * k - HUD_PAD;
     const cy = top + HUD_H / 2 + 1;
     hudPill(ctx, left, top, 196, HUD_H);
-    text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, left + 18, cy, { size: 22 });
+    text(ctx, `${Math.floor(this.score).toString().padStart(7, '0')}`, left + 18, cy, { size: fit(22) });
     hudPill(ctx, left + 206, top, 104, HUD_H);
     drawCoin(ctx, left + 228, cy - 1, 11);
-    text(ctx, `× ${this.coins}`, left + 246, cy, { size: 20 });
+    text(ctx, `× ${this.coins}`, left + 246, cy, { size: fit(20) });
     const livesX = right - 104;
     const clockX = livesX - 10 - 120;
     hudPill(ctx, clockX, top, 120, HUD_H);
     const low = this.timeLeft < HURRY_TIME && this.phase === 'play';
     text(ctx, `⏱ ${Math.ceil(this.timeLeft)}`, clockX + 60, cy, {
-      size: 20,
+      size: fit(20),
       align: 'center',
       color: low ? '#ff6b6b' : '#fff',
     });
     hudPill(ctx, livesX, top, 104, HUD_H);
     this.heart(livesX + 24, cy - 1, 10);
-    text(ctx, `× ${Math.max(0, this.lives)}`, livesX + 42, cy, { size: 20 });
+    text(ctx, `× ${Math.max(0, this.lives)}`, livesX + 42, cy, { size: fit(20) });
     // The world pill follows the coins when there is room, else it drops below the score.
     const worldW = 150;
     let wx = left + 320;
@@ -1582,7 +1602,7 @@ export class PlatformerGame extends BaseGame {
     }
     hudPill(ctx, wx, wy, worldW, HUD_H);
     text(ctx, `WORLD ${worldLabel(this.levelNum)}`, wx + worldW / 2, wy + HUD_H / 2 + 1, {
-      size: 18,
+      size: fit(18),
       align: 'center',
     });
 

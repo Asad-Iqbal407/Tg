@@ -59,12 +59,19 @@ export interface SceneView {
 
 const BG = '#0b1020';
 /** HUD text size under touch controls (logical px): at a phone's scale it stays at least 12 CSS px. */
-const COMPACT_HUD_PX = 20;
+export const COMPACT_HUD_PX = 21;
 /**
  * Bots are drawn this much larger under touch controls, so a walker is about 8% of a phone's short side (the bots'
  * collision size is unchanged).
  */
-const COMPACT_BOT_SCALE = 1.45;
+export const COMPACT_BOT_SCALE = 1.45;
+/**
+ * The player is drawn this much larger under touch controls, so the character is about 9% of a phone's short side
+ * (the collision size is unchanged).
+ */
+export const COMPACT_PLAYER_SCALE = 1.3;
+/** The player sprite from the top of its head to its shoes, in tile units at the normal size. */
+export const PLAYER_HEIGHT_TILES = 0.76;
 /** The sprite's feet sit this far below the player's tile centre, in tile units. */
 const FEET_DROP = 0.16;
 const WALKER_BODY = '#f87171';
@@ -172,7 +179,10 @@ function drawShadows(ctx: CanvasRenderingContext2D, v: SceneView): void {
   };
   for (const b of v.bombs) ellipse(b.x, b.y + 0.12, ts * 0.22, ts * 0.1);
   for (const bot of v.bots) ellipse(bot.x, bot.y + 0.3, ts * 0.26, ts * 0.1);
-  if (v.player.respawn <= 0) ellipse(v.player.x, v.player.y + 0.3, ts * 0.24, ts * 0.1);
+  if (v.player.respawn <= 0) {
+    const k = v.compact ? COMPACT_PLAYER_SCALE : 1;
+    ellipse(v.player.x, v.player.y + 0.3, ts * 0.24 * k, ts * 0.1 * k);
+  }
 }
 
 function drawExplosionsOnFloor(ctx: CanvasRenderingContext2D, v: SceneView): void {
@@ -448,7 +458,7 @@ function drawPlayer(ctx: CanvasRenderingContext2D, v: SceneView): void {
   if (p.invuln > 0 && Math.floor(v.time * 12) % 2 === 0) return;
   const cx = ox + p.x * ts;
   const feet = oy + p.y * ts + ts * FEET_DROP;
-  const r = ts * 0.3;
+  const r = ts * 0.3 * (v.compact ? COMPACT_PLAYER_SCALE : 1);
   const swing = Math.sin(p.walk) * r * 0.25;
   const flip = p.facingX < 0 ? -1 : 1;
 
@@ -534,16 +544,22 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
     color: '#fde68a',
   });
 
-  // Under touch controls the score pill has two lines (score, then power-ups), each at the larger text size.
-  const pillW = big ? 212 : 188;
+  // Under touch controls the score pill has two lines (score, then power-ups), each at the larger text size, set in
+  // from the right so the rounded end of the pill keeps clear of them.
+  const pillW = big ? 224 : 188;
+  const right = v.W - (big ? 20 : 14);
   hudPill(ctx, v.W - pillW - 8, 6, pillW, big ? 50 : 44);
-  text(ctx, formatNumber(v.score), v.W - 14, big ? 20 : 22, { size: 20, align: 'right', color: '#ffffff' });
+  text(ctx, formatNumber(v.score), right, big ? 20 : 22, {
+    size: big ? COMPACT_HUD_PX : 20,
+    align: 'right',
+    color: '#ffffff',
+  });
   const chips: string[] = [];
   if (p.blastUps > 0) chips.push(`F${p.blastUps}`);
   if (p.bombUps > 0) chips.push(`B${p.bombUps}`);
   if (p.speedUps > 0) chips.push(`S${p.speedUps}`);
   if (p.shielded) chips.push('SH');
-  text(ctx, chips.length > 0 ? chips.join('  ') : 'no power-ups', v.W - 14, big ? 42 : 41, {
+  text(ctx, chips.length > 0 ? chips.join('  ') : 'no power-ups', right, big ? 42 : 41, {
     size: big ? COMPACT_HUD_PX : 12,
     align: 'right',
     weight: 700,

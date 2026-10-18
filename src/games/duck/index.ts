@@ -24,7 +24,7 @@ export const duckGame: GameDefinition = {
     ['Space / Enter', 'Shoot'],
     ['Shift / X / right click', 'Snap onto the nearest duck'],
   ],
-  touchHint: 'Tap anywhere to shoot at that spot.',
+  touchHint: 'Tap the scene to shoot at that spot.',
   touchButtons: [],
   scorePerCoin: 4000,
   scorePerXp: 650,

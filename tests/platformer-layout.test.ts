@@ -3,7 +3,8 @@ import { NullAudio } from '../src/core/audio';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
-import { zoomFor } from '../src/games/platformer/platformer';
+import { hudFloorPx, zoomFor } from '../src/games/platformer/platformer';
+import { ROWS, T } from '../src/games/platformer/level';
 import type { GameInstance } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
 import { gameById, mockCtx } from './helpers';
@@ -61,6 +62,22 @@ describe('Pixel Quest layout', () => {
     expect(zoomFor(360)).toBeCloseTo(1.4);
     expect(zoomFor(430)).toBeCloseTo(1.4);
   });
+
+  it('leaves the HUD at its design size on desktops, tablets and landscape phones', () => {
+    expect(hudFloorPx(744, 1)).toBeLessThan(18); // 1280x800 desktop canvas
+    expect(hudFloorPx(691, 1)).toBeLessThan(18); // 1024x768 tablet canvas
+    expect(hudFloorPx(360, zoomFor(360))).toBeLessThan(18); // L1 canvas
+    expect(hudFloorPx(0, 1)).toBe(0); // size not known yet
+  });
+
+  it.each([243, 263, 290])(
+    'draws the smallest HUD label at least 12.5 CSS px on a %s px tall portrait canvas',
+    (cssH) => {
+      const zoom = zoomFor(cssH);
+      const cssPerPx = (cssH / (ROWS * T)) * zoom;
+      expect(Math.max(18, hudFloorPx(cssH, zoom)) * cssPerPx).toBeGreaterThanOrEqual(12.5 - 1e-9);
+    },
+  );
 
   it('frames the hero and the ground above the touch controls while zoomed', () => {
     // An L1 canvas: 1032x540 logical, 360 CSS px tall, so the world is drawn 1.4x bigger.

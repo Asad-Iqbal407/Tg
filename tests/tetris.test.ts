@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { type Action, Input, type PointerState, type SwipeDir } from '../src/core/input';
 import { NullAudio } from '../src/core/audio';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
-import { Board, COLS, HIDDEN_ROWS, ROWS } from '../src/games/tetris/board';
-import { layoutTetris, panelSlots } from '../src/games/tetris/draw';
+import { Board, COLS, HIDDEN_ROWS, ROWS, VISIBLE_ROWS } from '../src/games/tetris/board';
+import { COMPACT_LABEL_PX, layoutTetris, panelSlots } from '../src/games/tetris/draw';
 import {
   cellsOf,
   type Kind,
@@ -1223,6 +1223,32 @@ describe('phone layout', () => {
     }
   });
 
+  it('centres the visible playfield between the top margin and the touch controls at P1 to P3', () => {
+    // The logical canvas and the touch band of each phone, as the play screen reports them.
+    const cases: [number, number, number][] = [
+      [540, 1036, 111],
+      [540, 1100, 109],
+      [536, 1100, 106],
+    ];
+    for (const [width, height, bottom] of cases) {
+      const { well } = layoutTetris(width, height, bottom, true);
+      const visibleTop = well.y + HIDDEN_ROWS * well.cell;
+      const visibleBottom = visibleTop + VISIBLE_ROWS * well.cell;
+      // The room above the playfield matches the room between it and the touch band, to within a logical pixel.
+      expect(
+        Math.abs(visibleTop - (height - bottom - visibleBottom)),
+        `${width}x${height}`,
+      ).toBeLessThanOrEqual(2);
+      expect(well.y).toBeGreaterThanOrEqual(16);
+    }
+  });
+
+  it('keeps the panel labels and stat names at least 12 CSS px at P1, where the canvas is scaled to 0.666', () => {
+    // A 360 x 740 phone draws the 540 x 1036 logical canvas at the smaller of its two scales.
+    const scale = Math.min(360 / 540, 690 / 1036);
+    expect(COMPACT_LABEL_PX * scale).toBeGreaterThanOrEqual(12);
+  });
+
   it('keeps the side panel beside the well, clear of the touch controls, at P1 and P2', () => {
     // The canvas of a 360 or 390 px phone is 540 logical px wide. The bottom inset is the touch band the shell reports.
     const cases: [number, number, number][] = [
@@ -1242,3 +1268,47 @@ describe('phone layout', () => {
     }
   });
 });
+
+describe('touch layout', () => {
+  it('sets the compact panel text on a touch screen even when no button covers the canvas', () => {
+    // A touch screen keeps the larger labels when the controls do not reach the canvas (bottom inset 0).
+    expect(layoutTetris(540, 900, 0, true, true).panel?.compact).toBe(true);
+    expect(layoutTetris(540, 900, 0, true).panel?.compact).toBe(false);
+    const compact = `800 ${COMPACT_LABEL_PX}px`;
+    expect(fontsDrawn(true).some((f) => f.startsWith(compact))).toBe(true);
+    expect(fontsDrawn(false).some((f) => f.startsWith(compact))).toBe(false);
+  });
+});
+
+/**
+ * The font of every text draw in one frame of Block Drop, for a run with no touch controls on the canvas. A coarse
+ * pointer makes the run a touch screen, as a phone's browser reports it.
+ */
+function fontsDrawn(coarsePointer: boolean): string[] {
+  const fonts: string[] = [];
+  const ctx = new Proxy(mockCtx(), {
+    set(target, key, value) {
+      if (key === 'font') fonts.push(String(value));
+      return Reflect.set(target, key, value);
+    },
+  });
+  if (coarsePointer) vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  try {
+    const game = tetrisGame.create({
+      ctx,
+      width: tetrisGame.width,
+      height: tetrisGame.height,
+      input: new Input(),
+      audio: new NullAudio(),
+      rng: new Rng(1),
+      loadout: { skin: toSkinData(defaultSkin('tetris')), boosts: new Set(), powerDuration: 1 },
+      insets: NO_INSETS,
+      reducedMotion: false,
+      haptic: () => undefined,
+    });
+    game.render();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  return fonts;
+}

@@ -11,6 +11,8 @@ const STRIP_PX = 104;
 const LABEL_PX = 18;
 /** Label room in a compact panel (under touch controls), where the labels are set larger. */
 const LABEL_PX_COMPACT = 24;
+/** Label and stat-name size in a compact panel: at a phone's scale it stays at least 12 CSS px. */
+export const COMPACT_LABEL_PX = 19;
 /** Shortest stat box that still has room for its name above its value. */
 const STAT_TALL_PX = 36;
 /** Narrowest logical width that leaves a side panel room beside a well of usable size. */
@@ -52,8 +54,18 @@ export interface TetrisLayout {
 /**
  * Where the well and its panel go. The well is fitted with the largest whole cell, centred in the area above
  * the touch controls. The panel sits to the right when the width allows, otherwise above the well.
+ * Under touch controls the visible playfield is centred there, so the room over it matches the room to the controls;
+ * the buffer rows, where pieces spawn, sit above it. On desktop the whole well, buffer rows included, is centred.
+ * `touch` selects the compact panel text; it is on under touch controls by default, and a touch screen passes it on
+ * its own, so a canvas the controls do not reach keeps the larger text too.
  */
-export function layoutTetris(W: number, H: number, bottom: number, withPanel: boolean): TetrisLayout {
+export function layoutTetris(
+  W: number,
+  H: number,
+  bottom: number,
+  withPanel: boolean,
+  touch = bottom > 0,
+): TetrisLayout {
   const availW = W - 2 * MARGIN;
   const availH = H - 2 * MARGIN - bottom;
   /** Start of a block of `size` centred in `space`, never above or left of the margin. */
@@ -72,10 +84,13 @@ export function layoutTetris(W: number, H: number, bottom: number, withPanel: bo
       const panelW = Math.floor(PANEL_CELLS * cell);
       const groupW = COLS * cell + GAP + panelW;
       const x = centred(availW, groupW);
-      const y = centred(availH, ROWS * cell);
+      const y =
+        bottom > 0
+          ? Math.max(MARGIN, centred(availH, VISIBLE_ROWS * cell) - HIDDEN_ROWS * cell)
+          : centred(availH, ROWS * cell);
       return {
         well: { x, y, cell },
-        panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true, compact: bottom > 0 },
+        panel: { x: x + COLS * cell + GAP, y, w: panelW, h: ROWS * cell, side: true, compact: touch },
       };
     }
   }
@@ -334,8 +349,8 @@ const VALUE_SHORT_TEXT: TextOpts = { size: 13, align: 'right', stroke: null };
 /** The tall stat value. Its size is set just before each value is drawn, so one object serves every stat. */
 const VALUE_TEXT: TextOpts = { stroke: null };
 /** Compact panel (under touch controls): the same text, set so a phone's small scale still reads at 12 CSS px. */
-const LABEL_TEXT_COMPACT: TextOpts = { size: 18, weight: 800, color: '#d8b4fe', stroke: null };
-const NAME_TEXT_COMPACT: TextOpts = { size: 18, weight: 800, color: '#d8b4fe', stroke: null };
+const LABEL_TEXT_COMPACT: TextOpts = { size: COMPACT_LABEL_PX, weight: 800, color: '#d8b4fe', stroke: null };
+const NAME_TEXT_COMPACT: TextOpts = { size: COMPACT_LABEL_PX, weight: 800, color: '#d8b4fe', stroke: null };
 const VALUE_MAX_PX = 18;
 const VALUE_MAX_PX_COMPACT = 20;
 

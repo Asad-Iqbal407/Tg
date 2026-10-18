@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { GAMES } from '../src/games/registry';
-import { touchHudSize } from '../src/games/snake/draw';
-import { gridSize } from '../src/games/snake/board';
+import { headRadius, touchHudSize } from '../src/games/snake/draw';
+import { fitBoard, gridSize } from '../src/games/snake/board';
 import { cornerSizes, createGame } from './helpers';
 import { snakeGame } from '../src/games/snake';
 
@@ -39,6 +39,22 @@ describe('snake layout', () => {
       expect(size.height, name).toBe(800);
       expect(gridSize(size.width, size.height).rows, name).toBe(29);
     }
+  });
+
+  it('draws the head at least 8% of the short side on the P2 phone stage', () => {
+    const [, w, h] = PORTRAIT_PHONES.find(([name]) => name === 'P2')!;
+    const stage = stageFor(w, h);
+    const size = chooseLogicalSize(snake, stage.w, stage.h);
+    const scale = Math.min(stage.w / size.width, stage.h / size.height);
+    const grid = gridSize(size.width, size.height);
+    const { cell } = fitBoard(grid.cols, grid.rows, size.width, size.height, 0);
+    const diameter = 2 * headRadius(cell, 0, true) * scale;
+    expect(diameter / Math.min(stage.w, stage.h)).toBeGreaterThanOrEqual(0.08);
+  });
+
+  it('keeps the desktop head at the body width, and draws a larger head on touch', () => {
+    expect(headRadius(24, 0, false)).toBeCloseTo(24 * 0.78 * 0.7);
+    expect(headRadius(24, 0, true)).toBeGreaterThan(headRadius(24, 0, false));
   });
 
   it('keeps the desktop 1280 x 800 window and the landscape phone boards inside the range', () => {

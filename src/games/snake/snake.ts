@@ -80,7 +80,7 @@ export class SnakeGame extends BaseGame {
   /** Scratch buffers reused by every spawn and level-up. */
   private readonly busy: Uint8Array;
   private readonly free: Int32Array;
-  /** Coarse pointer at the start of the run: selects the larger touch HUD. Drawing only. */
+  /** Coarse pointer at the start of the run: selects the larger touch HUD and head. Drawing only. */
   private readonly touch: boolean;
 
   constructor(services: GameServices) {
@@ -160,6 +160,7 @@ export class SnakeGame extends BaseGame {
       thick: this.skinParam('thick', 0),
       ghost: this.invulnT > 0,
       dead: this.isEnding,
+      touch: this.touch,
       time: this.time,
     });
     this.particles.render(ctx);

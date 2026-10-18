@@ -7,7 +7,13 @@ import type { App } from './app';
 import { fmt, h, isTouchDevice } from './dom';
 import { icon, type IconName } from './icons';
 import { Modal } from './overlay';
-import { declaresOrientation, needsRotation, orientationOf, type Orientation } from './orientation';
+import {
+  declaresOrientation,
+  needsRotation,
+  orientationOf,
+  type Orientation,
+  promptOwnsTurns,
+} from './orientation';
 import { showResults } from './results';
 
 /** Runs shorter than this with zero score are discarded instead of recorded. */
@@ -41,6 +47,8 @@ export class PlayScreen {
   private readonly muteBtn: HTMLButtonElement;
   private readonly fullscreenBtn: HTMLButtonElement | null;
   private readonly rotateHint: HTMLButtonElement;
+  /** Offered on a declared-orientation phone when the run was sized for the other side of a turn. */
+  private readonly fitHint: HTMLButtonElement;
   /** "Rotate your phone" prompt for games that declare an orientation (touch phones only). */
   private readonly rotateGate: HTMLElement;
   private readonly viewport: Viewport;
@@ -52,6 +60,8 @@ export class PlayScreen {
   private game: GameInstance | null = null;
   private ticket: RunTicket | null = null;
   private runSize: LogicalSize;
+  /** Whether the current game has simulated a step yet (a run that has not can be sized again). */
+  private stepped = false;
   /** Live insets object handed to the current game; updated in place on layout changes. */
   private insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
   private paused = false;
@@ -105,8 +115,21 @@ export class PlayScreen {
       h('span', { class: 'rotate-hint__text', text: 'Rotate for a bigger view' }),
       icon('close', 'icon rotate-hint__close'),
     );
+    this.fitHint = h(
+      'button',
+      {
+        class: 'rotate-hint fit-hint',
+        attrs: { type: 'button' },
+        on: {
+          pointerdown: (e) => e.stopPropagation(),
+          click: () => this.pause(),
+        },
+      },
+      icon('expand', 'icon rotate-hint__icon'),
+      h('span', { class: 'rotate-hint__text', text: 'Fit to this screen' }),
+    );
     this.rotateGate = this.buildRotateGate();
-    this.stage = h('div', { class: 'play__stage' }, this.rotateHint, this.rotateGate);
+    this.stage = h('div', { class: 'play__stage' }, this.rotateHint, this.fitHint, this.rotateGate);
     this.el = h(
       'section',
       {
@@ -145,9 +168,35 @@ export class PlayScreen {
   private newRun(boosts: BoostId[]): void {
     this.stopMenuPad();
     this.ticket = this.app.arcade.startRun(this.def.id, boosts);
+    this.app.audio.stopEngines();
+    this.stepped = false;
+    this.build();
+    if (this.ticket.boosts.length > 0) {
+      this.app.toaster.show({
+        title: 'Boosts active',
+        body: this.ticket.boosts.map((b) => b.replace('-', ' ')).join(' · '),
+        icon: 'bolt',
+        tone: 'info',
+        ms: 2500,
+      });
+    }
+    this.paused = false;
+    this.app.audio.setPaused(false);
+    this.app.audio.setMusicPaused(false);
+    this.app.audio.startMusic(this.def.music);
+    // A game that wants the other orientation waits behind the rotate prompt; the music waits too.
+    this.refreshPlay();
+  }
+
+  /**
+   * Size the game to the stage as it is now and create it at that size. A run is sized once when it
+   * starts; only a run that has not stepped yet is sized again, when the phone turns (see onRefit).
+   */
+  private build(): void {
+    const ticket = this.ticket;
+    if (!ticket) return;
     this.game?.destroy();
     this.game = null;
-    this.app.audio.stopEngines();
     this.input.reset();
     // Pick the logical size for this run from the space available right now.
     const avail = this.viewport.available();
@@ -166,31 +215,17 @@ export class PlayScreen {
       input: this.input,
       audio: this.app.audio,
       rng: new Rng((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0),
-      loadout: this.ticket.loadout,
+      loadout: ticket.loadout,
       insets: this.insets,
       reducedMotion: this.app.reducedMotion,
       haptic: (ms) => this.app.haptic(ms),
     });
-    if (this.ticket.boosts.length > 0) {
-      this.app.toaster.show({
-        title: 'Boosts active',
-        body: this.ticket.boosts.map((b) => b.replace('-', ' ')).join(' · '),
-        icon: 'bolt',
-        tone: 'info',
-        ms: 2500,
-      });
-    }
-    this.paused = false;
-    this.app.audio.setPaused(false);
-    this.app.audio.setMusicPaused(false);
-    this.app.audio.startMusic(this.def.music);
-    // A game that wants the other orientation waits behind the rotate prompt; the music waits too.
-    this.refreshPlay();
   }
 
   private step(dt: number): void {
     const game = this.game;
     if (!game) return;
+    this.stepped = true;
     game.update(dt);
     if (this.input.wasPressed('pause')) {
       this.input.postUpdate();
@@ -244,11 +279,13 @@ export class PlayScreen {
     const landscape = a.width > a.height;
     const rotated = this.stageLandscape !== null && landscape !== this.stageLandscape;
     this.stageLandscape = landscape;
+    // A run that has not started yet takes the new shape at once, so it never begins at the wrong fit.
+    if (rotated && !this.stepped && this.game && this.gateOwnsTurns()) this.build();
     // Insets follow the new layout at once, so the next frame already avoids the new button spots.
     this.updateLayout();
-    // Games that declare an orientation keep their run through a turn (the prompt holds it when the
-    // turn is the wrong way). Other games pause, as before, so the player can choose.
-    if (rotated && !declaresOrientation(this.def.orientation)) this.pause();
+    // On a touch phone the prompt holds and resumes a declared-orientation run through a turn. Any other
+    // turn pauses, as before, so the player can choose.
+    if (rotated && !this.gateOwnsTurns()) this.pause();
     this.refreshPlay();
     if (this.paused) this.updateFitOffer();
     if (this.loop.isRunning) this.loop.invalidate();
@@ -299,15 +336,27 @@ export class PlayScreen {
   }
 
   private updateRotateHint(): void {
-    const hint = this.rotateHint;
     const a = this.viewport.available();
     const key = a.width > a.height ? 'landscape' : 'portrait';
-    // The rotate prompt and this hint never show together: the prompt covers a touch phone held the
-    // wrong way for a declared orientation, and the hint covers every other case.
+    // The prompt, the rotate hint and the fit chip never show together. The prompt covers a touch phone
+    // held the wrong way. The fit chip covers a run sized for the other side of a turn, now that the
+    // phone is on the declared side. The rotate hint covers every other turn that would enlarge the game.
+    // Hints belong to a run on screen: none while the results are open or before a game exists.
+    const live = this.game !== null && !this.resultsOpen;
     const prompted = this.rotateBlocked();
-    const show = !prompted && this.sawTouch && !this.rotateDismissed[key] && this.rotateGain() >= ROTATE_GAIN;
-    hint.classList.toggle('is-visible', show);
-    if (show) this.placeRotateHint();
+    const onDeclared = orientationOf(window.innerWidth, window.innerHeight) === this.def.orientation;
+    const fit = live && !prompted && onDeclared && this.gateOwnsTurns() && this.refitGain() >= REFIT_GAIN;
+    const turn =
+      live &&
+      !prompted &&
+      !fit &&
+      this.sawTouch &&
+      !this.rotateDismissed[key] &&
+      this.rotateGain() >= ROTATE_GAIN;
+    this.rotateHint.classList.toggle('is-visible', turn);
+    this.fitHint.classList.toggle('is-visible', fit);
+    if (turn) this.placeHint(this.rotateHint);
+    if (fit) this.placeHint(this.fitHint);
   }
 
   /** The rotate prompt's card: an icon, the reason, and a way to play in the current orientation. */
@@ -351,6 +400,11 @@ export class PlayScreen {
     return needsRotation(preferred, isTouchDevice(), w, h, this.anywayFor);
   }
 
+  /** Whether the prompt, not a pause, handles this game's turns on this device. */
+  private gateOwnsTurns(): boolean {
+    return promptOwnsTurns(this.def.orientation, isTouchDevice(), window.innerWidth, window.innerHeight);
+  }
+
   /**
    * Keep the loop in step with the phone: a turn the wrong way holds the run behind the prompt, and
    * a turn back (or "Play anyway") resumes it. The pause menu and the results keep their own state.
@@ -361,6 +415,7 @@ export class PlayScreen {
     this.rotateGate.classList.toggle('is-visible', blocked);
     if (blocked) this.holdForRotate();
     else if (!this.paused) this.startLoop();
+    this.updateRotateHint();
   }
 
   /** Stop the simulation behind the rotate prompt: no input, no music, no engines. */
@@ -380,13 +435,12 @@ export class PlayScreen {
     this.loop.start();
   }
 
-  /** Put the rotate prompt in the widest letterbox band so it doesn't cover the game. */
-  private placeRotateHint(): void {
+  /** Put a hint in the widest letterbox band so it doesn't cover the game. */
+  private placeHint(hint: HTMLElement): void {
     const s = this.stage.getBoundingClientRect();
     const c = this.viewport.canvas.getBoundingClientRect();
     const top = c.top - s.top;
     const side = c.left - s.left;
-    const hint = this.rotateHint;
     hint.classList.remove('rotate-hint--side');
     if (top >= 64 || top >= side) {
       hint.style.left = `${s.width / 2}px`;

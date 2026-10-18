@@ -82,6 +82,8 @@ export class BombSquadGame extends BaseGame {
   /** Stamp of the latest detonation that covered each tile; compared against `serial`. */
   private readonly blastMark: Uint32Array;
   private readonly botEnv: BotEnv;
+  /** Coarse pointer at the start of the run: a touch screen gets the touch layout. Drawing only. */
+  private readonly touch: boolean;
   private bots: Bot[] = [];
   private bombs: Bomb[] = [];
   private explosions: Explosion[] = [];
@@ -103,6 +105,7 @@ export class BombSquadGame extends BaseGame {
 
   constructor(services: GameServices) {
     super(services);
+    this.touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     // The arena is built once, so its size is fixed by the touch controls present when the run starts.
     const bottom = this.insets.bottom;
     this.arena =
@@ -201,8 +204,17 @@ export class BombSquadGame extends BaseGame {
       score: this.score,
       ammo: this.player.ammo,
       ammoMax: this.player.ammoMax,
-      compact: this.insets.bottom > 0,
+      compact: this.touchLayout(),
     };
+  }
+
+  /**
+   * The touch layout: larger HUD text and sprites, and a taller HUD. It is on under touch controls and on any touch
+   * screen, so a canvas that the controls do not reach (letterboxed, for example) keeps the larger text too. Card
+   * previews keep the desktop layout, so their art is the same on every device.
+   */
+  private touchLayout(): boolean {
+    return this.services.preview !== true && (this.insets.bottom > 0 || this.touch);
   }
 
   /** Where the arena sits on screen: the largest whole tile size that fits, centred. */
@@ -210,8 +222,8 @@ export class BombSquadGame extends BaseGame {
     const key = this.insets.bottom;
     if (key !== this.layoutKey) {
       this.layoutKey = key;
-      // Under touch controls the HUD is taller (its score pill has two lines), so the arena starts lower.
-      const top = key > 0 ? 64 : 56;
+      // On a touch screen the HUD is taller (its score pill has two lines), so the arena starts lower.
+      const top = this.touchLayout() ? 64 : 56;
       const rectW = this.W - 32;
       const rectH = this.H - top - 8 - key;
       const ts = Math.max(4, Math.floor(Math.min(rectW / this.arena.cols, rectH / this.arena.rows)));

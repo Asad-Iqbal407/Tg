@@ -64,6 +64,7 @@ interface Probe {
   collect(kind: string): void;
   hpScale(): number;
   groupHover(): void;
+  hudScale(): number;
 }
 
 function probe(game: GameInstance): Probe {
@@ -342,6 +343,40 @@ describe('Galaxy War controls', () => {
     expect(g.bombs).toBe(before - 1);
   });
 
+  it('keeps the whole hull on the field when a drag runs past either wall', () => {
+    const { game, input, g } = fresh({ width: 540, height: 960 });
+    input.pointer.touch = true;
+    input.pointer.active = true;
+    input.pointer.inside = true;
+    input.pointer.down = true;
+    input.pointer.pressed = true;
+    // The finger lands on the ship, then drags far past the left wall, then the right one.
+    input.pointer.x = g.shipX;
+    input.pointer.y = g.shipY;
+    step(game, input, 1);
+    input.pointer.pressed = false;
+    input.pointer.x = -200;
+    step(game, input, 240);
+    expect(g.shipX).toBeCloseTo(26, 6);
+    input.pointer.x = 740;
+    step(game, input, 240);
+    expect(g.shipX).toBeCloseTo(540 - 26, 6);
+  });
+
+  it('keeps a popup earned at the wall on the field', () => {
+    const { game, g } = fresh();
+    g.shipX = 26;
+    g.weapon = 5;
+    g.collect('power');
+    // The overdrive label is centred near the ship; its half-width must stay inside the field.
+    const texts = (game as unknown as { texts: { items: { x: number; text: string }[] } }).texts.items;
+    const item = texts.find((t) => t.text === 'OVERDRIVE!');
+    expect(item).toBeDefined();
+    const half = 'OVERDRIVE!'.length * 0.4 * 22;
+    expect(item!.x - half).toBeGreaterThanOrEqual(0);
+    expect(item!.x + half).toBeLessThanOrEqual(540);
+  });
+
   it('keeps the ship above touch-control insets', () => {
     const insets = { top: 0, right: 0, bottom: 200, left: 0 };
     const { game, input, g } = fresh({ height: 960, insets });
@@ -394,21 +429,54 @@ function stageFor(w: number, h: number): { w: number; h: number } {
   return { w, h: h - (w <= 720 ? 50 : 56) };
 }
 
-/** A context stand-in on a canvas drawn `cssWidth` px wide; records the font size of each fillText. */
-function textRecorder(cssWidth: number): { ctx: CanvasRenderingContext2D; sizes: number[] } {
+const BOMB_FILL = '#ff9f1c';
+
+/**
+ * A context stand-in on a canvas drawn `cssWidth` px wide. It records the font size of each fillText,
+ * and the centre and radius of each arc drawn in the bomb colour.
+ */
+function hudRecorder(cssWidth: number): {
+  ctx: CanvasRenderingContext2D;
+  sizes: number[];
+  bombs: { x: number; y: number; r: number }[];
+} {
   const sizes: number[] = [];
+  const bombs: { x: number; y: number; r: number }[] = [];
   const base = mockCtx();
   (base as unknown as { canvas: unknown }).canvas = { clientWidth: cssWidth };
   const ctx = new Proxy(base, {
     get(target, key) {
-      if (key !== 'fillText') return Reflect.get(target, key);
-      return () => {
-        const m = /(\d+(?:\.\d+)?)px/.exec(target.font);
-        if (m) sizes.push(Number(m[1]));
-      };
+      if (key === 'fillText') {
+        return () => {
+          const m = /(\d+(?:\.\d+)?)px/.exec(target.font);
+          if (m) sizes.push(Number(m[1]));
+        };
+      }
+      if (key === 'arc') {
+        return (x: number, y: number, r: number) => {
+          if (target.fillStyle === BOMB_FILL) bombs.push({ x, y, r });
+        };
+      }
+      return Reflect.get(target, key);
     },
   });
-  return { ctx, sizes };
+  return { ctx, sizes, bombs };
+}
+
+/** A galaxy run at a logical size, drawing into a recording context. */
+function drawnRun(size: { width: number; height: number }, ctx: CanvasRenderingContext2D): GameInstance {
+  return gameById('galaxy').create({
+    ctx,
+    width: size.width,
+    height: size.height,
+    input: new Input(),
+    audio: new NullAudio(),
+    rng: new Rng(1),
+    loadout: { skin: toSkinData(defaultSkin('galaxy')), boosts: new Set(), powerDuration: 1 },
+    insets: NO_INSETS,
+    reducedMotion: false,
+    haptic: () => undefined,
+  });
 }
 
 describe('Galaxy War phone layout', () => {
@@ -433,31 +501,48 @@ describe('Galaxy War phone layout', () => {
     }
   });
 
-  it('keeps the first-frame HUD text at least 12 CSS px on every phone size', () => {
+  it('keeps the first-frame HUD text at least 12 CSS px on phone sizes, landscape fallback included', () => {
     for (const [w, h] of [
       [360, 740],
       [390, 844],
       [430, 932],
+      [740, 360],
+      [844, 390],
+      [932, 430],
     ] as const) {
       const stage = stageFor(w, h);
       const size = chooseLogicalSize(def, stage.w, stage.h);
       const scale = Math.min(stage.w / size.width, stage.h / size.height);
-      const { ctx, sizes } = textRecorder(size.width * scale);
-      const game = def.create({
-        ctx,
-        width: size.width,
-        height: size.height,
-        input: new Input(),
-        audio: new NullAudio(),
-        rng: new Rng(1),
-        loadout: { skin: toSkinData(defaultSkin('galaxy')), boosts: new Set(), powerDuration: 1 },
-        insets: NO_INSETS,
-        reducedMotion: false,
-        haptic: () => undefined,
-      });
-      game.render();
+      const { ctx, sizes } = hudRecorder(size.width * scale);
+      drawnRun(size, ctx).render();
       expect(sizes.length, `${w}x${h}`).toBeGreaterThan(0);
       expect(Math.min(...sizes) * scale, `${w}x${h}`).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('keeps five bombs clear of the weapon pill, wrapping onto a row above when they would reach it', () => {
+    for (const [w, h] of [
+      [360, 740],
+      [740, 360],
+      [844, 390],
+      [932, 430],
+    ] as const) {
+      const stage = stageFor(w, h);
+      const size = chooseLogicalSize(def, stage.w, stage.h);
+      const scale = Math.min(stage.w / size.width, stage.h / size.height);
+      const { ctx, bombs } = hudRecorder(size.width * scale);
+      const game = drawnRun(size, ctx);
+      const g = probe(game);
+      g.bombs = 5;
+      game.render();
+      const k = g.hudScale();
+      // The weapon pill spans W/2 +- 70 HUD units; a bomb's left edge must stay right of its right side.
+      const pillRight = size.width / 2 + 70 * k;
+      expect(bombs, `${w}x${h}`).toHaveLength(5);
+      for (const b of bombs) {
+        expect(Math.abs(b.r - 9 * k), `${w}x${h}`).toBeLessThan(1e-6);
+        expect(b.x - b.r, `${w}x${h}`).toBeGreaterThanOrEqual(pillRight - 1e-6);
+      }
     }
   });
 

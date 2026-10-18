@@ -5,10 +5,18 @@ import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import type { Action } from '../src/core/input';
 import { Arena, BORDER, CRATE, FLOOR, manhattan, PILLAR } from '../src/games/bombsquad/grid';
-import { drawScene, type Palette, type SceneView } from '../src/games/bombsquad/render';
+import {
+  COMPACT_BOT_SCALE,
+  COMPACT_HUD_PX,
+  COMPACT_PLAYER_SCALE,
+  drawScene,
+  PLAYER_HEIGHT_TILES,
+  type Palette,
+  type SceneView,
+} from '../src/games/bombsquad/render';
 import type { Bomb, Bot, BotKind, Explosion, Item, Player } from '../src/games/bombsquad/types';
 import { BOT_TOUCH_GRACE, FUSE, LIVES, WALKER_SPEED } from '../src/games/bombsquad/types';
-import type { BoostId, GameInstance, GameServices } from '../src/games/types';
+import type { BoostId, GameDefinition, GameInstance, GameServices } from '../src/games/types';
 import { NO_INSETS } from '../src/games/types';
 import { defaultSkin, toSkinData } from '../src/meta/catalog';
 import { createGame, gameById, mockCtx } from './helpers';
@@ -846,19 +854,120 @@ describe('phone layout', () => {
     }
   });
 
-  it('keeps seven rows of large tiles above the touch controls, so a character stays readable on a phone', () => {
-    // L2 is an 844 x 390 phone: its canvas is 1218 x 600 logical px, and the BOMB and PUNCH band reaches 118 px up it.
-    const bottom = 118;
-    const { game } = createGame(def, {
-      width: 1218,
-      height: 600,
-      insets: { top: 0, right: 0, bottom, left: 0 },
-    });
-    const i = internals(game);
-    const lay = i.layout();
-    expect(i.arena.rows).toBe(7);
-    expect(lay.oy + i.arena.rows * lay.ts).toBeLessThanOrEqual(600 - bottom);
-    // A character is about 0.9 of a tile tall. At this canvas scale (390 / 600) it must be 8% of the short side.
-    expect(0.9 * lay.ts * (390 / 600)).toBeGreaterThanOrEqual(0.08 * 390);
+  it('keeps seven rows of large tiles above the touch controls at every landscape phone size', () => {
+    for (const [name, width, height] of LANDSCAPE_PHONES) {
+      const { size, bottom } = phoneRun(width, height);
+      const { game } = createGame(def, {
+        width: size.width,
+        height: size.height,
+        insets: { top: 0, right: 0, bottom, left: 0 },
+      });
+      const i = internals(game);
+      const lay = i.layout();
+      expect(i.arena.rows, name).toBe(7);
+      expect(lay.oy + i.arena.rows * lay.ts, name).toBeLessThanOrEqual(size.height - bottom);
+    }
+  });
+
+  it('draws the player and the bots at least 8% of a landscape phone short side, with the touch controls on', () => {
+    for (const [name, width, height] of LANDSCAPE_PHONES) {
+      const { size, scale, bottom } = phoneRun(width, height);
+      const { game } = createGame(def, {
+        width: size.width,
+        height: size.height,
+        insets: { top: 0, right: 0, bottom, left: 0 },
+      });
+      const { ts } = internals(game).layout();
+      const stage = stageOf(width, height);
+      const short = Math.min(stage.w, stage.h);
+      // The player stands on a tile and its sprite is PLAYER_HEIGHT_TILES tall; a walker is a circle of radius 0.3 tile.
+      const player = PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * ts * scale;
+      const walker = 0.6 * COMPACT_BOT_SCALE * ts * scale;
+      expect(player / short, `${name} player`).toBeGreaterThanOrEqual(0.08);
+      expect(walker / short, `${name} walker`).toBeGreaterThanOrEqual(0.08);
+    }
+  });
+
+  it('sets the HUD text at least 12 CSS px high on every landscape phone', () => {
+    for (const [name, width, height] of LANDSCAPE_PHONES) {
+      const { scale } = phoneRun(width, height);
+      expect(COMPACT_HUD_PX * scale, name).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('draws the touch HUD on a touch screen even when no button covers the canvas', () => {
+    // The score is drawn at COMPACT_HUD_PX under the touch layout and at 20 px otherwise.
+    const compact = `800 ${COMPACT_HUD_PX}px`;
+    expect(fontsDrawn(def, true).some((f) => f.startsWith(compact))).toBe(true);
+    expect(fontsDrawn(def, false).some((f) => f.startsWith(compact))).toBe(false);
+  });
+
+  it('keeps card previews on the desktop layout on a touch screen, and gives a run the touch layout', () => {
+    const layoutOf = (coarse: boolean, preview: boolean) =>
+      internals(runWithoutTouch(def, mockCtx(), coarse, preview)).layout();
+    expect(layoutOf(true, true)).toEqual(layoutOf(false, true));
+    expect(layoutOf(true, false)).not.toEqual(layoutOf(false, false));
   });
 });
+
+/**
+ * A run with no touch controls on the canvas, built to draw into `ctx`. A coarse pointer makes it a touch screen, as a
+ * phone's browser reports it; the pointer is read when the run is built, so the stub is removed straight after.
+ */
+function runWithoutTouch(
+  def: GameDefinition,
+  ctx: CanvasRenderingContext2D,
+  coarsePointer: boolean,
+  preview = false,
+): GameInstance {
+  if (coarsePointer) vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  try {
+    return def.create({
+      ctx,
+      width: def.width,
+      height: def.height,
+      input: new Input(),
+      audio: new NullAudio(),
+      rng: new Rng(1),
+      loadout: { skin: toSkinData(defaultSkin(def.id)), boosts: new Set(), powerDuration: 1 },
+      insets: NO_INSETS,
+      reducedMotion: false,
+      haptic: () => undefined,
+      preview,
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
+/** The font of every text draw in one rendered frame of a run with no touch controls on the canvas. */
+function fontsDrawn(def: GameDefinition, coarsePointer: boolean): string[] {
+  const fonts: string[] = [];
+  const ctx = new Proxy(mockCtx(), {
+    set(target, key, value) {
+      if (key === 'font') fonts.push(String(value));
+      return Reflect.set(target, key, value);
+    },
+  });
+  runWithoutTouch(def, ctx, coarsePointer).render();
+  return fonts;
+}
+
+/** The landscape phones of the matrix (the rows whose name starts with L). */
+const LANDSCAPE_PHONES = PHONE_MATRIX.filter(([name]) => name.startsWith('L'));
+
+/**
+ * The logical size a landscape phone runs at, the scale its canvas is drawn at, and the logical rows the touch band
+ * covers at the bottom. The band is the BOMB button, the 8 px inset the landscape layout leaves and the 6 px margin.
+ */
+function phoneRun(
+  width: number,
+  height: number,
+): { size: { width: number; height: number }; scale: number; bottom: number } {
+  const def = gameById('bombsquad');
+  const stage = stageOf(width, height);
+  const size = chooseLogicalSize(def, stage.w, stage.h);
+  const scale = Math.min(stage.w / size.width, stage.h / size.height);
+  const button = Math.min(72, Math.max(48, 0.16 * Math.min(width, height)));
+  return { size, scale, bottom: Math.ceil((button + 14) / scale) };
+}

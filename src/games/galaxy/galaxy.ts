@@ -277,6 +277,8 @@ export class GalaxyGame extends BaseGame {
   private boss: Enemy | null = null;
   /** Hull scale for the Mothership: 1 on the narrowest layout, up to 1.33 on the widest. */
   private readonly bossScale: number;
+  /** Half the width of this skin's hull: the steering clamp, so no wing tip leaves the field. */
+  private readonly shipHalf: number;
   private readonly bgGradient: CanvasGradient;
   /** Radial nebula gradients centred on the origin; drawn translated to each nebula's position. */
   private readonly nebulae: CanvasGradient[] = [];
@@ -292,6 +294,7 @@ export class GalaxyGame extends BaseGame {
     this.weapon = clamp(this.skinParam('weapon', 1) + (this.hasBoost('head-start') ? 2 : 0), 1, MAX_WEAPON);
     this.shield = this.hasBoost('shield');
     this.bossScale = clamp(this.W / 540, 1, 1.33);
+    this.shipHalf = Math.max(...shipHull(this.skinParam('style', 0)).map(([x]) => Math.abs(x)));
     // Starfield is cosmetic: it draws from the forked RNG so gameplay randomness is untouched.
     for (let i = 0; i < 140; i++)
       this.stars.push({
@@ -327,16 +330,28 @@ export class GalaxyGame extends BaseGame {
 
   /**
    * HUD and popup size factor. A phone draws the canvas at fewer CSS px per logical px, so the HUD
-   * grows to keep its text near 12 CSS px on screen. Reads 1 when the canvas is not laid out (tests).
+   * grows to keep its text near 12 CSS px on screen. It stops growing where the top row (score and
+   * coin pills) would run together, which keeps the landscape fallback near that size too. Reads 1
+   * when the canvas is not laid out (tests).
    */
   private hudScale(): number {
     const css = (this.ctx.canvas as HTMLCanvasElement | undefined)?.clientWidth ?? 0;
-    return css > 0 ? clamp(0.9 / (css / this.W), 1, 1.5) : 1;
+    // The top row takes 316 HUD units (score pill, and a coin pill for up to four digits) plus 32 px
+    // of margins and gap.
+    const room = (this.W - 32 - this.insets.left - this.insets.right) / 316;
+    return css > 0 ? clamp(0.9 / (css / this.W), 1, Math.max(1, room)) : 1;
   }
 
-  /** Floating popup, sized with the HUD so it stays readable on a phone. */
+  /**
+   * Floating popup, sized with the HUD so it stays readable on a phone. Labels are centred on x, so
+   * one earned at a wall is moved in far enough to stay on the field.
+   */
   private popup(x: number, y: number, label: string, color: string, size: number): void {
-    this.texts.add(x, y, label, color, size * this.hudScale());
+    const k = this.hudScale();
+    // About 0.8 em per glyph covers the widest capitals and the popup's grow-in scale.
+    const half = label.length * 0.4 * size * k;
+    const px = clamp(x, Math.min(half + 4, this.W / 2), Math.max(this.W - half - 4, this.W / 2));
+    this.texts.add(px, y, label, color, size * k);
   }
 
   private hpScale(): number {
@@ -598,9 +613,9 @@ export class GalaxyGame extends BaseGame {
       this.shipX += ax * speed * dt;
       this.shipY += ay * speed * dt;
     }
-    // Keep the ship above the bottom HUD row and touch controls, and out of the top quarter so
-    // formations never spawn on top of it.
-    this.shipX = clamp(this.shipX, 24, this.W - 24);
+    // Keep the hull on the field, above the bottom HUD row and touch controls, and out of the top
+    // quarter so formations never spawn on top of it.
+    this.shipX = clamp(this.shipX, this.shipHalf, this.W - this.shipHalf);
     this.shipY = clamp(this.shipY, this.H * 0.25, this.H - 96 - this.insets.bottom);
     if (dt > 0) this.bank += (clamp((this.shipX - prevX) / dt / 300, -1, 1) - this.bank) * damp(10, dt);
     this.invuln = Math.max(0, this.invuln - dt);
@@ -1442,8 +1457,9 @@ export class GalaxyGame extends BaseGame {
     text(ctx, Math.floor(this.score).toLocaleString('en-US'), 12 + left + 18 * k, 12 + top + 21 * k, {
       size: 22 * k,
     });
-    const coinX = W - 12 - right - 120 * k;
-    hudPill(ctx, coinX, 12 + top, 120 * k, 40 * k);
+    // The coin pill narrows rather than run into the score pill on a small canvas.
+    const coinX = Math.max(W - 12 - right - 120 * k, 12 + left + 220 * k + 8);
+    hudPill(ctx, coinX, 12 + top, W - 12 - right - coinX, 40 * k);
     drawCoin(ctx, coinX + 24 * k, 12 + top + 20 * k, 11 * k);
     text(ctx, `${this.coins}`, coinX + 42 * k, 12 + top + 21 * k, { size: 20 * k });
     if (this.chain >= 2) this.drawChain(12 + left, 12 + top + 48 * k, k);
@@ -1460,10 +1476,12 @@ export class GalaxyGame extends BaseGame {
       );
     }
 
-    // Lives (bottom left)
+    // Lives (bottom left). Hearts wrap onto a row above before they would reach the weapon pill.
+    const pillL = W / 2 - 70 * k;
+    const heartsPerRow = Math.max(1, Math.floor((pillL - 4 - left - 37 * k) / (28 * k)) + 1);
     for (let i = 0; i < Math.max(0, this.lives); i++) {
       ctx.save();
-      ctx.translate(26 * k + left + i * 28 * k, row);
+      ctx.translate(26 * k + left + (i % heartsPerRow) * 28 * k, row - Math.floor(i / heartsPerRow) * 24 * k);
       ctx.scale(0.5 * k, 0.5 * k);
       ctx.fillStyle = this.skinColor('body', '#4dd9ff');
       ctx.beginPath();
@@ -1475,14 +1493,17 @@ export class GalaxyGame extends BaseGame {
       ctx.fill();
       ctx.restore();
     }
-    // Bombs (bottom right)
+    // Bombs (bottom right). Past the weapon pill they wrap onto a row above it.
+    const pillR = W / 2 + 70 * k;
+    const bombsPerRow = Math.max(1, Math.floor((W - right - pillR - 9 * k - 4) / (26 * k)));
     for (let i = 0; i < this.bombs; i++) {
-      const bx = W - (26 + i * 26) * k - right;
+      const bx = W - (26 + (i % bombsPerRow) * 26) * k - right;
+      const by = row - Math.floor(i / bombsPerRow) * 24 * k;
       ctx.fillStyle = '#ff9f1c';
       ctx.beginPath();
-      ctx.arc(bx, row, 9 * k, 0, TAU);
+      ctx.arc(bx, by, 9 * k, 0, TAU);
       ctx.fill();
-      text(ctx, 'B', bx, row + k, { size: 14 * k, align: 'center', color: '#3a1a00', stroke: null });
+      text(ctx, 'B', bx, by + k, { size: 14 * k, align: 'center', color: '#3a1a00', stroke: null });
     }
     // Weapon level (bottom centre)
     hudPill(ctx, W / 2 - 70 * k, row - 17 * k, 140 * k, 34 * k);

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { declaresOrientation, isTouchPhone, needsRotation, orientationOf } from '../src/ui/orientation';
+import {
+  declaresOrientation,
+  isTouchPhone,
+  needsRotation,
+  orientationOf,
+  promptOwnsTurns,
+} from '../src/ui/orientation';
 
 describe('orientationOf', () => {
   it('is landscape only when wider than tall', () => {
@@ -63,5 +69,20 @@ describe('needsRotation', () => {
     // The waiver names one orientation: holding the phone the other way from it asks again.
     expect(needsRotation('landscape', true, 390, 844, 'landscape')).toBe(true);
     expect(needsRotation('landscape', true, 390, 844, 'portrait')).toBe(false);
+  });
+});
+
+describe('promptOwnsTurns', () => {
+  it('owns the turns of a declared game on a touch phone, whichever side the phone is on', () => {
+    expect(promptOwnsTurns('portrait', true, 390, 844)).toBe(true);
+    expect(promptOwnsTurns('portrait', true, 844, 390)).toBe(true);
+    expect(promptOwnsTurns('landscape', true, 844, 390)).toBe(true);
+  });
+
+  it('leaves the turns of undeclared or "any" games, tablets and desktops to the pause', () => {
+    expect(promptOwnsTurns(undefined, true, 390, 844)).toBe(false);
+    expect(promptOwnsTurns('any', true, 844, 390)).toBe(false);
+    expect(promptOwnsTurns('landscape', true, 768, 1024)).toBe(false);
+    expect(promptOwnsTurns('portrait', false, 1280, 800)).toBe(false);
   });
 });

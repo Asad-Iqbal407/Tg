@@ -21,6 +21,20 @@ export function declaresOrientation(preferred: GameDefinition['orientation']): p
 }
 
 /**
+ * Whether the prompt owns a game's turns on this device: the game declares an orientation and the
+ * device is a touch phone. The prompt holds a run the wrong way and resumes it when the phone turns
+ * back. Every other turn (undeclared or 'any' games, tablets, desktops) pauses, as it always has.
+ */
+export function promptOwnsTurns(
+  preferred: GameDefinition['orientation'],
+  coarsePointer: boolean,
+  width: number,
+  height: number,
+): boolean {
+  return declaresOrientation(preferred) && isTouchPhone(coarsePointer, width, height);
+}
+
+/**
  * Whether the rotate prompt holds a run: the game declares an orientation, the device is a touch
  * phone held the other way, and the player has not chosen "Play anyway" for this orientation.
  */
@@ -31,8 +45,7 @@ export function needsRotation(
   height: number,
   anywayFor: Orientation | null = null,
 ): boolean {
-  if (!declaresOrientation(preferred)) return false;
-  if (!isTouchPhone(coarsePointer, width, height)) return false;
+  if (!promptOwnsTurns(preferred, coarsePointer, width, height)) return false;
   const now = orientationOf(width, height);
   return now !== preferred && anywayFor !== now;
 }

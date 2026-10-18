@@ -139,6 +139,8 @@ export class TetrisGame extends BaseGame {
   /** Which of POPUP_COLUMNS the next score popup goes in. */
   private popupSlot = 0;
   private readonly touchDrop: TouchDrop;
+  /** Coarse pointer at the start of the run: a touch screen gets the compact panel text. Drawing only. */
+  private readonly touch: boolean;
   /** A finger on the well is dragging down far enough to soft drop this step. */
   private dragSoft = false;
   /** The layout and panel slots, rebuilt only when the size, the touch inset or the preview flag changes. */
@@ -155,6 +157,7 @@ export class TetrisGame extends BaseGame {
 
   constructor(services: GameServices) {
     super(services);
+    this.touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     this.touchDrop = new TouchDrop(this.H);
     this.queue = new PieceQueue(this.rng);
     const skinStart = this.skinParam('startLevel', 1);
@@ -222,7 +225,7 @@ export class TetrisGame extends BaseGame {
       cache.bottom !== bottom ||
       cache.preview !== preview
     ) {
-      const layout = layoutTetris(W, H, bottom, !preview);
+      const layout = layoutTetris(W, H, bottom, !preview, this.touch || bottom > 0);
       cache = {
         width: W,
         height: H,

@@ -518,6 +518,7 @@ describe('snake rules', () => {
       thick: 0,
       ghost: false,
       dead: false,
+      touch: false,
       time: 0,
     });
     const shades = bodyShades(palette.body);

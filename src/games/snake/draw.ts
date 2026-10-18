@@ -21,6 +21,8 @@ const DEATH_FLASH = '#fb7185';
 const FADE_STEPS = 8;
 /** How much darker the tail is than the body colour, as a blend toward black. */
 const TAIL_DIM = 0.35;
+/** Head radius on a touch layout, in cells: about 1.36 cells across, so the head reads on a small screen. */
+const TOUCH_HEAD_CELLS = 0.68;
 
 const HEX = /^#?([0-9a-f]{6})$/i;
 
@@ -183,6 +185,16 @@ export function appleBlinkedOff(apple: Apple, time: number): boolean {
   return apple.golden && apple.left < GOLDEN_BLINK_SEC && Math.floor(time * 10) % 2 === 0;
 }
 
+/**
+ * Radius of the snake's head in logical px. Desktop keeps the head at 70% of the body width. A touch layout
+ * draws a larger head, so the character is easy to find on a phone. The head is drawn only: the snake still
+ * moves, eats and crashes on whole cells.
+ */
+export function headRadius(cell: number, thick: number, touch: boolean): number {
+  const r = cell * (0.78 + 0.06 * thick) * 0.7;
+  return touch ? Math.max(r, cell * TOUCH_HEAD_CELLS) : r;
+}
+
 export interface SnakeLook {
   heading: Dir;
   /** Extra body thickness from the skin (0 = classic). */
@@ -191,6 +203,8 @@ export interface SnakeLook {
   ghost: boolean;
   /** The run is over: the head flashes. */
   dead: boolean;
+  /** Coarse pointer: draws the larger touch head (see headRadius). */
+  touch: boolean;
   time: number;
 }
 
@@ -242,7 +256,7 @@ export function drawSnake(
   const d = delta(look.heading);
   const px = -d.y;
   const py = d.x;
-  const r = width * 0.7;
+  const r = headRadius(cell, look.thick, look.touch);
   // Tongue first, so the head covers its root.
   if (Math.sin(look.time * 10) > 0.55 && !look.dead) {
     const tx = hx + d.x * (r + cell * 0.32);

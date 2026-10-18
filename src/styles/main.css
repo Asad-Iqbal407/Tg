@@ -2005,6 +2005,10 @@ body.is-playing .toast__text span {
   height: 14px;
   opacity: 0.6;
 }
+/* The fit chip opens the pause menu rather than nudging the player, so its icon stays still. */
+.fit-hint .rotate-hint__icon {
+  animation: none;
+}
 @keyframes rotate-nudge {
   0%,
   55%,
@@ -2364,12 +2368,19 @@ body.is-playing .toast__text span {
   }
   /* Inline text links: a taller and wider hit area that leaves the line's layout as it was. */
   .link {
-    padding: 11px 8px;
-    margin: -11px -8px;
+    padding: 12px 14px;
+    margin: -12px -14px;
+  }
+  /* The switch's own box is 48 by 28 px; this extends its hit area to 60 by 44 px without moving it. */
+  .switch::before {
+    content: '';
+    position: absolute;
+    inset: -8px -6px;
   }
   .small,
   small,
   .pill,
+  .badge,
   .rarity-tag,
   .calendar__label,
   .field__label,
@@ -2377,6 +2388,12 @@ body.is-playing .toast__text span {
   .btn--sm,
   .stat__label,
   .stat-bar__label,
+  .game-card__meta,
+  .mini-stat span,
+  .achievement__reward,
+  .daily-card__text span,
+  .unlock span,
+  .toast__text span,
   .board th,
   .stats-table th,
   .lobby__section h3,
@@ -2387,5 +2404,24 @@ body.is-playing .toast__text span {
   .tabbar__link,
   .tabbar__badge {
     font-size: 0.75rem;
+  }
+}
+
+/* Phones and short screens: the results actions stay in view while the stats scroll above them. The
+   footer sits on the dialog's bottom edge and keeps the body's 18 px padding below the buttons. */
+@media (pointer: coarse), (max-height: 500px) {
+  .modal--results .modal__actions {
+    position: sticky;
+    bottom: 0;
+    margin: 18px -18px -18px;
+    padding: 14px 18px 18px;
+    background: linear-gradient(0deg, #111332 70%, rgba(17, 19, 50, 0));
+  }
+}
+
+/* Results list the achievements and levels a run unlocked, so on phones the toasts drop under the dialog. */
+@media (pointer: coarse), (max-height: 500px) {
+  body:has(.modal--results) .toasts {
+    z-index: 40;
   }
 }
