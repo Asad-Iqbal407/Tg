@@ -245,7 +245,13 @@ export class ArcadeService {
     const levelBefore = levelInfo(p0.xp);
     const previousBest = p0.games[gameId].best;
     const score = Math.max(0, Math.floor(Number.isFinite(result.score) ? result.score : 0));
-    const runStats: Record<string, number> = { ...result.stats, coins: result.coins, score };
+    const duration = Number.isFinite(result.durationSec) ? Math.max(0, result.durationSec) : 0;
+    // Only finite, non-negative stats count, so one bad value from a game can never poison saved totals,
+    // bests or mission progress with NaN or Infinity.
+    const runStats: Record<string, number> = {};
+    for (const [k, v] of Object.entries({ ...result.stats, coins: result.coins, score })) {
+      if (Number.isFinite(v) && v >= 0) runStats[k] = v;
+    }
 
     let levelUps: LevelReward[] = [];
     let achievements: AchievementDef[] = [];
@@ -257,11 +263,10 @@ export class ArcadeService {
       rec.plays += 1;
       rec.best = Math.max(rec.best, score);
       rec.totalScore += score;
-      rec.totalTime += Math.max(0, result.durationSec);
+      rec.totalTime += duration;
       rec.lastPlayed = this.now().getTime();
 
       for (const [k, v] of Object.entries(runStats)) {
-        if (!Number.isFinite(v) || v < 0) continue;
         const key = `${gameId}.${k}`;
         p.totals[key] = (p.totals[key] ?? 0) + v;
         p.bests[key] = Math.max(p.bests[key] ?? 0, v);
