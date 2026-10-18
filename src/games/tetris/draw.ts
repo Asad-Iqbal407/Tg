@@ -8,7 +8,7 @@ const GAP = 12;
 const PANEL_CELLS = 4.5;
 /**
  * Narrowest side panel a touch layout keeps, in cells. A phone is narrow, so the well takes most of the width (the
- * panel ends up about 2.1 to 2.4 cells wide at P1 to P3); the panel widens back toward PANEL_CELLS when the width
+ * panel ends up about 2 to 2.4 cells wide at P1 to P3); the panel widens back toward PANEL_CELLS when the width
  * leaves it room.
  */
 const PANEL_CELLS_TOUCH = 2;

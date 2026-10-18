@@ -11,11 +11,11 @@ export const snakeGame: GameDefinition = {
   inspiredBy: 'Nokia Snake',
   width: 600,
   height: 800,
-  // Phones in portrait get a board about as tall as the design (800 px), so their cells stay near
-  // their desktop size. Landscape takes the full 900 px width and the height that matches the stage
-  // (about 440 to 470 px on a landscape phone, 523 px on a 1280 x 800 window); the floor is low enough
-  // that no stage letterboxes sideways.
-  viewport: { minWidth: 380, maxWidth: 900, minHeight: 360, maxHeight: 800 },
+  // Desktop and portrait phones keep the design board. A touch phone held landscape uses its own range:
+  // the full 900 px width and the height that matches the stage (about 440 to 470 px on a landscape
+  // phone), with a floor low enough that no stage letterboxes sideways. Desktop never uses it.
+  viewport: { minWidth: 380, maxWidth: 900, minHeight: 640, maxHeight: 800 },
+  landscapeViewport: { minWidth: 380, maxWidth: 1200, minHeight: 360, maxHeight: 800 },
   orientation: 'any',
   accent: '#4ade80',
   gradient: ['#4ade80', '#14532d'],

@@ -121,6 +121,11 @@ export interface GameDefinition {
   /** Flexible logical size range; omit for a fixed width x height. */
   viewport?: ViewportRange;
   /**
+   * Range used instead of viewport on a touch phone held landscape, so a game can fill a short
+   * landscape screen without changing its desktop or portrait size.
+   */
+  landscapeViewport?: ViewportRange;
+  /**
    * Orientation the game is designed for. On a touch phone held the other way the shell asks the
    * player to rotate before the run starts and pauses a run that is rotated away. Omit or use 'any'
    * for games that work well either way.

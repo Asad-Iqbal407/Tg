@@ -9,6 +9,7 @@ import { icon, type IconName } from './icons';
 import { Modal } from './overlay';
 import {
   declaresOrientation,
+  isTouchPhone,
   needsRotation,
   orientationOf,
   type Orientation,
@@ -200,7 +201,7 @@ export class PlayScreen {
     this.input.reset();
     // Pick the logical size for this run from the space available right now.
     const avail = this.viewport.available();
-    const size = chooseLogicalSize(this.def, avail.width, avail.height);
+    const size = chooseLogicalSize(this.sizingFor(avail.width, avail.height), avail.width, avail.height);
     this.runSize = size;
     this.stageLandscape = avail.width > avail.height;
     this.el.classList.toggle('play--landscape', size.width > size.height);
@@ -318,12 +319,22 @@ export class PlayScreen {
     ins.bottom = Math.ceil(bottom);
   }
 
+  /**
+   * The definition a run is sized with. A touch phone held landscape uses the game's landscape range
+   * when it has one; desktops and portrait screens always use the main range.
+   */
+  private sizingFor(width: number, height: number): GameDefinition {
+    const landscape = this.def.landscapeViewport;
+    if (!landscape || width <= height || !isTouchPhone(isTouchDevice(), width, height)) return this.def;
+    return { ...this.def, viewport: landscape };
+  }
+
   /** How much bigger (by area) the game would be after rotating the device and restarting. */
   private rotateGain(): number {
     const a = this.viewport.available();
     const now = fittedArea(this.runSize, a.width, a.height);
     if (now <= 0) return 1;
-    const turned = chooseLogicalSize(this.def, a.height, a.width);
+    const turned = chooseLogicalSize(this.sizingFor(a.height, a.width), a.height, a.width);
     return fittedArea(turned, a.height, a.width) / now;
   }
 
@@ -332,7 +343,10 @@ export class PlayScreen {
     const a = this.viewport.available();
     const now = fittedArea(this.runSize, a.width, a.height);
     if (now <= 0) return 1;
-    return fittedArea(chooseLogicalSize(this.def, a.width, a.height), a.width, a.height) / now;
+    return (
+      fittedArea(chooseLogicalSize(this.sizingFor(a.width, a.height), a.width, a.height), a.width, a.height) /
+      now
+    );
   }
 
   private updateRotateHint(): void {
