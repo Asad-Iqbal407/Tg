@@ -788,6 +788,13 @@ export class PlatformerGame extends BaseGame {
         it.vx = (it.x + it.w / 2 < col * T + T / 2 ? -1 : 1) * Math.abs(it.vx || 100);
       }
     }
+    // A coin resting on the bumped block pops up and counts, as in the classic games.
+    for (const c of this.level.coins) {
+      if (c.taken || c.x < col * T || c.x >= (col + 1) * T || c.y < top - T || c.y >= top) continue;
+      c.taken = true;
+      this.popCoins.push({ x: c.x, y: c.y - T / 2, vy: -520, life: 0.55 });
+      this.gainCoin(c.x, c.y);
+    }
   }
 
   private updateBlocks(dt: number): void {

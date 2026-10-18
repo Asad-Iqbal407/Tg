@@ -1115,7 +1115,11 @@ export class RunnerGame extends BaseGame {
     // Announcements live in the sky between the HUD and the horizon, never over the track ahead.
     const band = bannerBand(this.W, top, left, y, s, this.cam.hz - 40 * this.framing.unit);
     if (this.stumbleT > 0 && !this.crashed)
-      text(ctx, 'CAREFUL!', band.carefulX, band.carefulY, { size: 26 * s, align: 'center', color: '#ff6b6b' });
+      text(ctx, 'CAREFUL!', band.carefulX, band.carefulY, {
+        size: 26 * s,
+        align: 'center',
+        color: '#ff6b6b',
+      });
     if (this.bannerT < 1.8 && this.milestone === 0) {
       this.drawBanner('RUN!', 'Grab coins · dodge trains', this.bannerT / 1.8, band.y, '#ffd23f');
     } else if (this.milestoneT < 2.8) {

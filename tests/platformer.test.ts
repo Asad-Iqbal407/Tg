@@ -278,6 +278,29 @@ describe('Pixel Quest jump feel', () => {
   });
 });
 
+describe('Pixel Quest blocks', () => {
+  it.each([Tile.Brick, Tile.Question])(
+    'collects a coin resting on a block bumped from below (tile %i)',
+    (tile) => {
+      const { g, input } = make();
+      flatten(g);
+      const col = 21;
+      const row = GROUND_ROW - 4;
+      setTile(g, col, row, tile);
+      g.level.coins.push({ x: col * T + T / 2, y: (row - 1) * T + T / 2, taken: false });
+      // A coin two tiles up is out of reach of the bump.
+      g.level.coins.push({ x: col * T + T / 2, y: (row - 2) * T + T / 2, taken: false });
+      placeHero(g, col * T + 7, GROUND_ROW * T);
+      step(g, input, 0.2);
+      input.setVirtual('primary', true, 'test');
+      step(g, input, 0.8);
+      expect(g.level.coins.map((c) => c.taken)).toEqual([true, false]);
+      // The resting coin, plus the question block's own coin when there is one.
+      expect(g.getResult().coins).toBe(tile === Tile.Question ? 2 : 1);
+    },
+  );
+});
+
 describe('Pixel Quest deaths and respawns', () => {
   it('a pit death does not hop the hero back up above the ground', () => {
     const { g, input } = make();
