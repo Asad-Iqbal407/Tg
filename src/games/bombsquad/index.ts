@@ -11,8 +11,10 @@ export const bombsquadGame: GameDefinition = {
   inspiredBy: 'BombSquad',
   width: 960,
   height: 600,
-  viewport: { minWidth: 800, maxWidth: 1280, minHeight: 360, maxHeight: 760 },
-  // The arena is wider than it is tall, and a portrait phone would only show a small strip of it.
+  // A tall screen (a portrait phone running the game anyway, a portrait tablet or window) gets a tall arena rather than
+  // a letterboxed strip; a wide screen is sized as before, since only an aspect under 960:760 reaches the new bounds.
+  viewport: { minWidth: 600, maxWidth: 1280, minHeight: 360, maxHeight: 1280 },
+  // The arena is designed wide; a portrait phone is asked to turn first, and a tall arena is the fallback.
   orientation: 'landscape',
   pointerArea: 'stage',
   accent: '#fb923c',

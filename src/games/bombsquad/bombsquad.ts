@@ -76,6 +76,12 @@ const ITEM_LABEL: Record<ItemKind, string> = {
  * of larger tiles rather than eleven small ones: the characters stay a readable share of the screen.
  */
 const TOUCH_ROWS = 7;
+/**
+ * Columns of tiles across a tall canvas under the touch controls (a portrait phone running the game anyway). The width
+ * is the short side there, so it sets the tile size the way TOUCH_ROWS does on a landscape phone; the tiles come out
+ * about the same size on screen, and the arena about as many open tiles as a landscape phone's.
+ */
+const TOUCH_COLS = 9;
 /** Shorter stage sides (CSS px) are phones: only they zoom the arena in on the character. */
 const PHONE_SHORT_SIDE = 600;
 /** Space the HUD keeps around the arena, in logical px (left, right and bottom margins; the top is set by the HUD). */
@@ -83,6 +89,16 @@ const ARENA_MARGIN = 16;
 const FIRE_COLORS = ['#fff7ed', '#fde047', '#fb923c', '#ef4444', '#7c2d12'];
 const WOOD_COLORS = ['#a16207', '#facc15', '#78350f'];
 const NO_VECTOR = { x: 0, y: 0 };
+
+/**
+ * The tile size (logical px) of an arena under touch controls that cover `bottom` logical px of a `W` x `H` canvas: the
+ * short side of the room the arena gets holds TOUCH_ROWS rows (a wide canvas) or TOUCH_COLS columns (a tall one).
+ */
+export function touchTile(W: number, H: number, bottom: number): number {
+  const roomW = W - 32;
+  const roomH = H - 72 - bottom;
+  return Math.max(1, Math.floor(Math.min(roomW / TOUCH_COLS, roomH / TOUCH_ROWS)));
+}
 
 /** Bomb Squad: a bomb-laying arena. Crates hide power-ups; bots chase you in waves. */
 export class BombSquadGame extends BaseGame {
@@ -124,7 +140,7 @@ export class BombSquadGame extends BaseGame {
     const bottom = this.insets.bottom;
     this.arena =
       bottom > 0
-        ? new Arena(this.W, this.H - bottom, this.rng, Math.floor((this.H - 72 - bottom) / TOUCH_ROWS))
+        ? new Arena(this.W, this.H - bottom, this.rng, touchTile(this.W, this.H, bottom))
         : new Arena(this.W, this.H, this.rng, TILE);
     const cells = this.arena.cols * this.arena.rows;
     this.occupied = new Uint8Array(cells);
