@@ -5,24 +5,30 @@ export const COLS = 9;
 /** Speed of a shot, in logical px per second. */
 export const FLY_SPEED = 1400;
 
-/** Band above the ceiling, for the score line. */
+/** Band above the ceiling for the score line, when the HUD runs across the top. It grows on tall screens. */
 const HUD_H = 56;
+const HUD_MAX = 88;
 /** Gap between the canvas edge and the side walls, so the rails and the HUD stay on screen. */
 export const WALL_PAD = 12;
-/** Band below the grid, where the shooter and the next bubble sit. */
-const BOTTOM_H = 96;
 /** Height of the shooter centre above the bottom edge. */
 const SHOOTER_LIFT = 48;
-/** Rows that fit the height at the design size. Bubbles shrink when the height is the tighter limit. */
-const ROWS_IN_VIEW = 12;
-/** The shooter line is never nearer the ceiling than this many rows. */
-const MIN_LINE_ROWS = 6;
+/**
+ * Rows between the ceiling and the shooter line at the start of a level, the same on every screen: a tall
+ * phone gets no more room to play than a desktop window. Bubbles shrink when the height is the tighter limit.
+ */
+export const LINE_ROWS = 16;
+/** A canvas with at least this much room beside the playfield shows the HUD in the side panels instead. */
+const SIDE_MIN = 220;
+/** Gap above the ceiling when the HUD is in the side panels. */
+const SIDE_TOP = 24;
 /** A flying bubble moves in steps no longer than this, so it cannot pass through a neighbour. */
 const SUB_PX = 4;
 /** Aim preview: sample step and length cap, in simulated seconds. */
 const TRACE_DT = 1 / 120;
 const TRACE_STEPS = 480;
 const SQRT3_2 = Math.sqrt(3) / 2;
+/** Chance that a cell of a fresh row matches a neighbour, making a pair a single shot can pop. */
+export const PAIR_CHANCE = 0.4;
 
 export interface Cell {
   row: number;
@@ -55,12 +61,16 @@ export interface Layout {
   /** Walls of the playfield. */
   left: number;
   right: number;
-  /** The ceiling: the top edge of row 0. */
+  /** The top of the playfield frame. Between it and `top` sits the press that pushes the ceiling down. */
+  frame: number;
+  /** The ceiling: the top edge of row 0. It sinks one row at a time (see `sunkLayout`). */
   top: number;
   shooterX: number;
   shooterY: number;
   /** The shooter line: a bubble settling in this row ends the run. It is the row just above the shooter. */
   lineRow: number;
+  /** Whether the score and the drop counter sit in the panels beside the playfield (on wide canvases). */
+  sideHud: boolean;
 }
 
 export interface Trace {
@@ -69,20 +79,50 @@ export interface Trace {
   at: Cell | null;
 }
 
-/** Fits the playfield to a logical size. Walls span the full width when the width is the tighter limit. */
+/** Bubble diameter that fits the width, and LINE_ROWS rows plus the shooter below a frame top of `top`. */
+function fitBubble(width: number, height: number, bottomInset: number, top: number): number {
+  const byWidth = (width - 2 * WALL_PAD) / (COLS + 0.5);
+  const byHeight = (height - bottomInset - SHOOTER_LIFT - top) / (0.5 + (LINE_ROWS + 1) * SQRT3_2);
+  return Math.max(1, Math.min(byWidth, byHeight));
+}
+
+/**
+ * Fits the playfield to a logical size. The shooter sits SHOOTER_LIFT above the bottom (and the inset), with
+ * LINE_ROWS rows above it. Height left over on a tall screen goes to the HUD band and then to the press above
+ * the ceiling, so every screen plays the same depth. A wide canvas moves the HUD into the side panels.
+ */
 export function makeLayout(width: number, height: number, bottomInset = 0): Layout {
-  const span = Math.max(1, height - HUD_H - BOTTOM_H - bottomInset);
-  const d = Math.min((width - 2 * WALL_PAD) / (COLS + 0.5), span / (ROWS_IN_VIEW * SQRT3_2));
+  let d = fitBubble(width, height, bottomInset, HUD_H);
+  const sideHud = (width - (COLS + 0.5) * d) / 2 - WALL_PAD >= SIDE_MIN;
+  if (sideHud) {
+    d = Math.min(
+      fitBubble(width, height, bottomInset, SIDE_TOP),
+      (width - 2 * (SIDE_MIN + WALL_PAD)) / (COLS + 0.5),
+    );
+  }
   const rowH = d * SQRT3_2;
   const wide = (COLS + 0.5) * d;
   const left = (width - wide) / 2;
-  // The shooter sits one row below the shooter line, the lowest row that still fits above the bottom band.
-  const lineRow = Math.max(
-    MIN_LINE_ROWS,
-    Math.floor((height - bottomInset - SHOOTER_LIFT - rowH - HUD_H - d / 2) / rowH),
-  );
-  const shooterY = HUD_H + d / 2 + (lineRow + 1) * rowH;
-  return { d, rowH, left, right: left + wide, top: HUD_H, shooterX: width / 2, shooterY, lineRow };
+  const shooterY = height - bottomInset - SHOOTER_LIFT;
+  const top = shooterY - d / 2 - (LINE_ROWS + 1) * rowH;
+  const frame = sideHud ? Math.min(top, SIDE_TOP) : Math.min(top, HUD_MAX);
+  return {
+    d,
+    rowH,
+    left,
+    right: left + wide,
+    frame,
+    top,
+    shooterX: width / 2,
+    shooterY,
+    lineRow: LINE_ROWS,
+    sideHud,
+  };
+}
+
+/** The layout after the ceiling has sunk `rows` rows: the grid starts lower and the shooter line is nearer. */
+export function sunkLayout(l: Layout, rows: number): Layout {
+  return { ...l, top: l.top + rows * l.rowH, lineRow: l.lineRow - rows };
 }
 
 export function emptyRow(shift: 0 | 1): Row {
@@ -279,19 +319,22 @@ export function trimRows(rows: Row[]): void {
 }
 
 /**
- * A colour in 1..colours that differs from every colour already touching (row, col), so a freshly made row
- * never starts with a group of three.
+ * A colour in 1..colours for a cell of a fresh row. It never completes a group of three, so a new level never
+ * starts with a free pop, but with PAIR_CHANCE it matches a neighbour, so some pairs wait for a single shot.
  */
-export function freeColour(
-  rng: Rng,
-  rows: readonly Row[],
-  row: number,
-  col: number,
-  colours: number,
-): number {
-  const taken = new Set<number>();
-  for (const [r, c] of neighbours(rows, row, col)) taken.add(colourAt(rows, r, c));
-  const free: number[] = [];
-  for (let k = 1; k <= colours; k++) if (!taken.has(k)) free.push(k);
-  return free.length > 0 ? rng.pick(free) : rng.int(1, colours);
+export function fillColour(rng: Rng, rows: Row[], row: number, col: number, colours: number): number {
+  const cells = rows[row]?.cells;
+  if (!cells) return rng.int(1, colours);
+  const single: number[] = [];
+  const pair: number[] = [];
+  for (let k = 1; k <= colours; k++) {
+    cells[col] = k;
+    const size = groupAt(rows, row, col).length;
+    if (size === 1) single.push(k);
+    else if (size === 2) pair.push(k);
+  }
+  cells[col] = 0;
+  const wantPair = pair.length > 0 && rng.chance(PAIR_CHANCE);
+  const list = wantPair ? pair : single.length > 0 ? single : pair;
+  return list.length > 0 ? rng.pick(list) : rng.int(1, colours);
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
-import type { Input } from '../src/core/input';
+import { NullAudio } from '../src/core/audio';
+import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import { bubbleGame } from '../src/games/bubble';
 import { clampAim, coloursFor, comboFor, rowsFor, SHOTS_PER_DROP } from '../src/games/bubble/bubble';
@@ -10,16 +11,17 @@ import {
   cellY,
   FLY_SPEED,
   type Flight,
+  groupAt,
   type Layout,
+  LINE_ROWS,
   makeLayout,
-  neighbours,
   type Row,
   shiftOf,
   stepFlight,
   traceShot,
 } from '../src/games/bubble/board';
 import { type BoostId, type GameInstance, type Insets, NO_INSETS, type SkinData } from '../src/games/types';
-import { cornerSizes, createGame } from './helpers';
+import { cornerSizes, createGame, mockCtx } from './helpers';
 
 const DT = 1 / 60;
 const MIN_AIM = (15 * Math.PI) / 180;
@@ -169,6 +171,73 @@ describe('bubble layout', () => {
       expect(l.shooterY - cellY(l, l.lineRow)).toBeCloseTo(l.rowH, 6);
       expect(l.lineRow).toBeGreaterThanOrEqual(6);
     }
+  });
+
+  it('plays the same depth on every screen: tall phones get no extra rows', () => {
+    // Regression: the shooter line sat 19 rows down on a portrait phone but 11 on a desktop window, so the
+    // same board was far easier on a phone.
+    const sizes = [
+      ...cornerSizes(bubbleGame),
+      ...PORTRAIT_PHONES.map(([, w, h]) => chooseLogicalSize(bubbleGame, w, h - 50)),
+      { width: 600, height: 880 },
+    ];
+    for (const { width, height } of sizes) {
+      for (const inset of [0, 110]) {
+        const l = makeLayout(width, height, inset);
+        expect(l.lineRow, `${width}x${height}`).toBe(LINE_ROWS);
+        expect(l.shooterY).toBeCloseTo(height - inset - 48, 6);
+        expect(l.shooterY - cellY(l, l.lineRow)).toBeCloseTo(l.rowH, 6);
+        // The ceiling never rises into the HUD band, and the press fills any height left over.
+        expect(l.top).toBeGreaterThanOrEqual(l.frame - 1e-6);
+        expect(l.frame).toBeGreaterThanOrEqual(Math.min(56, l.top) - 1e-6);
+      }
+    }
+  });
+
+  it('draws HUD text at least 12 CSS px tall on the portrait phones', () => {
+    for (const [name, w, h] of PORTRAIT_PHONES) {
+      const size = chooseLogicalSize(bubbleGame, w, h - 50);
+      const scale = Math.min(w / size.width, (h - 50) / size.height);
+      const drawn: { value: string; px: number }[] = [];
+      const base = mockCtx();
+      const ctx = new Proxy(base, {
+        get(target, key) {
+          if (key === 'fillText')
+            return (value: string) =>
+              drawn.push({ value, px: Number(/(\d+(?:\.\d+)?)px/.exec(String(target.font))?.[1]) });
+          return Reflect.get(target, key);
+        },
+      });
+      const game = bubbleGame.create({
+        ctx,
+        width: size.width,
+        height: size.height,
+        input: new Input(),
+        audio: new NullAudio(),
+        rng: new Rng(1),
+        loadout: { skin: SKIN, boosts: new Set(), powerDuration: 1 },
+        insets: NO_INSETS,
+        reducedMotion: true,
+        haptic: () => undefined,
+      });
+      game.render();
+      for (const label of ['SCORE', 'LEVEL', 'DROP', 'NEXT']) {
+        const hit = drawn.find((d) => d.value.startsWith(label));
+        expect(hit, `${name} ${label}`).toBeDefined();
+        expect((hit?.px ?? 0) * scale, `${name} ${label}`).toBeGreaterThanOrEqual(12);
+      }
+    }
+  });
+
+  it('moves the HUD beside the playfield on a wide canvas', () => {
+    const wide = makeLayout(1200, 800);
+    expect(wide.sideHud).toBe(true);
+    expect(wide.lineRow).toBe(LINE_ROWS);
+    expect(wide.left).toBeGreaterThanOrEqual(220);
+    expect(makeLayout(720, 800).sideHud).toBe(false);
+    const { game, input } = fresh(3, [], 1200, 800);
+    step(game, input, 30);
+    expect(() => game.render()).not.toThrow();
   });
 
   it('keeps the playfield inside the walls and centred', () => {
@@ -335,22 +404,46 @@ describe('shooting', () => {
 });
 
 describe('ceiling and shooter line', () => {
-  it('the ceiling drops one row on every sixth shot', () => {
+  it('the ceiling sinks one row on every sixth shot, pushing the grid down without adding bubbles', () => {
     const { game } = fresh(9);
     const s = peek(game);
     setGrid(s, [fullRow(1)]);
+    const before = { ...s.layout };
     for (let shot = 1; shot <= 6; shot++) {
       // Alternating colours down row 1 never touch a same colour, so no shot pops anything.
       s.land({ row: 1, col: shot - 1 }, shot % 2 ? 2 : 3);
       if (shot < 6) {
-        expect(s.rows.length).toBe(2);
+        expect(s.layout.top).toBe(before.top);
         expect(s.sinceDrop).toBe(shot);
       }
     }
-    expect(s.rows.length).toBe(3);
     expect(s.sinceDrop).toBe(0);
-    // The new ceiling row is a full row of colours.
-    expect(s.rows[0]?.cells.every((v) => v > 0)).toBe(true);
+    expect(s.layout.top).toBeCloseTo(before.top + before.rowH, 9);
+    expect(s.layout.lineRow).toBe(before.lineRow - 1);
+    // The shooter and the danger line stay where they were; only the ceiling has come nearer.
+    expect(s.layout.shooterY).toBe(before.shooterY);
+    expect(cellY(s.layout, s.layout.lineRow)).toBeCloseTo(cellY(before, before.lineRow), 9);
+    // Regression: a drop used to add a full row of new bubbles, so level 1 could not be cleared.
+    expect(s.rows.length).toBe(2);
+    const count = s.rows.reduce((n, r) => n + r.cells.filter((v) => v > 0).length, 0);
+    expect(count).toBe(9 + 6);
+  });
+
+  it('a new level resets the sunken ceiling', () => {
+    const { game, input } = fresh(16);
+    const s = peek(game);
+    const top = s.layout.top;
+    setGrid(s, [[2, 2, 0, 0, 0, 0, 0, 0, 0]]);
+    s.sinceDrop = SHOTS_PER_DROP - 1;
+    s.land({ row: 1, col: 5 }, 4);
+    expect(s.layout.top).toBeGreaterThan(top);
+    s.loaded = 2;
+    dragFire(game, input, 0, 2);
+    settle(game, input);
+    step(game, input, 130);
+    expect(s.level).toBe(2);
+    expect(s.layout.top).toBe(top);
+    expect(s.layout.lineRow).toBe(LINE_ROWS);
   });
 
   it('a bubble that settles on the shooter line ends the run', () => {
@@ -388,13 +481,15 @@ describe('ceiling and shooter line', () => {
     s.sinceDrop = SHOTS_PER_DROP - 1;
     // A shot that pops nothing: it is the sixth since the last drop, so the ceiling sinks onto the line.
     s.land({ row: line - 1, col: 0 }, 3);
-    expect(s.rows.length).toBe(line + 1);
+    expect(s.rows.length).toBe(line);
+    expect(s.layout.lineRow).toBe(line - 1);
     expect(s.isEnding).toBe(true);
   });
 });
 
 describe('levels', () => {
-  it('starts level 1 with 7 full rows of 5 colours, with no two touching bubbles alike', () => {
+  it('starts level 1 with 7 full rows of 5 colours, with pairs to pop but never a group of three', () => {
+    let pairs = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const s = peek(fresh(seed).game);
       expect(s.rows.length).toBe(7);
@@ -402,12 +497,15 @@ describe('levels', () => {
         row.cells.forEach((k, c) => {
           expect(k).toBeGreaterThanOrEqual(1);
           expect(k).toBeLessThanOrEqual(5);
-          for (const [nr, nc] of neighbours(s.rows, r, c)) {
-            expect(s.rows[nr]?.cells[nc] ?? 0).not.toBe(k);
-          }
+          const size = groupAt(s.rows, r, c).length;
+          expect(size).toBeLessThanOrEqual(2);
+          if (size === 2) pairs++;
         });
       });
     }
+    // Regression: rows used to have no matching neighbours at all, so every pop took two set-up shots.
+    // Each pair is counted from both of its bubbles; 20 boards of 63 bubbles should hold well over 100 pairs.
+    expect(pairs / 2).toBeGreaterThan(100);
   });
 
   it('clearing the grid starts the next level after a short pause', () => {
@@ -445,6 +543,41 @@ describe('levels', () => {
     expect(s.level).toBe(2);
     expect(game.getResult().stats['shots']).toBe(2);
     expect(Math.atan2(-(s.shot?.vy ?? 0), s.shot?.vx ?? 0)).toBeCloseTo(Math.atan2(300, 150), 6);
+  });
+
+  it('a greedy player clears level 1 on most seeds (it used to be unclearable)', () => {
+    /** Score of settling `colour` at `at`: a pop (and what it drops) beats a pair, which beats a single. */
+    const value = (rows: Row[], at: Cell, colour: number): number => {
+      const copy = rows.map((r) => ({ shift: r.shift, cells: Uint8Array.from(r.cells) }));
+      while (copy.length <= at.row) copy.push({ shift: shiftOf(copy, copy.length), cells: new Uint8Array(9) });
+      (copy[at.row] as Row).cells[at.col] = colour;
+      const group = groupAt(copy, at.row, at.col);
+      return group.length >= 3 ? 100 + group.length * 10 : group.length * 5 - at.row * 2;
+    };
+    let cleared = 0;
+    for (let seed = 1; seed <= 6; seed++) {
+      const { game, input } = fresh(seed);
+      const s = peek(game);
+      for (let shot = 0; shot < 200 && !s.isEnding && game.getResult().stats['levels'] === 0; shot++) {
+        let best = -Infinity;
+        let aim = Math.PI / 2;
+        for (let deg = 16; deg <= 164; deg += 1) {
+          const a = (deg * Math.PI) / 180;
+          const at = traceShot(s.layout, s.rows, a).at;
+          if (!at) continue;
+          const v = value(s.rows, at, s.loaded);
+          if (v > best) {
+            best = v;
+            aim = a;
+          }
+        }
+        s.aim = aim;
+        fireTap(game, input);
+        settle(game, input);
+      }
+      if (game.getResult().stats['levels'] > 0) cleared++;
+    }
+    expect(cleared).toBeGreaterThanOrEqual(4);
   });
 
   it('head-start begins on level 2, with an extra row and a sixth colour', () => {

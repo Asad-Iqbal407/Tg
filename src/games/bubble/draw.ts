@@ -61,18 +61,39 @@ export function drawBackdrop(ctx: CanvasRenderingContext2D, W: number, H: number
   ctx.fillRect(0, 0, W, H);
 }
 
-/** The playfield panel and the rails: the ceiling across the top and the two side walls. */
-export function drawWalls(ctx: CanvasRenderingContext2D, l: Layout, pal: Palette, H: number): void {
+/**
+ * The playfield panel and the rails: the frame across the top, the two side walls, and the press between the
+ * frame and the ceiling. The press grows a row each time the ceiling sinks; `slide` eases it down.
+ */
+export function drawWalls(
+  ctx: CanvasRenderingContext2D,
+  l: Layout,
+  pal: Palette,
+  H: number,
+  slide = 0,
+): void {
   // A rail never grows wider than the pad beside the playfield, so it stays on the canvas.
   const rail = Math.min(WALL_PAD, Math.max(4, l.d * 0.12));
-  const h = H - l.top;
+  const w = l.right - l.left;
+  const h = H - l.frame;
   ctx.globalAlpha = 0.35;
   ctx.fillStyle = pal.panel;
-  ctx.fillRect(l.left, l.top, l.right - l.left, h);
+  ctx.fillRect(l.left, l.frame, w, h);
   ctx.globalAlpha = 1;
-  fillRoundRect(ctx, l.left - rail, l.top - rail, l.right - l.left + rail * 2, rail, rail / 2, pal.rail);
-  fillRoundRect(ctx, l.left - rail, l.top, rail, h, rail / 2, pal.rail);
-  fillRoundRect(ctx, l.right, l.top, rail, h, rail / 2, pal.rail);
+  const ceiling = l.top - slide;
+  if (ceiling > l.frame + 1) {
+    ctx.fillStyle = shade(pal.panel, -0.25);
+    ctx.fillRect(l.left, l.frame, w, ceiling - l.frame);
+    // Plates one row tall, from the ceiling up, so each sink adds one visibly.
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = pal.rail;
+    for (let y = ceiling - l.rowH; y > l.frame; y -= l.rowH) ctx.fillRect(l.left, y - 1, w, 2);
+    ctx.globalAlpha = 1;
+    fillRoundRect(ctx, l.left, ceiling - rail, w, rail, rail / 2, pal.rail);
+  }
+  fillRoundRect(ctx, l.left - rail, l.frame - rail, w + rail * 2, rail, rail / 2, pal.rail);
+  fillRoundRect(ctx, l.left - rail, l.frame, rail, h, rail / 2, pal.rail);
+  fillRoundRect(ctx, l.right, l.frame, rail, h, rail / 2, pal.rail);
 }
 
 /** A dashed line on the boundary above the shooter line, where a bubble would end the run. */
@@ -102,7 +123,7 @@ export function drawGrid(
 ): void {
   ctx.save();
   ctx.beginPath();
-  ctx.rect(l.left, l.top, l.right - l.left, H - l.top);
+  ctx.rect(l.left, l.top - slide, l.right - l.left, H - l.top + slide);
   ctx.clip();
   rows.forEach((row, i) => {
     const y = cellY(l, i) - slide;
@@ -195,8 +216,8 @@ export function drawNext(
 ): void {
   const x = l.shooterX + l.d * 2.3;
   const y = l.shooterY;
-  text(ctx, 'NEXT', x, y - l.d * 0.8, {
-    size: Math.round(Math.max(11, l.d * 0.22)),
+  text(ctx, 'NEXT', x, y - l.d * 0.85, {
+    size: Math.round(Math.max(HUD_MIN, l.d * 0.3)),
     align: 'center',
     color: pal.text,
     weight: 700,
@@ -204,32 +225,34 @@ export function drawNext(
   drawBubble(ctx, x, y, r * 0.7, colour);
 }
 
-/** Score on the left, level in the middle, and one pip per shot until the ceiling drops. */
-export function drawHud(
+/** Smallest HUD text, in logical px: about 12 CSS px on the narrowest phone stage (a 522 px wide canvas). */
+export const HUD_MIN = 18;
+/** A HUD band at least this tall shows labels over values, on two lines. */
+const TWO_LINE_HUD = 72;
+
+export interface HudState {
+  score: number;
+  level: number;
+  sinceDrop: number;
+  perDrop: number;
+}
+
+/** One pip per shot until the ceiling drops, in a row ending at `right`. Returns the x of the first pip. */
+function drawPips(
   ctx: CanvasRenderingContext2D,
-  W: number,
-  l: Layout,
   pal: Palette,
-  s: { score: number; level: number; sinceDrop: number; perDrop: number },
-): void {
-  const size = Math.round(Math.min(22, Math.max(14, l.d * 0.34)));
-  const y = l.top / 2;
-  text(ctx, `SCORE ${formatNumber(s.score)}`, l.left + 4, y, { size, align: 'left', color: pal.text });
-  text(ctx, `LEVEL ${s.level}`, W / 2, y, { size, align: 'center', color: pal.text });
-  const pip = Math.max(4, l.d * 0.11);
+  s: HudState,
+  right: number,
+  y: number,
+  pip: number,
+): number {
   const gap = pip * 2.6;
-  const pipX = (i: number): number => l.right - pip - (s.perDrop - 1 - i) * gap;
-  text(ctx, 'DROP', pipX(0) - pip * 1.6, y, {
-    size: Math.round(size * 0.8),
-    align: 'right',
-    color: pal.text,
-    weight: 700,
-  });
+  const pipX = (i: number): number => right - pip - (s.perDrop - 1 - i) * gap;
   for (let i = 0; i < s.perDrop; i++) {
     ctx.beginPath();
     ctx.arc(pipX(i), y, pip, 0, TAU);
     if (i < s.sinceDrop) {
-      ctx.fillStyle = pal.rail;
+      ctx.fillStyle = s.sinceDrop === s.perDrop - 1 ? pal.danger : pal.rail;
       ctx.fill();
     } else {
       ctx.globalAlpha = 0.5;
@@ -239,4 +262,63 @@ export function drawHud(
       ctx.globalAlpha = 1;
     }
   }
+  return pipX(0);
+}
+
+/**
+ * The HUD. Across the top: score on the left, level in the middle, and the drop pips on the right. On a wide
+ * canvas the score and level go in the left panel and the drop counter in the right one.
+ */
+export function drawHud(ctx: CanvasRenderingContext2D, W: number, l: Layout, pal: Palette, s: HudState): void {
+  if (l.sideHud) {
+    drawSideHud(ctx, W, l, pal, s);
+    return;
+  }
+  const x0 = l.left + 4;
+  const x1 = l.right - 2;
+  if (l.frame < TWO_LINE_HUD) {
+    // One line: SCORE 1,234 · LEVEL 2 · DROP and the pips.
+    const y = l.frame / 2;
+    const size = HUD_MIN;
+    text(ctx, `SCORE ${formatNumber(s.score)}`, x0, y, { size, align: 'left', color: pal.text });
+    text(ctx, `LEVEL ${s.level}`, W / 2, y, { size, align: 'center', color: pal.text });
+    const pip = 5.5;
+    const first = drawPips(ctx, pal, s, x1, y, pip);
+    text(ctx, 'DROP', first - pip * 1.8, y, { size, align: 'right', color: pal.text, weight: 700 });
+    return;
+  }
+  // Two lines on a tall band: small labels over bigger values.
+  const ly = l.frame * 0.3;
+  const vy = l.frame * 0.66;
+  const big = Math.round(Math.min(32, l.frame * 0.34));
+  const label = { size: HUD_MIN, color: pal.text, weight: 700 } as const;
+  text(ctx, 'SCORE', x0, ly, { ...label, align: 'left' });
+  text(ctx, formatNumber(s.score), x0, vy, { size: big, align: 'left', color: pal.text });
+  text(ctx, 'LEVEL', W / 2, ly, { ...label, align: 'center' });
+  text(ctx, String(s.level), W / 2, vy, { size: big, align: 'center', color: pal.text });
+  text(ctx, 'DROP', x1, ly, { ...label, align: 'right' });
+  drawPips(ctx, pal, s, x1, vy, Math.round(big * 0.26));
+}
+
+function drawSideHud(ctx: CanvasRenderingContext2D, W: number, l: Layout, pal: Palette, s: HudState): void {
+  const panel = l.left - WALL_PAD;
+  const big = Math.round(Math.min(56, Math.max(HUD_MIN + 8, panel * 0.2)));
+  const small = Math.round(Math.max(HUD_MIN, big * 0.5));
+  const lx = l.left / 2;
+  const rx = (l.right + W) / 2;
+  const y0 = l.frame + big;
+  const label = { size: small, align: 'center', color: pal.text, weight: 700 } as const;
+  text(ctx, 'SCORE', lx, y0, label);
+  text(ctx, formatNumber(s.score), lx, y0 + big * 1.1, { size: big, align: 'center', color: pal.text });
+  text(ctx, 'LEVEL', lx, y0 + big * 2.6, label);
+  text(ctx, String(s.level), lx, y0 + big * 3.7, { size: big, align: 'center', color: pal.text });
+  text(ctx, 'DROP IN', rx, y0, label);
+  text(ctx, String(s.perDrop - s.sinceDrop), rx, y0 + big * 1.1, {
+    size: big,
+    align: 'center',
+    color: s.sinceDrop === s.perDrop - 1 ? pal.danger : pal.text,
+  });
+  const pip = Math.max(6, small * 0.4);
+  const span = (s.perDrop - 1) * pip * 2.6 + 2 * pip;
+  drawPips(ctx, pal, s, rx + span / 2, y0 + big * 2.2, pip);
 }

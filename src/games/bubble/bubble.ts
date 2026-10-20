@@ -7,10 +7,10 @@ import {
   cellY,
   COLS,
   emptyRow,
+  fillColour,
   FLY_SPEED,
   type Flight,
   flip,
-  freeColour,
   groupAt,
   type Layout,
   makeLayout,
@@ -18,6 +18,7 @@ import {
   type Row,
   shiftOf,
   stepFlight,
+  sunkLayout,
   traceShot,
   type Trace,
   trimRows,
@@ -40,7 +41,7 @@ import {
   type Palette,
 } from './draw';
 
-/** Shots between ceiling drops. */
+/** Shots between ceiling drops: every sixth shot the ceiling sinks one row, pushing the whole grid down. */
 export const SHOTS_PER_DROP = 6;
 /** Bubbles of one colour that must touch to pop. */
 const MIN_GROUP = 3;
@@ -89,7 +90,10 @@ export function clampAim(angle: number): number {
 type Shot = Flight & { colour: number };
 
 export class BubbleGame extends BaseGame {
-  private readonly layout: Layout;
+  /** The layout at the start of a level, and the layout after the ceiling has sunk `sunk` rows. */
+  private readonly baseLayout: Layout;
+  private layout: Layout;
+  private sunk = 0;
   private readonly pal: Palette;
   /** Grid rows from the ceiling (index 0) down. */
   private rows: Row[] = [];
@@ -122,7 +126,8 @@ export class BubbleGame extends BaseGame {
 
   constructor(services: GameServices) {
     super(services);
-    this.layout = makeLayout(this.W, this.H, this.insets.bottom);
+    this.baseLayout = makeLayout(this.W, this.H, this.insets.bottom);
+    this.layout = this.baseLayout;
     this.pal = this.palette();
     for (const key of STAT_KEYS) this.addStat(key, 0);
     this.startLevel(this.hasBoost('head-start') ? 2 : 1);
@@ -151,7 +156,7 @@ export class BubbleGame extends BaseGame {
     drawBackdrop(ctx, this.W, this.H, pal);
     ctx.save();
     ctx.translate(this.shake.x, this.shake.y);
-    drawWalls(ctx, L, pal, this.H);
+    drawWalls(ctx, L, pal, this.H, this.slide);
     drawDangerLine(ctx, L, pal);
     drawGrid(ctx, L, this.H, this.rows, pal, r, this.slide);
     const loaded = colourOf(pal, this.loaded);
@@ -215,7 +220,9 @@ export class BubbleGame extends BaseGame {
   private startLevel(level: number): void {
     this.level = level;
     this.rows = [];
-    for (let i = 0; i < rowsFor(level); i++) this.growRow(false);
+    this.sunk = 0;
+    this.layout = this.baseLayout;
+    for (let i = 0; i < rowsFor(level); i++) this.growRow();
     this.sinceDrop = 0;
     this.shot = null;
     this.slide = 0;
@@ -225,15 +232,14 @@ export class BubbleGame extends BaseGame {
     this.version++;
   }
 
-  /** Adds a full row of random colours above the grid (a ceiling drop) or below it (the first rows). */
-  private growRow(atTop: boolean): void {
+  /** Adds a full row of random colours below the grid, for the rows a level starts with. */
+  private growRow(): void {
     const colours = coloursFor(this.level);
-    const edge = atTop ? this.rows[0] : this.rows[this.rows.length - 1];
+    const edge = this.rows[this.rows.length - 1];
     const row = emptyRow(edge ? flip(edge.shift) : 0);
-    if (atTop) this.rows.unshift(row);
-    else this.rows.push(row);
-    const index = atTop ? 0 : this.rows.length - 1;
-    for (let c = 0; c < COLS; c++) row.cells[c] = freeColour(this.rng, this.rows, index, c, colours);
+    this.rows.push(row);
+    const index = this.rows.length - 1;
+    for (let c = 0; c < COLS; c++) row.cells[c] = fillColour(this.rng, this.rows, index, c, colours);
   }
 
   /** The next colour to load: one that is still on the grid, so the board is always clearable. */
@@ -448,9 +454,13 @@ export class BubbleGame extends BaseGame {
     });
   }
 
-  /** The ceiling sinks one row: a fresh full row comes in above, and everything moves down. */
+  /**
+   * The ceiling sinks one row and the whole grid moves down with it, a row nearer the shooter line. No bubbles
+   * are added, so a level can always be cleared.
+   */
   private ceilingDrop(): void {
-    this.growRow(true);
+    this.sunk++;
+    this.layout = sunkLayout(this.baseLayout, this.sunk);
     this.slide = this.layout.rowH;
     this.version++;
     this.audio.play('warning');
