@@ -6,7 +6,7 @@ export const pongGame: GameDefinition = {
   title: 'Ping Pong',
   tagline: 'Rally past the computer. First to eleven, win by two.',
   description:
-    'Table tennis against the computer. Keep the ball in play, and return it off the edge of your paddle for a sharper angle. Each hit makes the ball faster. Games go to eleven, and a win must be by two points. Long rallies earn bonus points.',
+    'Table tennis against the computer. Keep the ball in play, and return it off the edge of your paddle for a sharper angle. Every hit in a rally makes the ball faster, and each serve starts slow again. Games go to eleven, and a win must be by two points. Long rallies earn bonus points.',
   genre: 'Table tennis',
   inspiredBy: 'Classic table tennis',
   width: 960,

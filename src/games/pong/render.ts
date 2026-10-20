@@ -17,7 +17,12 @@ export interface Score {
   rival: number;
   shots: number;
   serving: boolean;
+  /** Whose serve it is, shown in the middle pill while the serve waits. */
+  server: 'player' | 'computer';
 }
+
+/** Smallest score band text, in logical px: about 12 CSS px on the smallest landscape phone stage (L1). */
+export const BAND_TEXT_MIN = 20;
 
 /** The table surface, the centre line (the net) and the rails at the playfield's top and bottom. */
 export function drawTable(ctx: CanvasRenderingContext2D, t: Table, u: number, pal: Palette): void {
@@ -117,26 +122,28 @@ export function drawScoreBand(
   ctx.fillRect(0, y0, W, head);
   const cy = y0 + head / 2;
   const cx = W / 2;
-  const pillW = Math.min(176 * u, W * 0.22);
+  // Wide enough for YOUR SERVE at the smallest text size.
+  const pillW = Math.max(Math.min(176 * u, W * 0.22), BAND_TEXT_MIN * 8);
   const pillH = head * 0.6;
   hudPill(ctx, cx - pillW / 2, cy - pillH / 2, pillW, pillH);
-  text(ctx, s.serving ? 'SERVE' : `RALLY ${s.shots}`, cx, cy, {
-    size: Math.round(pillH * 0.5),
+  const label = s.serving ? (s.server === 'player' ? 'YOUR SERVE' : 'CPU SERVE') : `RALLY ${s.shots}`;
+  text(ctx, label, cx, cy, {
+    size: Math.max(BAND_TEXT_MIN, Math.round(pillH * 0.5)),
     align: 'center',
+    color: s.serving && s.server === 'player' ? pal.player : '#fff',
   });
   const sides: readonly [number, number, string, string][] = [
     [W * 0.26, s.player, 'YOU', pal.player],
     [W * 0.74, s.rival, 'CPU', pal.rival],
   ];
   for (const [x, value, label, colour] of sides) {
-    text(ctx, String(value), x, cy - head * 0.1, {
+    text(ctx, String(value), x, cy - head * 0.13, {
       size: Math.round(head * 0.5),
       align: 'center',
       color: colour,
     });
-    // At least 18 logical px, so the labels stay about 11 CSS px tall on the smallest phone stage.
-    text(ctx, label, x, cy + head * 0.3, {
-      size: Math.max(18, Math.round(head * 0.3)),
+    text(ctx, label, x, cy + head * 0.27, {
+      size: Math.max(BAND_TEXT_MIN, Math.round(head * 0.3)),
       align: 'center',
       color: 'rgba(255,255,255,0.7)',
     });

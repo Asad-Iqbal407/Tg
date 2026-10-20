@@ -25,8 +25,9 @@ const POINT_SCORE = 100;
 const LONG_RALLY_SHOTS = 10;
 const LONG_RALLY_SCORE = 50;
 /**
- * Ball and paddle speeds in design px/s, scaled to the table (speedScale). The ball gains SPEEDUP on every paddle
- * hit until it reaches MAX_SPEED.
+ * Ball and paddle speeds in design px/s, scaled to the table (speedScale). Speed builds within a rally: the ball
+ * gains SPEEDUP on every paddle hit until it reaches MAX_SPEED, and every serve starts again at SERVE_SPEED. A long
+ * rally gets hard to keep alive, while a new point always opens at a pace a player can read.
  */
 const SERVE_SPEED = 420;
 const SPEEDUP = 18;
@@ -117,6 +118,7 @@ export class PongGame extends BaseGame {
         rival: this.rivalPts,
         shots: this.shots,
         serving: this.serving,
+        server: this.server,
       });
     }
   }

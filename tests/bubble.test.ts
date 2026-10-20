@@ -285,6 +285,20 @@ describe('shooting', () => {
     expect(s.rows[0]?.cells[8]).toBe(2);
   });
 
+  it('swaps the loaded and waiting bubbles when a pop takes their colour off the grid', () => {
+    const { game, input } = fresh(17);
+    const s = peek(game);
+    setGrid(s, [[1, 1, 0, 0, 0, 0, 0, 0, 2]]);
+    s.loaded = 1;
+    s.upcoming = 1;
+    dragFire(game, input, 0, 2);
+    settle(game, input);
+    // Colour 1 is gone, so neither bubble in the shooter may still be colour 1.
+    expect(game.getResult().stats['pops']).toBe(3);
+    expect(s.loaded).toBe(2);
+    expect(s.upcoming).toBe(2);
+  });
+
   it('a press and drag aims, and letting go fires along that aim', () => {
     const { game, input } = fresh(5);
     const s = peek(game);
@@ -549,7 +563,8 @@ describe('levels', () => {
     /** Score of settling `colour` at `at`: a pop (and what it drops) beats a pair, which beats a single. */
     const value = (rows: Row[], at: Cell, colour: number): number => {
       const copy = rows.map((r) => ({ shift: r.shift, cells: Uint8Array.from(r.cells) }));
-      while (copy.length <= at.row) copy.push({ shift: shiftOf(copy, copy.length), cells: new Uint8Array(9) });
+      while (copy.length <= at.row)
+        copy.push({ shift: shiftOf(copy, copy.length), cells: new Uint8Array(9) });
       (copy[at.row] as Row).cells[at.col] = colour;
       const group = groupAt(copy, at.row, at.col);
       return group.length >= 3 ? 100 + group.length * 10 : group.length * 5 - at.row * 2;
@@ -575,7 +590,7 @@ describe('levels', () => {
         fireTap(game, input);
         settle(game, input);
       }
-      if (game.getResult().stats['levels'] > 0) cleared++;
+      if ((game.getResult().stats['levels'] ?? 0) > 0) cleared++;
     }
     expect(cleared).toBeGreaterThanOrEqual(4);
   });

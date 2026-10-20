@@ -38,10 +38,13 @@ export function headHeight(H: number): number {
 /** The playfield height the speeds are authored for: a design canvas less its score band. */
 export const DESIGN_TABLE_H = DESIGN_H - headHeight(DESIGN_H);
 
+/** Half the rail thickness, in design px: the bottom edge stays this far up so the whole rail shows. */
+const RAIL_HALF = 2;
+
 /** The playfield for a logical size and live insets. The bottom edge stops above touch controls. */
 export function tableFor(W: number, H: number, ins: Readonly<Insets>): Table {
   const top = ins.top + headHeight(H);
-  const bottom = Math.max(top + H * 0.3, H - ins.bottom);
+  const bottom = Math.max(top + H * 0.3, H - ins.bottom - (RAIL_HALF * H) / DESIGN_H);
   return { left: ins.left, right: W - ins.right, top, bottom };
 }
 

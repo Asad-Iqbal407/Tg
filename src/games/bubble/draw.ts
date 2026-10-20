@@ -269,7 +269,13 @@ function drawPips(
  * The HUD. Across the top: score on the left, level in the middle, and the drop pips on the right. On a wide
  * canvas the score and level go in the left panel and the drop counter in the right one.
  */
-export function drawHud(ctx: CanvasRenderingContext2D, W: number, l: Layout, pal: Palette, s: HudState): void {
+export function drawHud(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  l: Layout,
+  pal: Palette,
+  s: HudState,
+): void {
   if (l.sideHud) {
     drawSideHud(ctx, W, l, pal, s);
     return;

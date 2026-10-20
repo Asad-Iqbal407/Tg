@@ -244,13 +244,28 @@ export class BubbleGame extends BaseGame {
 
   /** The next colour to load: one that is still on the grid, so the board is always clearable. */
   private pickShot(): number {
-    const present = new Set<number>();
-    for (const row of this.rows) for (const v of row.cells) if (v) present.add(v);
+    const present = this.coloursOnGrid();
     const list =
       present.size > 0
         ? [...present].sort((a, b) => a - b)
         : Array.from({ length: coloursFor(this.level) }, (_, i) => i + 1);
     return this.rng.pick(list);
+  }
+
+  /**
+   * A pop can take the last bubble of a colour off the grid. The loaded and the waiting bubble are swapped for
+   * colours still in play, so the player is never handed a shot that can match nothing.
+   */
+  private refreshShooter(): void {
+    const present = this.coloursOnGrid();
+    if (!present.has(this.loaded)) this.loaded = this.pickShot();
+    if (!present.has(this.upcoming)) this.upcoming = this.pickShot();
+  }
+
+  private coloursOnGrid(): Set<number> {
+    const present = new Set<number>();
+    for (const row of this.rows) for (const v of row.cells) if (v) present.add(v);
+    return present;
   }
 
   private aimTrace(): Trace {
@@ -350,6 +365,7 @@ export class BubbleGame extends BaseGame {
       this.clearLevel();
       return;
     }
+    if (pops > 0) this.refreshShooter();
     this.sinceDrop++;
     if (this.sinceDrop >= SHOTS_PER_DROP) {
       this.sinceDrop = 0;
@@ -495,6 +511,8 @@ export class BubbleGame extends BaseGame {
       this.texts.add(at.x, at.y - L.d * 0.9, 'SAVED!', '#67e8f9', Math.round(L.d * 0.4), 1.4);
       this.audio.play('powerup');
       this.shake.add(0.4);
+      if (this.rows.length === 0) this.clearLevel();
+      else this.refreshShooter();
       return;
     }
     this.endGame(DEATH_DELAY_SEC);

@@ -273,6 +273,23 @@ describe('Ping Pong rules', () => {
     expect(g.ball.speed).toBeCloseTo(780 * k, 6);
   });
 
+  it('builds speed within a rally only: every serve starts at serve speed again', () => {
+    // The speed rule, decided and kept: hits speed the ball up within a rally, and a new point starts slow.
+    const { game } = fresh(3);
+    const g = peek(game);
+    const k = speedScale(g.table());
+    waitForServe(game);
+    const serveSpeed = Math.hypot(g.ball.vx, g.ball.vy);
+    expect(serveSpeed).toBeCloseTo(420 * k, 6);
+    g.ball.y = (g.table().top + g.table().bottom) / 2;
+    for (let i = 0; i < 6; i++)
+      g.contact(i % 2 ? 'computer' : 'player', (g.table().left + g.table().right) / 2);
+    expect(g.ball.speed).toBeCloseTo((420 + 6 * 18) * k, 6);
+    score(game, 'player');
+    waitForServe(game);
+    expect(Math.hypot(g.ball.vx, g.ball.vy)).toBeCloseTo(serveSpeed, 6);
+  });
+
   it('bounces off the top and bottom walls without losing speed', () => {
     const { game, input } = fresh();
     const g = peek(game);
@@ -515,7 +532,46 @@ describe('Ping Pong rendering and layout', () => {
     for (const label of ['YOU', 'CPU']) {
       const font = drawn.find((d) => d.value === label)?.font ?? '';
       const px = Number(/(\d+)px/.exec(font)?.[1]);
-      expect(px * scale, label).toBeGreaterThanOrEqual(11);
+      expect(px * scale, label).toBeGreaterThanOrEqual(12);
+    }
+    // The middle pill names the server while the serve waits.
+    const pill = drawn.find((d) => d.value === 'YOUR SERVE');
+    expect(pill).toBeDefined();
+    expect(Number(/(\d+)px/.exec(pill?.font ?? '')?.[1]) * scale).toBeGreaterThanOrEqual(12);
+  });
+
+  it('names the side that serves next in the middle pill', () => {
+    const { game } = fresh(2);
+    const g = peek(game);
+    const labels = (): string[] => {
+      const drawn: string[] = [];
+      const ctx = new Proxy(mockCtx(), {
+        get(target, key) {
+          if (key === 'fillText') return (value: string) => drawn.push(value);
+          return Reflect.get(target, key);
+        },
+      });
+      (game as unknown as { ctx: CanvasRenderingContext2D }).ctx = ctx;
+      game.render();
+      return drawn;
+    };
+    expect(labels()).toContain('YOUR SERVE');
+    waitForServe(game);
+    expect(labels()).toContain('RALLY 1');
+    score(game, 'player');
+    expect(g.server).toBe('computer');
+    expect(labels()).toContain('CPU SERVE');
+  });
+
+  it('keeps the whole bottom rail on the canvas when nothing sits below the table', () => {
+    for (const [W, H] of [
+      [960, 600],
+      [1032, 600],
+      [1200, 554],
+    ] as const) {
+      const t = tableFor(W, H, NO_INSETS);
+      // The rail is 4 design px thick, centred on the table's bottom edge.
+      expect(t.bottom + 2 * (H / DESIGN_H)).toBeLessThanOrEqual(H + 1e-9);
     }
   });
 
