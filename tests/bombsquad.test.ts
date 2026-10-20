@@ -4,6 +4,7 @@ import { chooseLogicalSize, fittedArea } from '../src/core/engine';
 import { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import type { Action } from '../src/core/input';
+import { touchTile } from '../src/games/bombsquad/bombsquad';
 import { Arena, BORDER, CRATE, FLOOR, manhattan, PILLAR } from '../src/games/bombsquad/grid';
 import {
   COMPACT_BOT_SCALE,
@@ -11,6 +12,7 @@ import {
   COMPACT_PLAYER_SCALE,
   drawScene,
   hudTextPx,
+  lifePillScale,
   PLAYER_HEIGHT_TILES,
   type Palette,
   type SceneView,
@@ -1060,5 +1062,101 @@ describe('phone zoom and text', () => {
     expect(hudTextPx(0.6)).toBe(COMPACT_HUD_PX);
     expect(hudTextPx(0.93)).toBe(COMPACT_HUD_PX);
     expect(hudTextPx(0)).toBe(COMPACT_HUD_PX);
+  });
+});
+
+describe('portrait screens (Play anyway, portrait tablets)', () => {
+  const def = gameById('bombsquad');
+  const PORTRAIT_PHONES = PHONE_MATRIX.filter(([name]) => name.startsWith('P'));
+
+  /** A portrait phone's run: logical size, canvas scale and the logical rows the BOMB button covers at the bottom. */
+  function portraitRun(width: number, height: number) {
+    const stage = stageOf(width, height);
+    const size = chooseLogicalSize(def, stage.w, stage.h);
+    const scale = Math.min(stage.w / size.width, stage.h / size.height);
+    const button = Math.min(72, Math.max(48, 0.16 * Math.min(width, height)));
+    return { stage, size, scale, bottom: Math.ceil((button + 14) / scale) };
+  }
+
+  it('fills a portrait phone stage with a tall arena instead of a letterboxed strip', () => {
+    // Before, the range stopped at 800 x 760, so a portrait phone that played anyway filled 46 to 50% of its stage.
+    for (const [name, width, height] of [...PORTRAIT_PHONES, ['T1', 768, 1024] as const]) {
+      const { stage, size } = portraitRun(width, height);
+      expect(size.height, name).toBeGreaterThan(size.width);
+      expect(fittedArea(size, stage.w, stage.h) / (stage.w * stage.h), name).toBeGreaterThanOrEqual(0.85);
+    }
+  });
+
+  it('keeps every wide stage at the size the old range gave it', () => {
+    const old = { ...def, viewport: { minWidth: 800, maxWidth: 1280, minHeight: 360, maxHeight: 760 } };
+    for (const [name, width, height] of PHONE_MATRIX.filter(([n]) => !n.startsWith('P') && n !== 'T1')) {
+      const stage = stageOf(width, height);
+      expect(chooseLogicalSize(def, stage.w, stage.h), name).toEqual(chooseLogicalSize(old, stage.w, stage.h));
+    }
+  });
+
+  it('lays nine columns of large tiles across a portrait phone, with readable characters and HUD', () => {
+    for (const [name, width, height] of PORTRAIT_PHONES) {
+      const { stage, size, scale, bottom } = portraitRun(width, height);
+      const { game } = createGame(def, {
+        width: size.width,
+        height: size.height,
+        insets: { top: 0, right: 0, bottom, left: 0 },
+      });
+      const i = internals(game);
+      const lay = i.layout();
+      expect(i.arena.cols, name).toBe(9);
+      expect(i.arena.rows, name).toBeGreaterThanOrEqual(13);
+      // The whole arena shows above the controls, so no camera is needed.
+      expect(lay.clip, name).toBeUndefined();
+      expect(lay.oy + i.arena.rows * lay.ts, name).toBeLessThanOrEqual(size.height - bottom);
+      const short = Math.min(stage.w, stage.h);
+      expect((PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * lay.ts * scale) / short, name).toBeGreaterThanOrEqual(0.08);
+      expect((0.6 * COMPACT_BOT_SCALE * lay.ts * scale) / short, name).toBeGreaterThanOrEqual(0.08);
+      expect(hudTextPx(scale) * scale, name).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('keeps a tall run sane through long random play', () => {
+    const { size, bottom } = portraitRun(390, 844);
+    const { game, input } = createGame(def, {
+      seed: 5,
+      width: size.width,
+      height: size.height,
+      insets: { top: 0, right: 0, bottom, left: 0 },
+    });
+    const rng = new Rng(11);
+    for (let t = 0; t < 120 && !game.isOver(); t += DT) {
+      if (rng.chance(0.05)) input.setVirtual(rng.pick(ACTIONS), rng.chance(0.6), 'test');
+      game.update(DT);
+      input.postUpdate();
+      const p = internals(game).player;
+      expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true);
+    }
+    const r = game.getResult();
+    expect(Number.isFinite(r.score)).toBe(true);
+  });
+
+  it('caps the touch tile, so a touch tablet gets more tiles rather than a few very large ones', () => {
+    // A portrait tablet under the controls: before the cap, 103 px tiles left a 9 x 9 arena.
+    expect(touchTile(960, 1200, 90)).toBe(72);
+    expect(new Arena(960, 1200 - 90, new Rng(1), touchTile(960, 1200, 90)).cols).toBe(11);
+    // Phones keep their tiles: a landscape phone's seven rows and a portrait phone's nine columns.
+    expect(touchTile(1218, 600, 118)).toBe(Math.floor((600 - 72 - 118) / 7));
+    expect(touchTile(630, 1280, 120)).toBe(Math.floor((630 - 32) / 9));
+  });
+
+  it('draws the lives and ammo larger under touch controls, clear of the wave pill', () => {
+    expect(lifePillScale(1218, 124)).toBe(1.25);
+    // A narrow canvas with large HUD text: the pill shrinks to fit, and never below its usual size.
+    for (const [W, waveW] of [
+      [600, 160],
+      [668, 136],
+      [400, 200],
+    ] as const) {
+      const k = lifePillScale(W, waveW);
+      expect(k).toBeGreaterThanOrEqual(1);
+      if (k > 1) expect(8 + 176 * k + 12).toBeLessThanOrEqual(W / 2 - waveW / 2 + 1e-9);
+    }
   });
 });

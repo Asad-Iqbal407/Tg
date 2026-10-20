@@ -130,6 +130,11 @@ export class TetrisGame extends BaseGame {
   /** The part of a soft-drop row this piece has earned but not yet been paid for, in rows. */
   private softShare = 0;
   private lockResets = 0;
+  /**
+   * The lowest row (largest y) the active piece has reached. The lock timer and the reset count start over only when
+   * the piece falls below it, so a turn that kicks the piece up and lets it fall back gains no time.
+   */
+  private lowestY = 0;
   /** The direction auto-repeat is running in (-1, 0 or 1), and the time that direction has been held. */
   private steerDir = 0;
   private steerHeld = 0;
@@ -364,17 +369,31 @@ export class TetrisGame extends BaseGame {
       p.x += dx;
       p.y -= dy;
       this.moved();
+      // A kick down can take the piece below its lowest row.
+      this.reachedRow();
       this.audio.play('click', { volume: 0.5 });
       return;
     }
   }
 
-  /** A successful move or turn restarts the lock timer while the piece rests on something. */
+  /**
+   * A successful move or turn restarts the lock timer, up to LOCK_RESETS times per lowest row. It counts once the piece
+   * has rested at its lowest row (lockT is running, or the piece is on something): a turn that kicks the piece up into
+   * the air uses a reset as well, so turning back and forth runs out of resets.
+   */
   private moved(): void {
-    if (this.grounded() && this.lockResets < LOCK_RESETS) {
+    if ((this.grounded() || this.lockT > 0) && this.lockResets < LOCK_RESETS) {
       this.lockT = 0;
       this.lockResets++;
     }
+  }
+
+  /** Called after the piece moves down: a new lowest row brings back the full lock delay and all the resets. */
+  private reachedRow(): void {
+    if (this.active.y <= this.lowestY) return;
+    this.lowestY = this.active.y;
+    this.lockT = 0;
+    this.lockResets = 0;
   }
 
   private grounded(): boolean {
@@ -390,7 +409,7 @@ export class TetrisGame extends BaseGame {
       if (this.lockT >= LOCK_SEC) this.lock();
       return;
     }
-    this.lockT = 0;
+    // In the air the lock timer holds where it is: it restarts only below the lowest row reached (see reachedRow).
     const gravity = secondsPerRow(this.level);
     const soft = this.input.isDown('down') || this.dragSoft;
     const interval = soft ? Math.min(gravity, SOFT_DROP_SEC) : gravity;
@@ -413,6 +432,7 @@ export class TetrisGame extends BaseGame {
       this.active.y++;
       rows++;
     }
+    this.reachedRow();
     // The time spent falling this step: all of it, or only up to the row that landed the piece.
     const falling = this.grounded() ? Math.max(0, rows * interval - phase) : dt;
     this.softShare += falling * extra;
@@ -458,6 +478,7 @@ export class TetrisGame extends BaseGame {
     this.softShare = 0;
     this.lockT = 0;
     this.lockResets = 0;
+    this.lowestY = this.active.y;
     if (this.board.fits(this.active)) return;
     if (this.survive(this.board.highestRows(SHIELD_ROWS)) && this.board.fits(this.active)) return;
     this.endGame(TOP_OUT_SEC);

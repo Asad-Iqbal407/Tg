@@ -82,6 +82,11 @@ const TOUCH_ROWS = 7;
  * about the same size on screen, and the arena about as many open tiles as a landscape phone's.
  */
 const TOUCH_COLS = 9;
+/**
+ * Largest touch tile (logical px). Phones never reach it (58 to 70 px across the matrix); a touch tablet does, and gets
+ * more rows and columns of tiles instead of a handful of very large ones.
+ */
+const TOUCH_TILE_MAX = 72;
 /** Shorter stage sides (CSS px) are phones: only they zoom the arena in on the character. */
 const PHONE_SHORT_SIDE = 600;
 /** Space the HUD keeps around the arena, in logical px (left, right and bottom margins; the top is set by the HUD). */
@@ -92,12 +97,13 @@ const NO_VECTOR = { x: 0, y: 0 };
 
 /**
  * The tile size (logical px) of an arena under touch controls that cover `bottom` logical px of a `W` x `H` canvas: the
- * short side of the room the arena gets holds TOUCH_ROWS rows (a wide canvas) or TOUCH_COLS columns (a tall one).
+ * short side of the room the arena gets holds TOUCH_ROWS rows (a wide canvas) or TOUCH_COLS columns (a tall one), and
+ * a tile is never larger than TOUCH_TILE_MAX.
  */
 export function touchTile(W: number, H: number, bottom: number): number {
   const roomW = W - 32;
   const roomH = H - 72 - bottom;
-  return Math.max(1, Math.floor(Math.min(roomW / TOUCH_COLS, roomH / TOUCH_ROWS)));
+  return Math.max(1, Math.floor(Math.min(roomW / TOUCH_COLS, roomH / TOUCH_ROWS, TOUCH_TILE_MAX)));
 }
 
 /** Bomb Squad: a bomb-laying arena. Crates hide power-ups; bots chase you in waves. */

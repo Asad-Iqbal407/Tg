@@ -559,6 +559,14 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
   // Under touch controls the text is hudPx (see hudTextPx), and the pills grow with it. At the usual size they are the
   // pills they always were.
   const px = big ? v.hudPx : COMPACT_HUD_PX;
+  const waveW = big ? Math.round((124 * px) / COMPACT_HUD_PX) : 124;
+  // The hearts and the ammo bombs are drawn larger under touch controls, where the canvas is small on screen, as far as
+  // the room left of the wave pill allows.
+  const k = big ? lifePillScale(v.W, waveW) : 1;
+  ctx.save();
+  ctx.translate(8, 6);
+  ctx.scale(k, k);
+  ctx.translate(-8, -6);
   hudPill(ctx, 8, 6, 176, 44);
   for (let i = 0; i < LIVES; i++) drawHeart(ctx, 26 + i * 26, 22, 18, i < v.lives);
   // Ammo: small bombs (up to ten shown, then a count).
@@ -590,8 +598,8 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
       size: big ? px : 11,
       color: '#e2e8f0',
     });
+  ctx.restore();
 
-  const waveW = big ? Math.round((124 * px) / COMPACT_HUD_PX) : 124;
   hudPill(ctx, v.W / 2 - waveW / 2, 6, waveW, 36);
   text(ctx, `WAVE ${v.wave}`, v.W / 2, 24, {
     size: big ? px : 18,
@@ -620,6 +628,20 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
     weight: 700,
     color: chips.length > 0 ? '#bae6fd' : 'rgba(255,255,255,0.45)',
   });
+}
+
+/** Width of the lives-and-ammo pill at the usual size, in logical px. */
+const LIFE_PILL_W = 176;
+/** How much larger the lives-and-ammo pill is drawn under touch controls. */
+const LIFE_PILL_TOUCH = 1.25;
+
+/**
+ * Scale of the lives-and-ammo pill under touch controls: LIFE_PILL_TOUCH, or less where it would come within 12 logical px
+ * of the wave pill (`waveW` wide, centred on a `W` wide canvas). Never below the usual size.
+ */
+export function lifePillScale(W: number, waveW: number): number {
+  const room = W / 2 - waveW / 2 - 12 - 8;
+  return Math.max(1, Math.min(LIFE_PILL_TOUCH, room / LIFE_PILL_W));
 }
 
 function drawHeart(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, filled: boolean): void {

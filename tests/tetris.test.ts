@@ -546,6 +546,45 @@ describe('lock delay', () => {
     step(game, input, 12);
     expect(statsOf(game).pieces).toBe(1);
   });
+
+  it('cannot be stalled forever by turns that kick the piece up off the floor', () => {
+    // An I piece on the floor turns upright with a kick of two rows up, and turning back leaves it two rows in the air.
+    // Before the fix each fall from there restarted the lock timer for free, so turning back and forth never locked.
+    const { game, input } = start(4);
+    setActive(game, 'I', 0, 3, 0);
+    // Soft drop it to the floor, so it reaches its lowest row by falling, as in play.
+    input.setVirtual('down', true, 'test');
+    for (let i = 0; i < 120 && peek(game).active.y < 20; i++) step(game, input);
+    input.setVirtual('down', false, 'test');
+    expect(peek(game).active.y).toBe(20);
+    // Each turn up rests the piece on the floor for a step; once its 15 resets are spent those steps add up to the delay.
+    for (let t = 0; t < 200 && statsOf(game).pieces === 0; t++) {
+      tap(game, input, 'up');
+      tap(game, input, 'tertiary');
+      step(game, input, 4);
+    }
+    expect(statsOf(game).pieces).toBe(1);
+  });
+
+  it('gives a fresh set of lock resets once the piece falls below the lowest row it reached', () => {
+    // Step off a ledge: the piece falls to a new lowest row, so the 15 resets it used up on the ledge come back.
+    const { game, input } = start(4);
+    setStack(game, ['....######', '....######']);
+    setActive(game, 'O', 0, 5, 18);
+    step(game, input, 2);
+    for (let i = 0; i < 15; i++) {
+      tap(game, input, i % 2 === 0 ? 'up' : 'tertiary');
+      step(game, input, 1);
+    }
+    expect(statsOf(game).pieces).toBe(0);
+    // Walk off the ledge to the left: three columns, then the piece drops two rows to the floor.
+    for (let i = 0; i < 3; i++) tap(game, input, 'left');
+    step(game, input, 180);
+    const s = peek(game);
+    // The piece fell and locked on the floor, not on the ledge.
+    expect(statsOf(game).pieces).toBe(1);
+    expect(s.board.cells[21 * COLS + 2]).not.toBe(0);
+  });
 });
 
 describe('hold', () => {
