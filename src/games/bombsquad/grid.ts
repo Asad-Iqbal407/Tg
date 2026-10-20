@@ -208,6 +208,15 @@ export class Arena {
         out.push(c);
       }
     }
+    // A tall arena (a portrait screen) puts the corner at the end of the player's own row only six tiles away, so the
+    // first bot of a wave would walk straight in while the wave banner is still up. There the spawns are taken farthest
+    // first, as the first spawns of a wide arena already are. A wide arena keeps its order.
+    if (rows > cols)
+      out.sort(
+        (a, b) =>
+          manhattan(b.x, b.y, playerSpawn.x, playerSpawn.y) -
+          manhattan(a.x, a.y, playerSpawn.x, playerSpawn.y),
+      );
     return out;
   }
 

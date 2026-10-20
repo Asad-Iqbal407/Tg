@@ -1091,7 +1091,9 @@ describe('portrait screens (Play anyway, portrait tablets)', () => {
     const old = { ...def, viewport: { minWidth: 800, maxWidth: 1280, minHeight: 360, maxHeight: 760 } };
     for (const [name, width, height] of PHONE_MATRIX.filter(([n]) => !n.startsWith('P') && n !== 'T1')) {
       const stage = stageOf(width, height);
-      expect(chooseLogicalSize(def, stage.w, stage.h), name).toEqual(chooseLogicalSize(old, stage.w, stage.h));
+      expect(chooseLogicalSize(def, stage.w, stage.h), name).toEqual(
+        chooseLogicalSize(old, stage.w, stage.h),
+      );
     }
   });
 
@@ -1111,7 +1113,10 @@ describe('portrait screens (Play anyway, portrait tablets)', () => {
       expect(lay.clip, name).toBeUndefined();
       expect(lay.oy + i.arena.rows * lay.ts, name).toBeLessThanOrEqual(size.height - bottom);
       const short = Math.min(stage.w, stage.h);
-      expect((PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * lay.ts * scale) / short, name).toBeGreaterThanOrEqual(0.08);
+      expect(
+        (PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * lay.ts * scale) / short,
+        name,
+      ).toBeGreaterThanOrEqual(0.08);
       expect((0.6 * COMPACT_BOT_SCALE * lay.ts * scale) / short, name).toBeGreaterThanOrEqual(0.08);
       expect(hudTextPx(scale) * scale, name).toBeGreaterThanOrEqual(12);
     }
@@ -1135,6 +1140,18 @@ describe('portrait screens (Play anyway, portrait tablets)', () => {
     }
     const r = game.getResult();
     expect(Number.isFinite(r.score)).toBe(true);
+  });
+
+  it('sends the first bots of a wave from the far end of a tall arena', () => {
+    // Before, the first spawn of a 9 x 15 arena was the end of the player's own top row, six tiles away.
+    const arena = new Arena(630, 1280 - 120, new Rng(1), touchTile(630, 1280, 120));
+    expect([arena.cols, arena.rows]).toEqual([9, 15]);
+    const dist = arena.botSpawns.map((s) => manhattan(s.x, s.y, arena.playerSpawn.x, arena.playerSpawn.y));
+    expect(dist.slice(0, 3).every((d) => d >= 12)).toBe(true);
+    expect([...dist].sort((a, b) => b - a)).toEqual(dist);
+    // A wide arena keeps its order: the far end of the top row first.
+    const wide = new Arena(960, 600, new Rng(1));
+    expect(wide.botSpawns[0]).toEqual({ x: wide.cols - 2, y: 1 });
   });
 
   it('caps the touch tile, so a touch tablet gets more tiles rather than a few very large ones', () => {
