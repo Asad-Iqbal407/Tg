@@ -316,6 +316,33 @@ describe('shooting', () => {
     expect(game.getResult().stats['shots']).toBe(1);
   });
 
+  it('a press below the shooter aims to the side of the finger, not always to the right', () => {
+    for (const side of [-1, 1]) {
+      const { game, input } = fresh(3);
+      const s = peek(game);
+      setGrid(s, [fullRow(1)]);
+      s.loaded = 2;
+      drag(input, s.layout.shooterX + side * 150, s.layout.shooterY + 25);
+      step(game, input);
+      expect(s.aim).toBeCloseTo(side < 0 ? Math.PI - MIN_AIM : MIN_AIM, 9);
+      input.pointer.down = false;
+      input.pointer.released = true;
+      step(game, input);
+      expect(s.shot).not.toBeNull();
+      expect(Math.sign(s.shot?.vx ?? 0)).toBe(side);
+      expect(s.shot?.vy ?? 0).toBeLessThan(0);
+    }
+  });
+
+  it('a press straight below the shooter keeps the aim it had', () => {
+    const { game, input } = fresh(3);
+    const s = peek(game);
+    const before = s.aim;
+    drag(input, s.layout.shooterX, s.layout.shooterY + 30);
+    step(game, input);
+    expect(s.aim).toBeCloseTo(before, 9);
+  });
+
   it('the arrow keys aim, but never closer than 15 degrees to the horizontal', () => {
     const { game, input } = fresh(6);
     const s = peek(game);

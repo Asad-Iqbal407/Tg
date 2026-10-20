@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { chooseLogicalSize, fittedArea } from '../src/core/engine';
-import { hudLayout, playfieldTop, speedPillWidth } from '../src/games/hill/hill';
+import { hudLayout, hudPills, playfieldTop, speedPillWidth } from '../src/games/hill/hill';
+import type { HudRect } from '../src/games/hill/hill';
 import { GAMES } from '../src/games/registry';
 
 /** Play-stage size (CSS px) for a browser window: a 52 px rail on short landscape screens, else a header. */
@@ -81,6 +82,46 @@ describe('hill layout', () => {
       // Bold digits are about 0.62 em wide and "km/h" about 2.2 em; 14 s of padding at the end, 4 s between.
       const needed = 3 * 0.62 * 22 * s + 4 * s + 2.2 * 13 * s + 14 * s + 10 * s;
       expect(speedPillWidth(touch), String(touch)).toBeGreaterThanOrEqual(needed);
+    }
+  });
+
+  // Regression: in the two-row touch HUD the speed pill was anchored 124 s left of the right edge, so once it grew
+  // to 145.6 px it covered most of the shield pill at W = 520 (the logical width on portrait phones).
+  // The one-row check also ignored the side insets, so a notched landscape phone (960 wide, 44 px insets) drew the
+  // speed pill over the shield pill.
+  it('keeps the HUD pills apart in one-row and two-row layouts, with and without the shield', () => {
+    const overlap = (a: HudRect, b: HudRect) =>
+      a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    for (const W of [520, 560, 602, 640, 760, 960]) {
+      for (const touch of [true, false]) {
+        for (const shield of [true, false]) {
+          // Side insets (notches) only come with landscape phones, which are 760 logical px wide or more.
+          const insetSets = [
+            { top: 0, left: 0, right: 0 },
+            { top: 24, left: 0, right: 0 },
+          ];
+          if (W >= 760) insetSets.push({ top: 0, left: 44, right: 44 });
+          for (const insets of insetSets) {
+            const p = hudPills(W, touch, shield, insets);
+            const name = `${W} touch=${touch} shield=${shield} insets=${insets.left}`;
+            const rects = [p.fuel, p.coin, p.speed, p.dist, ...(p.shield ? [p.shield] : [])];
+            for (let i = 0; i < rects.length; i++) {
+              const r = rects[i];
+              expect(r.x, name).toBeGreaterThanOrEqual(insets.left);
+              expect(r.x + r.w, name).toBeLessThanOrEqual(W - insets.right);
+              for (let j = i + 1; j < rects.length; j++)
+                expect(overlap(r, rects[j]), `${name} ${i}/${j}`).toBe(false);
+            }
+            const { s, stacked } = hudLayout(W, touch, shield, insets.top, insets.left + insets.right);
+            if (stacked) {
+              // The score shares the chip's line and keeps room for "99,999 pts" right of the chip.
+              expect(p.scoreY, name).toBeGreaterThan(p.chip.y);
+              expect(p.scoreY, name).toBeLessThan(p.chip.y + p.chip.h);
+              expect(p.scoreRight - (p.chip.x + p.chip.w), name).toBeGreaterThanOrEqual(10 * 0.62 * 15 * s);
+            }
+          }
+        }
+      }
     }
   });
 });

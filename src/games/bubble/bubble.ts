@@ -296,8 +296,15 @@ export class BubbleGame extends BaseGame {
     else this.aim = clampAim(this.aim - this.input.axisX() * AIM_RATE * dt);
   }
 
+  /**
+   * The aim towards a pointer. A point below the shooter counts as level with it, so a finger that slips
+   * down past the shooter still aims to its own side; straight below keeps the aim as it is.
+   */
   private angleTo(x: number, y: number): number {
-    return clampAim(Math.atan2(this.layout.shooterY - y, x - this.layout.shooterX));
+    const dx = x - this.layout.shooterX;
+    const dy = Math.max(0, this.layout.shooterY - y);
+    if (dy === 0 && dx === 0) return this.aim;
+    return clampAim(Math.atan2(dy, dx));
   }
 
   /** Notes a fire request: a release fires at the spot the pointer let go, a fire key at the aim as it is. */

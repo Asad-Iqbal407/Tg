@@ -96,10 +96,12 @@ export interface BannerBand {
 
 /**
  * Lay out the announcements for a `w` px wide canvas whose HUD starts at `top` and `left`, at HUD scale
- * `s`, with the power-up stack under the coin counter ending at `stackBottom`. The banner sits halfway
- * between the HUD and `skyBottom` (just above the horizon), but always below the power-up stack, so a
- * milestone reached with several power-ups running never draws over their timers. The CAREFUL! warning
- * keeps its row under the score and moves right when it would touch the stack.
+ * `s`, with the power-up stack under the coin counter ending at `stackBottom`. The banner, centred and
+ * `bannerHalfW` px wide on each side, sits halfway between the HUD and `skyBottom` (just above the
+ * horizon). Only when it would reach across the left-hand power-up stack (narrow portrait canvases) does
+ * it drop below the stack, so a milestone reached with several power-ups running never draws over their
+ * timers; on wide canvases it stays in the sky, clear of the track. The CAREFUL! warning keeps its row
+ * under the score and moves right when it would touch the stack.
  */
 export function bannerBand(
   w: number,
@@ -108,12 +110,15 @@ export function bannerBand(
   stackBottom: number,
   s: number,
   skyBottom: number,
+  bannerHalfW: number,
 ): BannerBand {
   const bandTop = top + 92 * s;
   const size = Math.min(54 * s, w / 8);
-  const clear = stackBottom + 8 * s + 0.8 * size;
+  const mid = (bandTop + skyBottom) / 2;
+  const reachesStack = w / 2 - bannerHalfW < left + (POWER_PILL_W + 8) * s;
+  const y = reachesStack ? Math.max(mid, stackBottom + 8 * s + 0.8 * size) : mid;
   const carefulX = Math.max(w / 2, left + (POWER_PILL_W + 10 + CAREFUL_HALF_W) * s);
-  return { y: Math.max((bandTop + skyBottom) / 2, clear), carefulX, carefulY: bandTop + 6 * s };
+  return { y, carefulX, carefulY: bandTop + 6 * s };
 }
 
 /** Seconds the world freezes on impact before the crash animation plays. */
@@ -1113,26 +1118,39 @@ export class RunnerGame extends BaseGame {
     }
 
     // Announcements live in the sky between the HUD and the horizon, never over the track ahead.
-    const band = bannerBand(this.W, top, left, y, s, this.cam.hz - 40 * this.framing.unit);
+    let banner: { title: string; sub: string; t: number; color: string } | null = null;
+    if (this.bannerT < 1.8 && this.milestone === 0) {
+      banner = { title: 'RUN!', sub: 'Grab coins · dodge trains', t: this.bannerT / 1.8, color: '#ffd23f' };
+    } else if (this.milestoneT < 2.8) {
+      const zone = zoneDef(this.milestone);
+      banner = {
+        title: `${(this.milestone * MILESTONE_M).toLocaleString('en-US')} m`,
+        sub: `${zone.name} · SPEED UP · x${Math.min(MAX_MULTIPLIER, 1 + this.milestone)}`,
+        t: this.milestoneT / 2.8,
+        color: '#7cf6ff',
+      };
+    }
+    const halfW = banner ? this.bannerHalfWidth(banner.title, banner.sub) : 0;
+    const band = bannerBand(this.W, top, left, y, s, this.cam.hz - 40 * this.framing.unit, halfW);
     if (this.stumbleT > 0 && !this.crashed)
       text(ctx, 'CAREFUL!', band.carefulX, band.carefulY, {
         size: 26 * s,
         align: 'center',
         color: '#ff6b6b',
       });
-    if (this.bannerT < 1.8 && this.milestone === 0) {
-      this.drawBanner('RUN!', 'Grab coins · dodge trains', this.bannerT / 1.8, band.y, '#ffd23f');
-    } else if (this.milestoneT < 2.8) {
-      const zone = zoneDef(this.milestone);
-      this.drawBanner(
-        `${(this.milestone * MILESTONE_M).toLocaleString('en-US')} m`,
-        `${zone.name} · SPEED UP · x${Math.min(MAX_MULTIPLIER, 1 + this.milestone)}`,
-        this.milestoneT / 2.8,
-        band.y,
-        '#7cf6ff',
-      );
-    }
+    if (banner) this.drawBanner(banner.title, banner.sub, banner.t, band.y, banner.color);
     if (this.hint && !this.crashed) this.drawHint(this.hint, this.hintT);
+  }
+
+  /** Half the drawn width of a banner (title or subtitle, whichever is wider, plus its outline). */
+  private bannerHalfWidth(title: string, sub: string): number {
+    const ctx = this.ctx;
+    const s = this.hs;
+    ctx.font = `900 ${Math.min(54 * s, this.W / 8)}px ${FONT}`;
+    const tw = ctx.measureText(title).width + 8 * s;
+    ctx.font = `800 ${Math.min(19 * s, this.W / 26)}px ${FONT}`;
+    const sw = ctx.measureText(sub).width + 4 * s;
+    return Math.max(tw, sw) / 2;
   }
 
   private drawBanner(title: string, sub: string, t: number, y: number, color: string): void {

@@ -105,8 +105,17 @@ export function speedPillWidth(touch: boolean): number {
   return SPEED_W * (touch ? TOUCH_TEXT : 1);
 }
 
-/** Layout for a canvas `W` wide: one row of pills when they fit, two rows when they do not. */
-export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: number): HudLayout {
+/**
+ * Layout for a canvas `W` wide: one row of pills when they fit between the side insets (`insetSides` is the left plus
+ * right inset), two rows when they do not.
+ */
+export function hudLayout(
+  W: number,
+  touch: boolean,
+  shield: boolean,
+  insetTop: number,
+  insetSides = 0,
+): HudLayout {
   const s = touch ? TOUCH_TEXT : 1;
   const k = touch ? TOUCH_PILLS : 1;
   const ph = 44 * s;
@@ -117,7 +126,7 @@ export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: 
     k * (FUEL_W + COIN_W + DIST_W + gaps * HUD_GAP) +
     speedPillWidth(touch) +
     (shield ? ph : 0);
-  const stacked = row > W;
+  const stacked = row > W - insetSides;
   const chipH = 26 * s;
   // One row: the next-fuel chip sits under the fuel pill, and the score line under the distance pill
   // (its text is centred 16 s below the pill, so its lower edge is about 8 s further down).
@@ -128,12 +137,81 @@ export function hudLayout(W: number, touch: boolean, shield: boolean, insetTop: 
   return { s, k, ph, stacked, bottom };
 }
 
+export interface HudRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Where each HUD pill goes, plus the right edge and centre line of the score text. */
+export interface HudPills {
+  fuel: HudRect;
+  coin: HudRect;
+  shield: HudRect | null;
+  speed: HudRect;
+  dist: HudRect;
+  chip: HudRect;
+  scoreRight: number;
+  scoreY: number;
+}
+
+/**
+ * Pill positions for a canvas `W` wide. One row: fuel, coins, shield, then speed and distance at the right, with the
+ * score under the distance. Two rows: coins and shield start row 2 at the left, the speed pill sits under the
+ * distance pill at the right, and the score moves to the next-fuel chip's line at the right, so no pill on row 2
+ * overlaps another however wide the touch speed pill is.
+ */
+export function hudPills(
+  W: number,
+  touch: boolean,
+  shield: boolean,
+  insets: { top: number; left: number; right: number },
+): HudPills {
+  const { s, k, ph, stacked } = hudLayout(W, touch, shield, insets.top, insets.left + insets.right);
+  const left = HUD_EDGE + insets.left;
+  const top = HUD_EDGE + insets.top;
+  const right = W - HUD_EDGE - insets.right;
+  const row2 = top + ph + 8 * s;
+  const fuelW = FUEL_W * k;
+  const coinW = COIN_W * k;
+  const distW = DIST_W * k;
+  const spW = speedPillWidth(touch);
+  const chipH = 26 * s;
+  const fuel = { x: left, y: top, w: fuelW, h: ph };
+  const coin = stacked
+    ? { x: left, y: row2, w: coinW, h: ph }
+    : { x: left + fuelW + HUD_GAP * k, y: top, w: coinW, h: ph };
+  const shieldRect = shield ? { x: coin.x + coinW + HUD_GAP * k, y: coin.y, w: ph, h: ph } : null;
+  const dist = { x: right - distW, y: top, w: distW, h: ph };
+  const speed = stacked
+    ? { x: right - spW, y: row2, w: spW, h: ph }
+    : { x: right - distW - HUD_GAP * k - spW, y: top, w: spW, h: ph };
+  const chip = { x: left, y: (stacked ? row2 + ph : top + ph) + 6 * s, w: CHIP_W * k, h: chipH };
+  return {
+    fuel,
+    coin,
+    shield: shieldRect,
+    speed,
+    dist,
+    chip,
+    scoreRight: right - 16 * s,
+    scoreY: stacked ? chip.y + chipH / 2 + 1 : top + ph + 16 * s,
+  };
+}
+
 /**
  * Top of the playfield in logical px, below the HUD. A one-row desktop HUD keeps its original 80 px. Touch and
  * two-row layouts start just under the lowest HUD element, the next-fuel chip, which is drawn almost all the time.
  */
-export function playfieldTop(W: number, touch: boolean, shield: boolean, insetTop: number): number {
-  const lay = hudLayout(W, touch, shield, insetTop);
+export function playfieldTop(
+  W: number,
+  touch: boolean,
+  shield: boolean,
+  insetTop: number,
+  insetSides = 0,
+): number {
+  const lay = hudLayout(W, touch, shield, insetTop, insetSides);
   if (!touch && !lay.stacked) return insetTop + 80;
   return lay.bottom + HUD_CLEARANCE;
 }
@@ -636,7 +714,13 @@ export class HillGame extends BaseGame {
 
   /** Top of the playfield, below the HUD (see playfieldTop). */
   private hudTop(): number {
-    return playfieldTop(this.W, this.touchUi, this.shield, this.insets.top);
+    return playfieldTop(
+      this.W,
+      this.touchUi,
+      this.shield,
+      this.insets.top,
+      this.insets.left + this.insets.right,
+    );
   }
 
   private snapCamera(): void {
@@ -842,15 +926,19 @@ export class HillGame extends BaseGame {
 
   private drawHud(): void {
     const ctx = this.ctx;
-    const { s, k, ph, stacked } = hudLayout(this.W, this.touchUi, this.shield, this.insets.top);
+    const { s, k, ph } = hudLayout(
+      this.W,
+      this.touchUi,
+      this.shield,
+      this.insets.top,
+      this.insets.left + this.insets.right,
+    );
+    const pills = hudPills(this.W, this.touchUi, this.shield, this.insets);
     const ins = this.insets;
     const left = HUD_EDGE + ins.left;
     const top = HUD_EDGE + ins.top;
     const right = this.W - HUD_EDGE - ins.right;
     const cy = top + ph / 2;
-    // Second row, used when the pills do not fit one row: coins, shield and speed move down.
-    const row2 = top + ph + 8 * s;
-    const cy2 = row2 + ph / 2;
 
     // Fuel
     const fuelW = FUEL_W * k;
@@ -867,8 +955,8 @@ export class HillGame extends BaseGame {
     }
     // Next fuel can distance (and low-fuel warning).
     const low = f < 0.25;
-    const chipY = (stacked ? row2 + ph : top + ph) + 6 * s;
-    const chipH = 26 * s;
+    const chipY = pills.chip.y;
+    const chipH = pills.chip.h;
     const nextM = Number.isFinite(this.nextFuelX)
       ? Math.max(0, Math.round((this.nextFuelX - this.car.center().x) / PX_PER_M))
       : -1;
@@ -893,10 +981,10 @@ export class HillGame extends BaseGame {
     }
 
     // Coins
-    const coinY = stacked ? row2 : top;
+    const coinY = pills.coin.y;
     const coinCy = coinY + ph / 2;
-    const coinX = stacked ? left : left + fuelW + HUD_GAP * k;
-    const coinW = COIN_W * k;
+    const coinX = pills.coin.x;
+    const coinW = pills.coin.w;
     hudPill(ctx, coinX, coinY, coinW, ph);
     drawCoin(ctx, coinX + 24 * s, coinCy, 12 * s);
     text(ctx, `${this.coins}`, coinX + 44 * s, coinCy + 1, { size: 22 * s });
@@ -904,28 +992,23 @@ export class HillGame extends BaseGame {
       const e = fl.t * fl.t;
       drawCoin(ctx, lerp(fl.x, coinX + 24 * s, e), lerp(fl.y, coinCy, e), 9 * s * (1 - 0.3 * fl.t));
     }
-    if (this.shield) {
-      const gx = coinX + coinW + HUD_GAP * k;
+    if (pills.shield) {
+      const gx = pills.shield.x;
       hudPill(ctx, gx, coinY, ph, ph);
       this.drawShieldIcon(gx + ph / 2, coinCy, 14 * s);
     }
 
-    // Distance + score. The score sits under the distance, or at the right of the second row.
-    const distW = DIST_W * k;
-    hudPill(ctx, right - distW, top, distW, ph);
+    // Distance + score. The score sits under the distance, or on the next-fuel chip's line in two-row mode.
+    const { dist } = pills;
+    hudPill(ctx, dist.x, dist.y, dist.w, dist.h);
     text(ctx, `${Math.floor(this.meters)} m`, right - 16 * s, cy + 1, { size: 24 * s, align: 'right' });
     const score = `${Math.floor(this.score).toLocaleString('en-US')} pts`;
-    if (stacked) {
-      text(ctx, score, right - 16 * s, cy2 + 1, { size: 15 * s, align: 'right', color: '#eef' });
-    } else {
-      text(ctx, score, right - 16 * s, top + ph + 16 * s, { size: 15 * s, align: 'right', color: '#eef' });
-    }
+    text(ctx, score, pills.scoreRight, pills.scoreY, { size: 15 * s, align: 'right', color: '#eef' });
     // Speed
     const kmh = Math.round((this.car.speed() / PX_PER_M) * 3.6);
-    const spW = speedPillWidth(this.touchUi);
-    const spRight = stacked ? right - 124 * s - HUD_GAP * k : right - distW - HUD_GAP * k;
-    const spX = spRight - spW;
-    const spY = stacked ? row2 : top;
+    const spW = pills.speed.w;
+    const spX = pills.speed.x;
+    const spY = pills.speed.y;
     const spCy = spY + ph / 2;
     hudPill(ctx, spX, spY, spW, ph);
     // The unit sits at the pill's right end and the number right-aligns against it, so neither leaves the pill.
