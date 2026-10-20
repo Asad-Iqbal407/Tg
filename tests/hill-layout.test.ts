@@ -105,13 +105,13 @@ describe('hill layout', () => {
             const p = hudPills(W, touch, shield, insets);
             const name = `${W} touch=${touch} shield=${shield} insets=${insets.left}`;
             const rects = [p.fuel, p.coin, p.speed, p.dist, ...(p.shield ? [p.shield] : [])];
-            for (let i = 0; i < rects.length; i++) {
-              const r = rects[i];
+            rects.forEach((r, i) => {
               expect(r.x, name).toBeGreaterThanOrEqual(insets.left);
               expect(r.x + r.w, name).toBeLessThanOrEqual(W - insets.right);
-              for (let j = i + 1; j < rects.length; j++)
-                expect(overlap(r, rects[j]), `${name} ${i}/${j}`).toBe(false);
-            }
+              rects
+                .slice(i + 1)
+                .forEach((o, j) => expect(overlap(r, o), `${name} ${i}/${i + 1 + j}`).toBe(false));
+            });
             const { s, stacked } = hudLayout(W, touch, shield, insets.top, insets.left + insets.right);
             if (stacked) {
               // The score shares the chip's line and keeps room for "99,999 pts" right of the chip.
