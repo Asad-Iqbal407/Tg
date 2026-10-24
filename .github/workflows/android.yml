@@ -1,0 +1,77 @@
+name: Android APK
+
+# Pinned to Ubuntu 24.04 so the runner's preinstalled Android SDK does not move under the build.
+# Builds a debug APK of the web app inside the Capacitor Android shell and publishes it as a
+# pre-release named android-latest, so it can be downloaded straight to a phone.
+on:
+  push:
+    branches: [claude/upbeat-cray-fudovj]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Build debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install the Android SDK packages the project targets
+        # The Ubuntu runner ships the Android SDK; accept its licences and add the packages we target.
+        run: |
+          SDKMANAGER="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | head -n 1)/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
+
+      - run: npm ci
+
+      - name: Build the web app and copy it into the Android project
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Build the debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk neon-arcade.apk
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: neon-arcade-apk
+          path: neon-arcade.apk
+          retention-days: 14
+
+      - name: Publish the APK as the android-latest pre-release
+        # gh is preinstalled on the runner and authenticates with the workflow token.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view android-latest > /dev/null 2>&1; then
+            gh release upload android-latest neon-arcade.apk --clobber
+          else
+            gh release create android-latest neon-arcade.apk \
+              --prerelease \
+              --title "Neon Arcade Android (latest build)" \
+              --notes 'Debug build of the web app for Android. Enable "Install unknown apps" for your browser, then open neon-arcade.apk.'
+          fi
