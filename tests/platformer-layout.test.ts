@@ -101,18 +101,18 @@ describe('Pixel Quest layout', () => {
   });
 
   it('zooms the world on phones held sideways', () => {
-    expect(zoomFor(360)).toBeCloseTo(1.4);
-    expect(zoomFor(430)).toBeCloseTo(1.4);
+    expect(zoomFor(360)).toBeCloseTo(1.65);
+    expect(zoomFor(430)).toBeCloseTo(1.65);
   });
 
   it('zooms a phone held upright more, easing back to the sideways zoom', () => {
     for (const cssH of [243, 263, 290]) expect(zoomFor(cssH)).toBeCloseTo(1.9);
-    expect(zoomFor(330)).toBeGreaterThan(1.4);
+    expect(zoomFor(330)).toBeGreaterThan(1.65);
     expect(zoomFor(330)).toBeLessThan(1.9);
   });
 
   it('keeps every HUD pill inside and apart on a wide view (one row, the world pill below)', () => {
-    // L1: 1032 logical px at the 1.4 sideways zoom leaves a 737 px view; the HUD sits 12 px in.
+    // L1: 1032 logical px at the 1.65 sideways zoom leaves a 737 px view; the HUD sits 12 px in.
     const left = 12;
     const right = 1032 / 1.4 - 12;
     const layout = hudLayout(left, right, 12);
@@ -150,7 +150,7 @@ describe('Pixel Quest layout', () => {
   );
 
   it('frames the hero and the ground above the touch controls while zoomed', () => {
-    // An L1 canvas: 1032x540 logical, 360 CSS px tall, so the world is drawn 1.4x bigger.
+    // An L1 canvas: 1032x540 logical, 360 CSS px tall, so the world is drawn 1.65x bigger.
     const ctx = mockCtx();
     (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 360 };
     const input = new Input();
@@ -167,7 +167,7 @@ describe('Pixel Quest layout', () => {
       reducedMotion: false,
       haptic: () => undefined,
     }) as unknown as Framed;
-    expect(g.vh).toBeCloseTo(540 / 1.4);
+    expect(g.vh).toBeCloseTo(540 / 1.65);
     g.enemies.length = 0;
     input.setVirtual('right', true, 'test');
     for (let i = 0; i < Math.round(2.5 * 60); i++) {
@@ -178,8 +178,8 @@ describe('Pixel Quest layout', () => {
     const p = g.player;
     const feet = p.y + p.h - g.camY;
     // Feet and a strip of floor stay above the covered strip (bottom inset in virtual px).
-    expect(feet).toBeLessThanOrEqual(g.vh - bottom / 1.4 - 16);
-    expect(p.y - g.camY).toBeGreaterThan(60 / 1.4);
+    expect(feet).toBeLessThanOrEqual(g.vh - bottom / 1.65 - 16);
+    expect(p.y - g.camY).toBeGreaterThan(60 / 1.65);
   });
 
   it('keeps the upright hero under the two-row HUD and the ground in view while running', () => {

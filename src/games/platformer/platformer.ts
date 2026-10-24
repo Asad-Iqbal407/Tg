@@ -43,13 +43,13 @@ const FLOOR_STRIP = 24;
 const BLOCK_ROW = GROUND_ROW - 4;
 /**
  * World zoom: the world, HUD and banners are drawn this many times bigger than the canvas scale alone.
- * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, so it gets ZOOM_PHONE;
+ * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, so it gets ZOOM_PHONE (the hero is about 11% of the screen height; higher zooms push the HUD into the block row);
  * the zoom eases back to the design framing as the canvas grows to ZOOM_DESKTOP_H px tall. A phone held
  * upright (Play anyway) shows the 800 px view in a 243-290 CSS px tall canvas, where the 36 px hero would
  * be under 7% of the short side, so it gets ZOOM_UPRIGHT, which keeps it at about 8.5%. A run wider than
  * 800 px held upright (a landscape run turned to portrait) zooms in further, so it keeps that share too.
  */
-const ZOOM_PHONE = 1.4;
+const ZOOM_PHONE = 1.65;
 const ZOOM_PHONE_MIN_H = 360;
 const ZOOM_PHONE_H = 430;
 const ZOOM_UPRIGHT = 1.9;
