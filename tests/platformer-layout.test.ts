@@ -6,6 +6,7 @@ import { Rng } from '../src/core/rng';
 import {
   HERO_DRAW_H,
   HUD_H,
+  HUD_ZOOM_MAX,
   type HudBox,
   hudFloorPx,
   hudLayout,
@@ -65,6 +66,7 @@ interface Framed extends GameInstance {
   enemies: unknown[];
   vw: number;
   vh: number;
+  hudBottom(): number;
 }
 
 describe('Pixel Quest layout', () => {
@@ -101,14 +103,14 @@ describe('Pixel Quest layout', () => {
   });
 
   it('zooms the world on phones held sideways', () => {
-    expect(zoomFor(360)).toBeCloseTo(1.65);
-    expect(zoomFor(430)).toBeCloseTo(1.65);
+    expect(zoomFor(360)).toBeCloseTo(2);
+    expect(zoomFor(430)).toBeCloseTo(2);
   });
 
   it('zooms a phone held upright more, easing back to the sideways zoom', () => {
-    for (const cssH of [243, 263, 290]) expect(zoomFor(cssH)).toBeCloseTo(1.9);
-    expect(zoomFor(330)).toBeGreaterThan(1.65);
-    expect(zoomFor(330)).toBeLessThan(1.9);
+    for (const cssH of [243, 263, 290]) expect(zoomFor(cssH)).toBeCloseTo(2.1);
+    expect(zoomFor(330)).toBeGreaterThan(2);
+    expect(zoomFor(330)).toBeLessThan(2.1);
   });
 
   it('keeps every HUD pill inside and apart on a wide view (one row, the world pill below)', () => {
@@ -122,7 +124,7 @@ describe('Pixel Quest layout', () => {
   });
 
   it('stacks the HUD into two rows that fit the view of a phone held upright', () => {
-    // 800 logical px at the 1.9 upright zoom leaves a 421 px view.
+    // A 421 px view: narrower than one row of pills needs.
     const left = 12;
     const right = 800 / 1.9 - 12;
     const layout = hudLayout(left, right, 12);
@@ -136,21 +138,41 @@ describe('Pixel Quest layout', () => {
   it('leaves the HUD at its design size on desktops, tablets and landscape phones', () => {
     expect(hudFloorPx(744, 1)).toBeLessThan(18); // 1280x800 desktop canvas
     expect(hudFloorPx(691, 1)).toBeLessThan(18); // 1024x768 tablet canvas
-    expect(hudFloorPx(360, zoomFor(360))).toBeLessThan(18); // L1 canvas
+    expect(hudFloorPx(360, HUD_ZOOM_MAX)).toBeLessThan(18); // L1 canvas
     expect(hudFloorPx(0, 1)).toBe(0); // size not known yet
   });
 
   it.each([243, 263, 290])(
     'draws the smallest HUD label at least 12.5 CSS px on a %s px tall portrait canvas',
     (cssH) => {
-      const zoom = zoomFor(cssH);
+      const zoom = Math.min(HUD_ZOOM_MAX, zoomFor(cssH));
       const cssPerPx = (cssH / (ROWS * T)) * zoom;
       expect(Math.max(18, hudFloorPx(cssH, zoom)) * cssPerPx).toBeGreaterThanOrEqual(12.5 - 1e-9);
     },
   );
 
+  it('keeps the HUD one row high and clear of the block row on a landscape phone with touch controls', () => {
+    const ctx = mockCtx();
+    (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 360 };
+    const g = def.create({
+      ctx,
+      width: 1032,
+      height: 540,
+      insets: { top: 0, right: 0, bottom: 120, left: 0 },
+      input: new Input(),
+      audio: new NullAudio(),
+      rng: new Rng(1),
+      loadout: { skin: toSkinData(defaultSkin('platformer')), boosts: new Set(), powerDuration: 1 },
+      reducedMotion: false,
+      haptic: () => undefined,
+    }) as unknown as Framed;
+    // One row of pills (12 px in, 40 px tall) at the HUD's own scale, in view px.
+    expect(g.hudBottom()).toBeCloseTo(((12 + HUD_H) * HUD_ZOOM_MAX) / 2, 6);
+    expect((GROUND_ROW - 4) * T - g.camY).toBeGreaterThanOrEqual(g.hudBottom());
+  });
+
   it('frames the hero and the ground above the touch controls while zoomed', () => {
-    // An L1 canvas: 1032x540 logical, 360 CSS px tall, so the world is drawn 1.65x bigger.
+    // An L1 canvas: 1032x540 logical, 360 CSS px tall, so the world is drawn 2x bigger.
     const ctx = mockCtx();
     (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 360 };
     const input = new Input();
@@ -167,7 +189,7 @@ describe('Pixel Quest layout', () => {
       reducedMotion: false,
       haptic: () => undefined,
     }) as unknown as Framed;
-    expect(g.vh).toBeCloseTo(540 / 1.65);
+    expect(g.vh).toBeCloseTo(540 / 2);
     g.enemies.length = 0;
     input.setVirtual('right', true, 'test');
     for (let i = 0; i < Math.round(2.5 * 60); i++) {
@@ -178,12 +200,12 @@ describe('Pixel Quest layout', () => {
     const p = g.player;
     const feet = p.y + p.h - g.camY;
     // Feet and a strip of floor stay above the covered strip (bottom inset in virtual px).
-    expect(feet).toBeLessThanOrEqual(g.vh - bottom / 1.65 - 16);
-    expect(p.y - g.camY).toBeGreaterThan(60 / 1.65);
+    expect(feet).toBeLessThanOrEqual(g.vh - bottom / 2 - 16);
+    expect(p.y - g.camY).toBeGreaterThan(g.hudBottom());
   });
 
-  it('keeps the upright hero under the two-row HUD and the ground in view while running', () => {
-    // A phone held upright ("Play anyway"): an 800 x 540 run on a 263 CSS px tall canvas, so 1.9x zoom.
+  it('keeps the upright hero under the HUD and the ground in view while running', () => {
+    // A phone held upright ("Play anyway"): an 800 x 540 run on a 263 CSS px tall canvas, so 2.1x zoom.
     const ctx = mockCtx();
     (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 263 };
     const input = new Input();
@@ -199,7 +221,7 @@ describe('Pixel Quest layout', () => {
       reducedMotion: false,
       haptic: () => undefined,
     }) as unknown as Framed;
-    expect(g.vh).toBeCloseTo(540 / 1.9);
+    expect(g.vh).toBeCloseTo(540 / 2.1);
     g.enemies.length = 0;
     input.setVirtual('right', true, 'test');
     for (let i = 0; i < Math.round(2.5 * 60); i++) {
@@ -208,13 +230,13 @@ describe('Pixel Quest layout', () => {
     }
     g.render();
     const p = g.player;
-    // The hero is below both HUD rows (12 px padding, two 40 px rows, an 8 px gap) and its feet are in view.
-    const hudBottom = 12 + 2 * HUD_H + 8;
+    // The hero is below the HUD and its feet are in view.
+    const hudBottom = g.hudBottom();
     expect(p.y - g.camY).toBeGreaterThanOrEqual(hudBottom);
     expect(p.y + p.h - g.camY).toBeLessThanOrEqual(g.vh - 16);
   });
 
-  it('keeps the usual block row below the two-row HUD held upright, with the ground in view', () => {
+  it('keeps the usual block row below the HUD held upright, with the ground in view', () => {
     // Regression: the upright view used to sit on the bottom of the world, so the second HUD row (world
     // and lives) hid the question blocks four rows above the ground.
     const ctx = mockCtx();
@@ -232,7 +254,7 @@ describe('Pixel Quest layout', () => {
       reducedMotion: false,
       haptic: () => undefined,
     }) as unknown as Framed;
-    const hudBottom = 12 + 2 * HUD_H + 8;
+    const hudBottom = g.hudBottom();
     const check = (): void => {
       expect((GROUND_ROW - 4) * T - g.camY).toBeGreaterThanOrEqual(hudBottom);
       expect(GROUND_ROW * T + 16 - g.camY).toBeLessThanOrEqual(g.vh);
@@ -267,8 +289,8 @@ describe('Pixel Quest layout', () => {
   });
 
   it('shows the same view width held upright, whatever the run is wide', () => {
-    expect(800 / zoomFor(263, 800)).toBeCloseTo(800 / 1.9, 6);
-    expect(1096 / zoomFor(192, 1096)).toBeCloseTo(800 / 1.9, 6);
+    expect(800 / zoomFor(263, 800)).toBeCloseTo(800 / 2.1, 6);
+    expect(1096 / zoomFor(192, 1096)).toBeCloseTo(800 / 2.1, 6);
   });
 
   it.each(WIDE_UPRIGHT)('keeps the hero at least 8 percent of the short side on %s', (_name, w, h, runW) => {
@@ -280,12 +302,12 @@ describe('Pixel Quest layout', () => {
   it.each(WIDE_UPRIGHT)('draws the smallest HUD label at least 12.5 CSS px on %s', (_name, w, h, runW) => {
     const scale = Math.min(w / runW, h / (ROWS * T));
     const cssH = ROWS * T * scale;
-    const zoom = zoomFor(cssH, runW);
+    const zoom = Math.min(HUD_ZOOM_MAX, zoomFor(cssH, runW));
     expect(Math.max(18, hudFloorPx(cssH, zoom)) * scale * zoom).toBeGreaterThanOrEqual(12.5 - 1e-9);
   });
 
-  it('keeps the hero under the two-row HUD and the ground in view on a wide run held upright', () => {
-    // A 1096 px run turned upright: its 192 CSS px tall canvas gets the same 421 px view as an 800 px run.
+  it('keeps the hero under the HUD and the ground in view on a wide run held upright', () => {
+    // A 1096 px run turned upright: its 192 CSS px tall canvas gets the same 381 px view as an 800 px run.
     const ctx = mockCtx();
     (ctx as unknown as { canvas: { clientHeight: number } }).canvas = { clientHeight: 192 };
     const input = new Input();
@@ -301,7 +323,7 @@ describe('Pixel Quest layout', () => {
       reducedMotion: false,
       haptic: () => undefined,
     }) as unknown as Framed;
-    expect(g.vw).toBeCloseTo(800 / 1.9, 0);
+    expect(g.vw).toBeCloseTo(800 / 2.1, 0);
     g.enemies.length = 0;
     input.setVirtual('right', true, 'test');
     for (let i = 0; i < Math.round(2.5 * 60); i++) {
@@ -310,7 +332,7 @@ describe('Pixel Quest layout', () => {
     }
     g.render();
     const p = g.player;
-    const hudBottom = 12 + 2 * HUD_H + 8;
+    const hudBottom = g.hudBottom();
     expect(p.y - g.camY).toBeGreaterThanOrEqual(hudBottom);
     expect(p.y + p.h - g.camY).toBeLessThanOrEqual(g.vh - 16);
   });

@@ -43,20 +43,25 @@ const FLOOR_STRIP = 24;
 const BLOCK_ROW = GROUND_ROW - 4;
 /**
  * World zoom: the world, HUD and banners are drawn this many times bigger than the canvas scale alone.
- * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, so it gets ZOOM_PHONE (the hero is about 11% of the screen height; higher zooms push the HUD into the block row);
+ * A phone held sideways shows the 540 px level in a 360-430 CSS px tall canvas, so it gets ZOOM_PHONE (the hero is about 13% of the screen height; the HUD stays at HUD_ZOOM_MAX, so it clears the block row);
  * the zoom eases back to the design framing as the canvas grows to ZOOM_DESKTOP_H px tall. A phone held
  * upright (Play anyway) shows the 800 px view in a 243-290 CSS px tall canvas, where the 36 px hero would
- * be under 7% of the short side, so it gets ZOOM_UPRIGHT, which keeps it at about 8.5%. A run wider than
+ * be under 7% of the short side, so it gets ZOOM_UPRIGHT, which keeps it at about 9.5%. A run wider than
  * 800 px held upright (a landscape run turned to portrait) zooms in further, so it keeps that share too.
  */
-const ZOOM_PHONE = 1.65;
+const ZOOM_PHONE = 2;
 const ZOOM_PHONE_MIN_H = 360;
 const ZOOM_PHONE_H = 430;
-const ZOOM_UPRIGHT = 1.9;
+const ZOOM_UPRIGHT = 2.1;
 const ZOOM_UPRIGHT_H = 300;
 const ZOOM_DESKTOP_H = 500;
 /** Width (logical px) of the view a phone held upright shows: an 800 px run at ZOOM_UPRIGHT. */
 const UPRIGHT_VIEW_W = 800 / ZOOM_UPRIGHT;
+/**
+ * The HUD zooms with the world only up to this much. Past it the world grows but the HUD keeps its size, so a
+ * zoomed-in phone view keeps a one-row HUD that stays clear of the block row.
+ */
+export const HUD_ZOOM_MAX = 1.2;
 /** HUD labels are drawn at least this many CSS px tall, however small the canvas (see hudFloorPx). */
 const HUD_MIN_CSS = 12.5;
 
@@ -400,13 +405,24 @@ export class PlatformerGame extends BaseGame {
     this.vh = this.H / this.zoom;
   }
 
-  /** Where the HUD sits in the current view, inside the insets (see hudLayout). */
+  /** Scale the HUD is drawn at: the world zoom, capped at HUD_ZOOM_MAX. */
+  private get hudZoom(): number {
+    return Math.min(this.zoom, HUD_ZOOM_MAX);
+  }
+
+  /** Where the HUD sits, in HUD px (canvas px over hudZoom), inside the insets (see hudLayout). */
   private hud(): HudLayout {
-    const k = 1 / this.zoom;
+    const hz = this.hudZoom;
+    const k = 1 / hz;
     const top = this.insets.top * k + HUD_PAD;
     const left = this.insets.left * k + HUD_PAD;
-    const right = this.vw - this.insets.right * k - HUD_PAD;
+    const right = this.W / hz - this.insets.right * k - HUD_PAD;
     return hudLayout(left, right, top);
+  }
+
+  /** Lowest view px the HUD covers. */
+  private hudBottom(): number {
+    return (this.hud().bottom * this.hudZoom) / this.zoom;
   }
 
   private cameraTargetX(): number {
@@ -424,7 +440,7 @@ export class PlatformerGame extends BaseGame {
   private cameraTargetY(): number {
     const k = 1 / this.zoom;
     const worldTop = ROWS * T - this.vh;
-    const hudBottom = this.hud().bottom;
+    const hudBottom = this.hudBottom();
     const need = GROUND_ROW * T + FLOOR_STRIP - (this.vh - this.insets.bottom * k);
     // A zoomed-in view can be too short for the whole course. It sits on the bottom of the world unless
     // the HUD would then hide the usual block row (a phone held upright, with its two-row HUD): then it
@@ -1191,10 +1207,15 @@ export class PlatformerGame extends BaseGame {
     // zoomed it gets its own scale, kept in a save so it cannot leak state into the next frame.
     if (this.zoom === 1) {
       this.drawHud();
+      this.drawBanners();
     } else {
       ctx.save();
-      ctx.scale(this.zoom, this.zoom);
+      ctx.scale(this.hudZoom, this.hudZoom);
       this.drawHud();
+      ctx.restore();
+      ctx.save();
+      ctx.scale(this.zoom, this.zoom);
+      this.drawBanners();
       ctx.restore();
     }
   }
@@ -1666,13 +1687,12 @@ export class PlatformerGame extends BaseGame {
   /** HUD anchored to the canvas edges inside the insets: score, coins, world on the left; clock, lives on the right. */
   private drawHud(): void {
     const ctx = this.ctx;
-    const k = 1 / this.zoom;
     // On a short canvas (a narrow phone held upright) a label would draw below HUD_MIN_CSS, so it grows.
     // At design zoom the floor is far below every label, so the HUD is unchanged.
     const canvas = ctx.canvas as HTMLCanvasElement | undefined;
     const minPx = hudFloorPx(
       typeof canvas?.clientHeight === 'number' ? canvas.clientHeight : 0,
-      this.zoom,
+      this.hudZoom,
       this.H,
     );
     const fit = (px: number): number => Math.max(px, minPx);
@@ -1701,9 +1721,12 @@ export class PlatformerGame extends BaseGame {
       size: fit(18),
       align: 'center',
     });
+  }
 
-    // Banners sit in the open sky under the HUD, clear of the rows the hero plays in.
-    const sky = hud.bottom;
+  /** Banners, in view px: they sit in the open sky under the HUD, clear of the rows the hero plays in. */
+  private drawBanners(): void {
+    const k = 1 / this.zoom;
+    const sky = this.hudBottom();
     const mid = this.insets.top * k + (this.vh - (this.insets.top + this.insets.bottom) * k) * 0.38;
     if (this.phase === 'play' && this.showBanner && this.bannerT < BANNER_TIME) {
       const t = this.bannerT / BANNER_TIME;

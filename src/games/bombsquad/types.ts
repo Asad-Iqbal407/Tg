@@ -32,9 +32,13 @@ export const BOMBER_DROP_COOLDOWN = 3.5;
 export const BOMBER_DROP_RANGE = 3;
 export const WALKER_SPEED = 1.5;
 export const BOMBER_SPEED = 1.0;
+/** Dashers rush the player at this speed, but one blast of any size finishes them. */
+export const DASHER_SPEED = 2.5;
+/** A lit bomb marks the tiles its blast will cover once its fuse is this short (seconds). */
+export const DANGER_SEC = 1;
 
-export type ItemKind = 'blast' | 'bombs' | 'speed' | 'shield';
-export type BotKind = 'walker' | 'bomber';
+export type ItemKind = 'blast' | 'bombs' | 'speed' | 'shield' | 'life';
+export type BotKind = 'walker' | 'bomber' | 'dasher';
 
 export interface Item {
   kind: ItemKind;

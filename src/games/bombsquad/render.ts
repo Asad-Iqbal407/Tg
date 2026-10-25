@@ -58,6 +58,8 @@ export interface SceneView {
   bots: readonly Bot[];
   bombs: readonly Bomb[];
   explosions: readonly Explosion[];
+  /** Tiles a bomb about to go off will blast (see DANGER_SEC), tinted as a warning. */
+  danger: readonly number[];
   items: readonly Item[];
   lives: number;
   wave: number;
@@ -77,7 +79,7 @@ export const COMPACT_HUD_PX = 21;
 /** The smallest on-screen text, in CSS px, that the HUD and the floating labels keep. */
 export const MIN_TEXT_CSS = 12;
 /** The controlled character, and a walker, are each drawn at least this share of a phone's short side. */
-export const MIN_CHARACTER_SHARE = 0.08;
+export const MIN_CHARACTER_SHARE = 0.1;
 /** A walker's diameter in tile units at the normal size (its radius is 0.3 tile). */
 const WALKER_TILES = 0.6;
 
@@ -104,27 +106,29 @@ export function tileForCharacters(stageShortCss: number, cssScale: number): numb
   );
 }
 /**
- * Bots are drawn this much larger under touch controls, so a walker is about 8% of a phone's short side (the bots'
+ * Bots are drawn this much larger under touch controls, so a walker is about 10% of a phone's short side (the bots'
  * collision size is unchanged).
  */
-export const COMPACT_BOT_SCALE = 1.45;
+export const COMPACT_BOT_SCALE = 1.75;
 /**
- * The player is drawn this much larger under touch controls, so the character is about 9% of a phone's short side
+ * The player is drawn this much larger under touch controls, so the character is about 11% of a phone's short side
  * (the collision size is unchanged).
  */
-export const COMPACT_PLAYER_SCALE = 1.3;
+export const COMPACT_PLAYER_SCALE = 1.6;
 /** The player sprite from the top of its head to its shoes, in tile units at the normal size. */
 export const PLAYER_HEIGHT_TILES = 0.76;
 /** The sprite's feet sit this far below the player's tile centre, in tile units. */
 const FEET_DROP = 0.16;
 const WALKER_BODY = '#f87171';
 const BOMBER_BODY = '#94a3b8';
+const DASHER_BODY = '#facc15';
 const HEART = '#f43f5e';
 const ITEM_COLOR: Record<ItemKind, string> = {
   blast: '#fb923c',
   bombs: '#e2e8f0',
   speed: '#38bdf8',
   shield: '#60a5fa',
+  life: '#f43f5e',
 };
 
 /** Draws the arena, its contents and (outside preview) the HUD and wave banner. */
@@ -146,6 +150,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, v: SceneView): void {
   fillRoundRect(ctx, ox - 6, oy - 6, cols * ts + 12, rows * ts + 12, 10, shade(v.palette.stone, -0.5));
   // Ground layer: floor, blast scorch and flames, pick-ups and shadows.
   drawFloor(ctx, v);
+  drawDanger(ctx, v);
   drawExplosionsOnFloor(ctx, v);
   drawExplosionFlames(ctx, v);
   drawItems(ctx, v);
@@ -233,6 +238,28 @@ function drawShadows(ctx: CanvasRenderingContext2D, v: SceneView): void {
   if (v.player.respawn <= 0) {
     const k = v.compact ? COMPACT_PLAYER_SCALE : 1;
     ellipse(v.player.x, v.player.y + 0.3, ts * 0.24 * k, ts * 0.1 * k);
+  }
+}
+
+/** A pulsing red wash over the tiles a bomb is about to blast, so the player can see where is safe. */
+function drawDanger(ctx: CanvasRenderingContext2D, v: SceneView): void {
+  if (v.danger.length === 0) return;
+  const { ts, ox, oy } = v.layout;
+  const cols = v.arena.cols;
+  const pulse = 0.5 + 0.5 * Math.sin(v.time * 14);
+  ctx.fillStyle = `rgba(239,68,68,${0.18 + 0.17 * pulse})`;
+  for (const t of v.danger) {
+    const tx = t % cols;
+    const ty = (t - tx) / cols;
+    ctx.fillRect(ox + tx * ts, oy + ty * ts, ts, ts);
+  }
+  ctx.strokeStyle = `rgba(254,202,202,${0.35 + 0.3 * pulse})`;
+  ctx.lineWidth = Math.max(1, ts * 0.04);
+  for (const t of v.danger) {
+    const tx = t % cols;
+    const ty = (t - tx) / cols;
+    const m = ts * 0.12;
+    ctx.strokeRect(ox + tx * ts + m, oy + ty * ts + m, ts - 2 * m, ts - 2 * m);
   }
 }
 
@@ -340,6 +367,14 @@ function drawItemIcon(ctx: CanvasRenderingContext2D, kind: ItemKind, x: number, 
     ctx.fill();
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(-r * 0.45, r * 0.45, r * 1.25, r * 0.25);
+  } else if (kind === 'life') {
+    ctx.restore();
+    drawHeart(ctx, x, y + r * 0.1, r * 1.7, true);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.arc(x - r * 0.42, y - r * 0.25, r * 0.15, 0, TAU);
+    ctx.fill();
+    return;
   } else {
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -449,15 +484,28 @@ function drawBot(ctx: CanvasRenderingContext2D, v: SceneView, bot: Bot): void {
   const bob = (moving ? Math.abs(Math.sin(v.time * 12 + bot.phase)) : 0) * ts * 0.06;
   const spawn = bot.wait > 0 ? Math.max(0, 1 - bot.wait / 0.5) : 1;
   const bomber = bot.kind === 'bomber';
+  const dasher = bot.kind === 'dasher';
   const size = v.compact ? COMPACT_BOT_SCALE : 1;
-  const r = ts * (bomber ? 0.36 : 0.3) * size * (0.4 + 0.6 * spawn);
+  const r = ts * (bomber ? 0.36 : dasher ? 0.27 : 0.3) * size * (0.4 + 0.6 * spawn);
   const cy = oy + bot.y * ts - bob - r * 0.2;
   const flashing = bot.flash > 0;
-  const base = bomber ? BOMBER_BODY : WALKER_BODY;
+  const base = bomber ? BOMBER_BODY : dasher ? DASHER_BODY : WALKER_BODY;
   const body = flashing ? '#ffffff' : bot.hp < bot.maxHp ? shade(base, -0.25) : base;
 
   ctx.save();
   ctx.globalAlpha = spawn;
+  if (dasher && moving) {
+    // Speed streaks trail behind a running dasher.
+    const back = bot.facingX < 0 ? 1 : -1;
+    ctx.strokeStyle = 'rgba(250,204,21,0.5)';
+    ctx.lineWidth = Math.max(1.5, r * 0.16);
+    ctx.beginPath();
+    for (const dy of [-0.4, 0, 0.4]) {
+      ctx.moveTo(cx + back * r * 1.1, cy + dy * r);
+      ctx.lineTo(cx + back * r * 1.9, cy + dy * r);
+    }
+    ctx.stroke();
+  }
   ctx.fillStyle = body;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, TAU);
@@ -489,6 +537,19 @@ function drawBot(ctx: CanvasRenderingContext2D, v: SceneView, bot: Bot): void {
   ctx.lineTo(cx + ex - r * 0.22, ey - r * 0.12);
   ctx.stroke();
 
+  if (dasher) {
+    // A lightning bolt on the forehead.
+    ctx.fillStyle = '#1f2937';
+    ctx.beginPath();
+    ctx.moveTo(cx + r * 0.05, cy - r * 0.95);
+    ctx.lineTo(cx - r * 0.2, cy - r * 0.6);
+    ctx.lineTo(cx + r * 0.02, cy - r * 0.6);
+    ctx.lineTo(cx - r * 0.12, cy - r * 0.38);
+    ctx.lineTo(cx + r * 0.22, cy - r * 0.7);
+    ctx.lineTo(cx, cy - r * 0.7);
+    ctx.closePath();
+    ctx.fill();
+  }
   if (bomber) {
     // Helmet: a dark dome over the top of the head with a rim.
     ctx.fillStyle = '#334155';
@@ -607,27 +668,47 @@ function drawHud(ctx: CanvasRenderingContext2D, v: SceneView): void {
     color: '#fde68a',
   });
 
-  // Under touch controls the score pill has two lines (score, then power-ups), each at the larger text size, set in
-  // from the right so the rounded end of the pill keeps clear of them.
+  // Power-ups held: an icon each with its level, right-aligned under the score. Nothing shows until one is found.
+  const chips: [ItemKind, number][] = [];
+  if (p.blastUps > 0) chips.push(['blast', p.blastUps]);
+  if (p.bombUps > 0) chips.push(['bombs', p.bombUps]);
+  if (p.speedUps > 0) chips.push(['speed', p.speedUps]);
+  if (p.shielded) chips.push(['shield', 0]);
   const pillW = big ? Math.round((224 * px) / COMPACT_HUD_PX) : 188;
   const right = v.W - (big ? 20 : 14);
-  hudPill(ctx, v.W - pillW - 8, 6, pillW, big ? 2 * px + 8 : 44);
+  // The score pill gets a second line for power-ups once one is held. Under touch controls each line is at the larger
+  // text size, set in from the right so the rounded end of the pill keeps clear of them.
+  const lines = chips.length > 0 ? 2 : 1;
+  hudPill(ctx, v.W - pillW - 8, 6, pillW, big ? lines * px + 8 : lines === 2 ? 44 : 32);
   text(ctx, formatNumber(v.score), right, big ? px - 1 : 22, {
     size: big ? px : 20,
     align: 'right',
     color: '#ffffff',
   });
-  const chips: string[] = [];
-  if (p.blastUps > 0) chips.push(`F${p.blastUps}`);
-  if (p.bombUps > 0) chips.push(`B${p.bombUps}`);
-  if (p.speedUps > 0) chips.push(`S${p.speedUps}`);
-  if (p.shielded) chips.push('SH');
-  text(ctx, chips.length > 0 ? chips.join('  ') : 'no power-ups', right, big ? 2 * px : 41, {
-    size: big ? px : 12,
-    align: 'right',
-    weight: 700,
-    color: chips.length > 0 ? '#bae6fd' : 'rgba(255,255,255,0.45)',
-  });
+  const rowY = big ? 2 * px - 1 : 40;
+  const ir = big ? px * 0.42 : 6.5;
+  let x = right;
+  for (let i = chips.length - 1; i >= 0; i--) {
+    const chip = chips[i];
+    if (!chip) continue;
+    const [kind, level] = chip;
+    if (level > 0) {
+      text(ctx, `${level}`, x, rowY, {
+        size: big ? px * 0.85 : 12,
+        align: 'right',
+        weight: 800,
+        color: '#e0f2fe',
+      });
+      x -= big ? px * 0.6 : 8;
+    }
+    // A faint disc behind each icon keeps the dark bomb readable on the dark pill.
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.beginPath();
+    ctx.arc(x - ir, rowY, ir * 1.15, 0, TAU);
+    ctx.fill();
+    drawItemIcon(ctx, kind, x - ir, rowY, ir);
+    x -= ir * 2 + (big ? px * 0.45 : 7);
+  }
 }
 
 /** Width of the lives-and-ammo pill at the usual size, in logical px. */

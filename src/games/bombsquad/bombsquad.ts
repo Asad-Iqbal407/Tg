@@ -26,6 +26,8 @@ import {
   type Bomb,
   type Bot,
   type BotKind,
+  DANGER_SEC,
+  DASHER_SPEED,
   BLAST_BASE,
   BOMBER_SPEED,
   BOT_FUSE,
@@ -64,12 +66,22 @@ const ITEM_DROPS: readonly { value: ItemKind; weight: number }[] = [
   { value: 'bombs', weight: 3 },
   { value: 'speed', weight: 2 },
   { value: 'shield', weight: 1 },
+  { value: 'life', weight: 0.5 },
 ];
 const ITEM_LABEL: Record<ItemKind, string> = {
   blast: 'BLAST UP',
   bombs: 'BOMB UP',
   speed: 'SPEED UP',
   shield: 'SHIELD',
+  life: '+1 LIFE',
+};
+/** Points for an extra life picked up with every life already full. */
+const FULL_LIFE_POINTS = 300;
+const BOT_POINTS: Record<BotKind, number> = { walker: 100, bomber: 250, dasher: 150 };
+const BOT_DEBRIS: Record<BotKind, string[]> = {
+  walker: ['#ef4444', '#fef2f2', '#fca5a5'],
+  bomber: ['#94a3b8', '#e2e8f0', '#fb923c'],
+  dasher: ['#facc15', '#fef9c3', '#a3e635'],
 };
 /**
  * Rows of tiles that fit above the touch controls. A phone is short, so under the controls the arena keeps seven rows
@@ -234,6 +246,7 @@ export class BombSquadGame extends BaseGame {
       bots: this.bots,
       bombs: this.bombs,
       explosions: this.explosions,
+      danger: this.dangerTiles(),
       items: this.items,
       lives: this.lives,
       wave: this.wave,
@@ -512,6 +525,10 @@ export class BombSquadGame extends BaseGame {
       case 'shield':
         p.shielded = true;
         break;
+      case 'life':
+        if (this.lives < LIVES) this.lives++;
+        else this.score += FULL_LIFE_POINTS;
+        break;
     }
     this.addStat('powerups');
     this.score += 50;
@@ -689,7 +706,11 @@ export class BombSquadGame extends BaseGame {
     }
   }
 
-  private explode(b: Bomb, chain: Bomb[]): void {
+  /**
+   * The tiles a bomb's blast covers: its own tile and up to its power along each lane, stopped by stone and by the
+   * first crate (which it reaches). Pure: it breaks nothing.
+   */
+  private blastTiles(b: Bomb): number[] {
     const { arena } = this;
     const tiles: number[] = [arena.index(b.tx, b.ty)];
     for (const d of DIRECTIONS) {
@@ -699,10 +720,31 @@ export class BombSquadGame extends BaseGame {
         const kind = arena.kindAt(x, y);
         if (kind === BORDER || kind === PILLAR) break;
         tiles.push(arena.index(x, y));
-        if (kind === CRATE) {
-          this.breakCrate(x, y);
-          break;
-        }
+        if (kind === CRATE) break;
+      }
+    }
+    return tiles;
+  }
+
+  /** Tiles about to be blasted: those of every bomb within DANGER_SEC of going off. */
+  private dangerTiles(): number[] {
+    const out = new Set<number>();
+    for (const b of this.bombs) {
+      if (b.dead || b.fuse > DANGER_SEC) continue;
+      for (const t of this.blastTiles(b)) out.add(t);
+    }
+    return [...out];
+  }
+
+  private explode(b: Bomb, chain: Bomb[]): void {
+    const { arena } = this;
+    const tiles = this.blastTiles(b);
+    const cols = arena.cols;
+    for (const t of tiles) {
+      const x = t % cols;
+      const y = (t - x) / cols;
+      if (arena.kindAt(x, y) === CRATE) this.breakCrate(x, y);
+      else if (t !== tiles[0]) {
         const other = this.bombAt(x, y);
         if (other) chain.push(other);
       }
@@ -805,7 +847,7 @@ export class BombSquadGame extends BaseGame {
     for (const bot of dead) {
       this.kills++;
       this.addStat('kills');
-      const points = bot.kind === 'bomber' ? 250 : 100;
+      const points = BOT_POINTS[bot.kind];
       this.score += points;
       const s = this.screenOf(bot.x, bot.y);
       this.texts.add(s.x, s.y - 14, `+${points}`, '#fde68a', this.labelPx(18));
@@ -817,7 +859,7 @@ export class BombSquadGame extends BaseGame {
         life: 0.6,
         size: 4,
         gravity: 260,
-        colors: bot.kind === 'bomber' ? ['#94a3b8', '#e2e8f0', '#fb923c'] : ['#ef4444', '#fef2f2', '#fca5a5'],
+        colors: BOT_DEBRIS[bot.kind],
       });
     }
     this.audio.play('stomp');
@@ -857,7 +899,7 @@ export class BombSquadGame extends BaseGame {
       y: s.y + 0.5,
       hp: bomber ? 2 : 1,
       maxHp: bomber ? 2 : 1,
-      speed: bomber ? BOMBER_SPEED : WALKER_SPEED,
+      speed: bomber ? BOMBER_SPEED : kind === 'dasher' ? DASHER_SPEED : WALKER_SPEED,
       path: [],
       goal: -1,
       repath: this.rng.range(0, REPATH_TIME),
@@ -882,9 +924,12 @@ export class BombSquadGame extends BaseGame {
     this.clearTimer = -1;
     const walkers = Math.min(9, 2 + n);
     const bombers = Math.min(5, Math.max(0, n - 2));
+    // Dashers join from wave 3: one, then another every second wave, up to three.
+    const dashers = n >= 3 ? Math.min(3, Math.floor((n - 1) / 2)) : 0;
     this.spawnQueue = [];
     for (let i = 0; i < walkers; i++) this.spawnQueue.push('walker');
     for (let i = 0; i < bombers; i++) this.spawnQueue.push('bomber');
+    for (let i = 0; i < dashers; i++) this.spawnQueue.push('dasher');
     this.rng.shuffle(this.spawnQueue);
     this.spawnTimer = SPAWN_STAGGER;
     this.audio.play('levelup');

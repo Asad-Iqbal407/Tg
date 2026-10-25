@@ -494,6 +494,7 @@ describe('rendering', () => {
       bots: [],
       bombs: [bomb],
       explosions: [],
+      danger: [],
       items: [],
       lives: LIVES,
       wave: 1,
@@ -888,8 +889,8 @@ describe('phone layout', () => {
       // The player stands on a tile and its sprite is PLAYER_HEIGHT_TILES tall; a walker is a circle of radius 0.3 tile.
       const player = PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * ts * scale;
       const walker = 0.6 * COMPACT_BOT_SCALE * ts * scale;
-      expect(player / short, `${name} player`).toBeGreaterThanOrEqual(0.08);
-      expect(walker / short, `${name} walker`).toBeGreaterThanOrEqual(0.08);
+      expect(player / short, `${name} player`).toBeGreaterThanOrEqual(0.1);
+      expect(walker / short, `${name} walker`).toBeGreaterThanOrEqual(0.1);
     }
   });
 
@@ -1025,16 +1026,16 @@ describe('phone zoom and text', () => {
     return { game, fonts };
   }
 
-  it('finds the smallest tile at which the character and a walker reach 8% of a 390 px stage side', () => {
-    expect(tileForCharacters(390, 0.4875)).toBe(74);
+  it('finds the smallest tile at which the character and a walker reach 10% of a 390 px stage side', () => {
+    expect(tileForCharacters(390, 0.4875)).toBe(77);
     expect(tileForCharacters(0, 0.4875)).toBe(0);
   });
 
-  it('zooms the arena in on a portrait phone, so the character and a walker are at least 8% of the short side', () => {
+  it('zooms the arena in on a portrait phone, so the character and a walker are at least 10% of the short side', () => {
     const { game } = screenRun(800, 760, 0.4875, { w: 390, h: 788 });
     const { ts } = internals(game).layout();
-    expect((PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * ts * 0.4875) / 390).toBeGreaterThanOrEqual(0.08);
-    expect((0.6 * COMPACT_BOT_SCALE * ts * 0.4875) / 390).toBeGreaterThanOrEqual(0.08);
+    expect((PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * ts * 0.4875) / 390).toBeGreaterThanOrEqual(0.1);
+    expect((0.6 * COMPACT_BOT_SCALE * ts * 0.4875) / 390).toBeGreaterThanOrEqual(0.1);
   });
 
   it('keeps the HUD text at least 12 CSS px at a portrait phone scale and at a turned phone under the controls', () => {
@@ -1116,8 +1117,8 @@ describe('portrait screens (Play anyway, portrait tablets)', () => {
       expect(
         (PLAYER_HEIGHT_TILES * COMPACT_PLAYER_SCALE * lay.ts * scale) / short,
         name,
-      ).toBeGreaterThanOrEqual(0.08);
-      expect((0.6 * COMPACT_BOT_SCALE * lay.ts * scale) / short, name).toBeGreaterThanOrEqual(0.08);
+      ).toBeGreaterThanOrEqual(0.1);
+      expect((0.6 * COMPACT_BOT_SCALE * lay.ts * scale) / short, name).toBeGreaterThanOrEqual(0.1);
       expect(hudTextPx(scale) * scale, name).toBeGreaterThanOrEqual(12);
     }
   });
@@ -1175,5 +1176,62 @@ describe('portrait screens (Play anyway, portrait tablets)', () => {
       expect(k).toBeGreaterThanOrEqual(1);
       if (k > 1) expect(8 + 176 * k + 12).toBeLessThanOrEqual(W / 2 - waveW / 2 + 1e-9);
     }
+  });
+});
+
+describe('dashers, extra lives and danger tiles', () => {
+  it('adds dashers from wave 3', () => {
+    const { i } = quietGame(3);
+    const start = (n: number) => (i as unknown as { startWave(n: number): void }).startWave(n);
+    start(2);
+    expect(i.spawnQueue).not.toContain('dasher');
+    start(3);
+    expect(i.spawnQueue.filter((k) => k === 'dasher')).toHaveLength(1);
+    start(9);
+    expect(i.spawnQueue.filter((k) => k === 'dasher')).toHaveLength(3);
+  });
+
+  it('a dasher runs faster than a walker and goes down to one blast', () => {
+    const { game, input, i, arena } = quietGame(4);
+    clearInterior(arena);
+    (i as unknown as { spawnBot(k: BotKind, s: { x: number; y: number }): void }).spawnBot('dasher', {
+      x: 5,
+      y: 3,
+    });
+    const dasher = i.bots[0]!;
+    expect(dasher.speed).toBeGreaterThan(WALKER_SPEED);
+    expect(dasher.hp).toBe(1);
+    i.addBomb('player', 5, 3, 2, 0.01);
+    run(game, input, 0.1);
+    expect(i.bots).toHaveLength(0);
+  });
+
+  it('an extra life restores a lost life, and pays points when lives are full', () => {
+    const { game, input, i } = quietGame(5);
+    const tx = Math.floor(i.player.x);
+    const ty = Math.floor(i.player.y);
+    i.lives = LIVES - 1;
+    i.items = [{ kind: 'life', x: tx, y: ty }];
+    run(game, input, DT);
+    expect(i.lives).toBe(LIVES);
+    const before = game.getResult().score;
+    i.items = [{ kind: 'life', x: tx, y: ty }];
+    run(game, input, DT);
+    expect(i.lives).toBe(LIVES);
+    expect(game.getResult().score - before).toBeGreaterThanOrEqual(300);
+  });
+
+  it('marks the blast tiles of a bomb in its last second', () => {
+    const { i, arena } = quietGame(6);
+    clearInterior(arena);
+    const danger = () => (i as unknown as { dangerTiles(): number[] }).dangerTiles();
+    i.addBomb('player', 5, 3, 2, 2);
+    expect(danger()).toEqual([]);
+    i.bombs[0]!.fuse = 0.5;
+    const tiles = danger();
+    expect(tiles).toContain(arena.index(5, 3));
+    expect(tiles).toContain(arena.index(7, 3));
+    expect(tiles).toContain(arena.index(5, 1));
+    expect(tiles).not.toContain(arena.index(8, 3));
   });
 });
