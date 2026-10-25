@@ -1,13 +1,12 @@
 import { BaseGame } from '../base';
 import { banner } from '../draw';
 import type { GameServices } from '../types';
+import { buildBoard } from './patterns';
 import {
   type Cell,
   cellX,
   cellY,
-  COLS,
   emptyRow,
-  fillColour,
   FLY_SPEED,
   type Flight,
   flip,
@@ -35,6 +34,7 @@ import {
   drawGrid,
   drawHud,
   drawNext,
+  nextX,
   drawShooter,
   drawWalls,
   type Falling,
@@ -105,6 +105,8 @@ export class BubbleGame extends BaseGame {
   /** Colour in the shooter, and the colour waiting beside it. */
   private loaded = 1;
   private upcoming = 1;
+  /** True while a press that began on the waiting bubble is held: lifting it there swaps instead of firing. */
+  private onNext = false;
   private shot: Shot | null = null;
   /**
    * Aim of a fire request made while a shot was flying or the level was clearing. It goes off once the board
@@ -142,6 +144,7 @@ export class BubbleGame extends BaseGame {
       return;
     }
     if (this.isEnding) return;
+    if (this.handleSwap()) return;
     this.steerAim(dt);
     this.askToFire();
     this.fireQueued();
@@ -222,7 +225,7 @@ export class BubbleGame extends BaseGame {
     this.rows = [];
     this.sunk = 0;
     this.layout = this.baseLayout;
-    for (let i = 0; i < rowsFor(level); i++) this.growRow();
+    this.rows = buildBoard(this.rng, level, rowsFor(level), coloursFor(level));
     this.sinceDrop = 0;
     this.shot = null;
     this.slide = 0;
@@ -230,16 +233,6 @@ export class BubbleGame extends BaseGame {
     this.upcoming = this.pickShot();
     this.bannerT = BANNER_SEC;
     this.version++;
-  }
-
-  /** Adds a full row of random colours below the grid, for the rows a level starts with. */
-  private growRow(): void {
-    const colours = coloursFor(this.level);
-    const edge = this.rows[this.rows.length - 1];
-    const row = emptyRow(edge ? flip(edge.shift) : 0);
-    this.rows.push(row);
-    const index = this.rows.length - 1;
-    for (let c = 0; c < COLS; c++) row.cells[c] = fillColour(this.rng, this.rows, index, c, colours);
   }
 
   /** The next colour to load: one that is still on the grid, so the board is always clearable. */
@@ -287,6 +280,31 @@ export class BubbleGame extends BaseGame {
       f.life -= dt;
     }
     this.falling = this.falling.filter((f) => f.life > 0);
+  }
+
+  /**
+   * Swaps the loaded and the waiting bubble: X / Shift, or a tap on the waiting bubble. Returns true while a press
+   * that began on the waiting bubble is held or lifts, so that press neither aims nor fires.
+   */
+  private handleSwap(): boolean {
+    const ptr = this.input.pointer;
+    const L = this.layout;
+    const nx = nextX(L);
+    const near = Math.hypot(ptr.x - nx, ptr.y - L.shooterY) <= L.d * 0.95;
+    if (ptr.pressed && near) this.onNext = true;
+    if (this.input.wasPressed('secondary')) this.swap();
+    if (!this.onNext) return false;
+    if (ptr.released || !ptr.down) {
+      this.onNext = false;
+      if (near) this.swap();
+    }
+    return true;
+  }
+
+  private swap(): void {
+    if (this.loaded === this.upcoming) return;
+    [this.loaded, this.upcoming] = [this.upcoming, this.loaded];
+    this.audio.play('select');
   }
 
   /** The pointer aims while it is held (and for the release); otherwise the arrow keys nudge the aim. */

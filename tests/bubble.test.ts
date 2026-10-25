@@ -19,7 +19,9 @@ import {
   shiftOf,
   stepFlight,
   traceShot,
+  unanchored,
 } from '../src/games/bubble/board';
+import { buildBoard, designFor, SCHEMES, SHAPES } from '../src/games/bubble/patterns';
 import { type BoostId, type GameInstance, type Insets, NO_INSETS, type SkinData } from '../src/games/types';
 import { cornerSizes, createGame, mockCtx } from './helpers';
 
@@ -139,7 +141,7 @@ describe('bubble definition', () => {
     expect(bubbleGame.viewport).toEqual({ minWidth: 480, maxWidth: 720, minHeight: 800, maxHeight: 1000 });
     expect(bubbleGame.pointerArea).toBe('stage');
     expect(bubbleGame.touchButtons).toEqual([]);
-    expect(bubbleGame.touchHint).toBe('Drag to aim, let go to fire.');
+    expect(bubbleGame.touchHint).toBe('Drag to aim, let go to fire. Tap the NEXT bubble to swap.');
   });
 
   it('labels every stat the run reports', () => {
@@ -529,8 +531,9 @@ describe('ceiling and shooter line', () => {
 });
 
 describe('levels', () => {
-  it('starts level 1 with 7 full rows of 5 colours, with pairs to pop but never a group of three', () => {
-    let pairs = 0;
+  it('starts level 1 as a full wall of 7 rows in 5 colours, painted in matching groups', () => {
+    let grouped = 0;
+    let total = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const s = peek(fresh(seed).game);
       expect(s.rows.length).toBe(7);
@@ -538,15 +541,14 @@ describe('levels', () => {
         row.cells.forEach((k, c) => {
           expect(k).toBeGreaterThanOrEqual(1);
           expect(k).toBeLessThanOrEqual(5);
-          const size = groupAt(s.rows, r, c).length;
-          expect(size).toBeLessThanOrEqual(2);
-          if (size === 2) pairs++;
+          total++;
+          if (groupAt(s.rows, r, c).length >= 3) grouped++;
         });
       });
     }
-    // Regression: rows used to have no matching neighbours at all, so every pop took two set-up shots.
-    // Each pair is counted from both of its bubbles; 20 boards of 63 bubbles should hold well over 100 pairs.
-    expect(pairs / 2).toBeGreaterThan(100);
+    // Regression: boards used to be scattered singles and pairs, so almost no shot popped anything. Designed
+    // boards keep colours together: most bubbles sit in a group a single matching shot can pop.
+    expect(grouped / total).toBeGreaterThan(0.6);
   });
 
   it('clearing the grid starts the next level after a short pause', () => {
@@ -745,5 +747,41 @@ describe('bubble game contract', () => {
         expect(() => game.render()).not.toThrow();
       }
     }
+  });
+});
+
+describe('designed boards', () => {
+  it('hangs every bubble of every design from the ceiling, inside the colour range', () => {
+    for (let level = 1; level <= SHAPES.length * SCHEMES.length; level++) {
+      for (const seed of [1, 2, 3]) {
+        const rows = buildBoard(new Rng(seed), level, rowsFor(level), coloursFor(level));
+        expect(unanchored(rows), `level ${level}`).toEqual([]);
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows[0]?.cells.every((v) => v >= 1 && v <= coloursFor(level))).toBe(true);
+        for (const row of rows) for (const v of row.cells) expect(v).toBeLessThanOrEqual(coloursFor(level));
+        // Rows alternate their offset, starting flush.
+        rows.forEach((row, i) => expect(row.shift).toBe(i % 2));
+      }
+    }
+  });
+
+  it('gives neighbouring levels different designs', () => {
+    for (let level = 1; level < 12; level++) expect(designFor(level)).not.toEqual(designFor(level + 1));
+  });
+
+  it('swaps the loaded and the waiting bubble on X / Shift', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      const { game, input } = fresh(seed);
+      const s = game as unknown as { loaded: number; upcoming: number };
+      if (s.loaded === s.upcoming) continue;
+      const [a, b] = [s.loaded, s.upcoming];
+      input.setVirtual('secondary', true, 'test');
+      game.update(1 / 60);
+      input.postUpdate();
+      input.setVirtual('secondary', false, 'test');
+      expect([s.loaded, s.upcoming]).toEqual([b, a]);
+      return;
+    }
+    throw new Error('no seed loaded two different colours');
   });
 });

@@ -1,5 +1,3 @@
-import type { Rng } from '../../core/rng';
-
 /** Bubbles per row. Odd rows are offset half a bubble to the right, so the playfield is COLS + 1/2 bubbles wide. */
 export const COLS = 9;
 /** Speed of a shot, in logical px per second. */
@@ -27,8 +25,6 @@ const SUB_PX = 4;
 const TRACE_DT = 1 / 120;
 const TRACE_STEPS = 480;
 const SQRT3_2 = Math.sqrt(3) / 2;
-/** Chance that a cell of a fresh row matches a neighbour, making a pair a single shot can pop. */
-export const PAIR_CHANCE = 0.4;
 
 export interface Cell {
   row: number;
@@ -316,25 +312,4 @@ export function unanchored(rows: readonly Row[]): Cell[] {
 /** Drops empty rows from the bottom. Rows only ever change at the ends, so neighbours keep alternating. */
 export function trimRows(rows: Row[]): void {
   while (rows.length > 0 && rows[rows.length - 1]?.cells.every((v) => v === 0)) rows.pop();
-}
-
-/**
- * A colour in 1..colours for a cell of a fresh row. It never completes a group of three, so a new level never
- * starts with a free pop, but with PAIR_CHANCE it matches a neighbour, so some pairs wait for a single shot.
- */
-export function fillColour(rng: Rng, rows: Row[], row: number, col: number, colours: number): number {
-  const cells = rows[row]?.cells;
-  if (!cells) return rng.int(1, colours);
-  const single: number[] = [];
-  const pair: number[] = [];
-  for (let k = 1; k <= colours; k++) {
-    cells[col] = k;
-    const size = groupAt(rows, row, col).length;
-    if (size === 1) single.push(k);
-    else if (size === 2) pair.push(k);
-  }
-  cells[col] = 0;
-  const wantPair = pair.length > 0 && rng.chance(PAIR_CHANCE);
-  const list = wantPair ? pair : single.length > 0 ? single : pair;
-  return list.length > 0 ? rng.pick(list) : rng.int(1, colours);
 }

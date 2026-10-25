@@ -40,16 +40,25 @@ export function drawBubble(
   r: number,
   fill: string,
 ): void {
+  // A glossy sphere: lit from the top left, darker at the rim, with a soft shine and a small hot spot.
+  const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
+  g.addColorStop(0, shade(fill, 0.45));
+  g.addColorStop(0.55, fill);
+  g.addColorStop(1, shade(fill, -0.35));
   ctx.beginPath();
   ctx.arc(x, y, r, 0, TAU);
-  ctx.fillStyle = fill;
+  ctx.fillStyle = g;
   ctx.fill();
-  ctx.lineWidth = Math.max(1.5, r * 0.12);
-  ctx.strokeStyle = shade(fill, -0.4);
+  ctx.lineWidth = Math.max(1.2, r * 0.08);
+  ctx.strokeStyle = shade(fill, -0.5);
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(x - r * 0.33, y - r * 0.33, r * 0.2, 0, TAU);
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.ellipse(x - r * 0.28, y - r * 0.42, r * 0.38, r * 0.2, -0.5, 0, TAU);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x - r * 0.38, y - r * 0.38, r * 0.11, 0, TAU);
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.fill();
 }
 
@@ -206,7 +215,12 @@ export function drawShooter(
   drawBubble(ctx, x, y, r, colour);
 }
 
-/** The bubble waiting beside the shooter. */
+/** Centre x of the bubble waiting beside the shooter (it sits level with the shooter). */
+export function nextX(l: Layout): number {
+  return l.shooterX + l.d * 2.3;
+}
+
+/** The bubble waiting beside the shooter, with a swap hint under it. */
 export function drawNext(
   ctx: CanvasRenderingContext2D,
   l: Layout,
@@ -214,7 +228,7 @@ export function drawNext(
   colour: string,
   r: number,
 ): void {
-  const x = l.shooterX + l.d * 2.3;
+  const x = nextX(l);
   const y = l.shooterY;
   text(ctx, 'NEXT', x, y - l.d * 0.85, {
     size: Math.round(Math.max(HUD_MIN, l.d * 0.3)),
@@ -223,6 +237,12 @@ export function drawNext(
     weight: 700,
   });
   drawBubble(ctx, x, y, r * 0.7, colour);
+  text(ctx, '⇄ SWAP', x, y + l.d * 0.8, {
+    size: Math.round(Math.max(HUD_MIN * 0.8, l.d * 0.24)),
+    align: 'center',
+    color: pal.text,
+    weight: 600,
+  });
 }
 
 /** Smallest HUD text, in logical px: about 12 CSS px on the narrowest phone stage (a 522 px wide canvas). */
