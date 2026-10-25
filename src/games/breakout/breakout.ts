@@ -119,6 +119,13 @@ export class BreakoutGame extends BaseGame {
   private readonly tap = new TapTracker();
   /** Seconds the current arrow key direction has been held, for the key ramp. */
   private keyHeld = 0;
+  /** Mouse x at the last step, to tell a moving mouse from one resting over the canvas. */
+  private mouseX: number | null = null;
+  /**
+   * True once the mouse has moved over the canvas since the run started or the keys last steered. Until then a
+   * resting mouse (say, left where the Play button was) does not pull the paddle toward it.
+   */
+  private mouseLive = false;
 
   constructor(services: GameServices) {
     super(services);
@@ -282,8 +289,8 @@ export class BreakoutGame extends BaseGame {
 
   /**
    * Arrow keys move the paddle, faster the longer they are held. On touch screens a drag anywhere moves the paddle
-   * by the finger's distance (TOUCH_GAIN times), so the finger never covers it. A mouse moves it by hovering or
-   * dragging. Preview cards follow the lowest ball so the frame shows play.
+   * by the finger's distance (TOUCH_GAIN times), so the finger never covers it. A mouse moves it by dragging, or by
+   * hovering once it has moved (a resting mouse never pulls the paddle). Preview cards follow the lowest ball so the frame shows play.
    */
   private movePaddle(dt: number, f: Field): void {
     const half = this.paddleHalf();
@@ -295,12 +302,16 @@ export class BreakoutGame extends BaseGame {
       ? this.drag.update(p.down, p.pressed, p.x, this.paddleX, TOUCH_GAIN, this.W * 0.3)
       : null;
     if (!p.touch) this.drag.update(false, false, 0, 0, 0, 0);
+    const hovering = !p.touch && p.active && p.inside;
+    if (!hovering || axis !== 0) this.mouseLive = false;
+    else if (this.mouseX !== null && p.x !== this.mouseX) this.mouseLive = true;
+    this.mouseX = hovering ? p.x : null;
     if (axis !== 0) {
       const ramp = Math.min(1, this.keyHeld / KEY_RAMP_SEC);
       this.paddleX += axis * (KEY_SPEED + (KEY_MAX - KEY_SPEED) * ramp) * this.u * dt;
     } else if (touch !== null) {
       this.paddleX = touch;
-    } else if (!p.touch && (p.down || (p.active && p.inside))) {
+    } else if (!p.touch && (p.down || (hovering && this.mouseLive))) {
       target = p.x;
     } else if (this.services.preview) {
       const low = this.balls.reduce<Ball | null>((m, b) => (!m || b.y > m.y ? b : m), null);

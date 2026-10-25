@@ -406,3 +406,41 @@ describe('touch paddle controls', () => {
     expect(g.playerY).toBeCloseTo(before - 60 * 1.5, 3);
   });
 });
+
+describe('Brick Breaker mouse', () => {
+  function mouseAt(input: Input, x: number): void {
+    const p = input.pointer;
+    p.touch = false;
+    p.active = true;
+    p.inside = true;
+    p.down = false;
+    p.x = x;
+  }
+
+  it('ignores a mouse resting over the canvas, then follows it once it moves', () => {
+    const { game, input } = createGame(breakoutGame, { seed: 1 });
+    const g = game as unknown as { paddleX: number };
+    const start = g.paddleX;
+    mouseAt(input, 560);
+    run(game, 1);
+    expect(g.paddleX).toBe(start);
+    mouseAt(input, 400);
+    run(game, 1);
+    expect(g.paddleX).toBeCloseTo(400, 3);
+  });
+
+  it('does not pull the paddle back to a resting mouse after the arrow keys steer', () => {
+    const { game, input } = createGame(breakoutGame, { seed: 1 });
+    const g = game as unknown as { paddleX: number };
+    mouseAt(input, 400);
+    game.update(DT);
+    mouseAt(input, 420);
+    run(game, 0.5);
+    input.setVirtual('left', true, 'test');
+    run(game, 0.2);
+    input.setVirtual('left', false, 'test');
+    const after = g.paddleX;
+    run(game, 1);
+    expect(g.paddleX).toBe(after);
+  });
+});
