@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { Input } from '../src/core/input';
 import { Rng } from '../src/core/rng';
 import { breakoutGame } from '../src/games/breakout';
+import { TapTracker, TouchDrag } from '../src/games/drag';
+import { pongGame } from '../src/games/pong';
 import {
   bounceAxis,
   buildLevel,
@@ -314,5 +317,92 @@ describe('colour mixing', () => {
     expect(mixHex('#000000', '#ffffff', 0)).toBe('#000000');
     expect(mixHex('#000000', '#ffffff', 1)).toBe('#ffffff');
     expect(mixHex('#000000', '#ffffff', 0.5)).toBe('#808080');
+  });
+});
+
+describe('touch paddle controls', () => {
+  /** Holds a finger down at `start`, then drags it to `end` over `frames` steps along one axis. */
+  function drag(
+    game: GameInstance,
+    input: Input,
+    axis: 'x' | 'y',
+    start: number,
+    end: number,
+    frames: number,
+  ): void {
+    const p = input.pointer;
+    p.touch = true;
+    p.active = true;
+    p.inside = true;
+    p.down = true;
+    p.pressed = true;
+    p[axis] = start;
+    for (let i = 1; i <= frames; i++) {
+      game.update(DT);
+      input.postUpdate();
+      p[axis] = start + ((end - start) * i) / frames;
+    }
+    game.update(DT);
+    input.postUpdate();
+  }
+
+  it('moves by the finger distance times the gain, not to the finger', () => {
+    const d = new TouchDrag();
+    expect(d.update(true, true, 100, 300, 1.5, 50)).toBe(300);
+    expect(d.update(true, false, 110, 300, 1.5, 50)).toBe(315);
+    // A big jump is another finger taking over: no movement, just a new anchor.
+    expect(d.update(true, false, 400, 315, 1.5, 50)).toBe(315);
+    expect(d.update(false, false, 400, 315, 1.5, 50)).toBeNull();
+  });
+
+  it('tells a tap from a drag', () => {
+    const t = new TapTracker();
+    t.update(true, true, false, 10, 10, 0, 18, 0.35);
+    expect(t.update(false, false, true, 12, 10, 0.1, 18, 0.35)).toBe(true);
+    t.update(true, true, false, 10, 10, 1, 18, 0.35);
+    t.update(true, false, false, 60, 10, 1.05, 18, 0.35);
+    expect(t.update(false, false, true, 60, 10, 1.1, 18, 0.35)).toBe(false);
+  });
+
+  it('slides the Brick Breaker paddle with a drag far from it, and keeps the ball until a tap', () => {
+    const { game, input } = createGame(breakoutGame, { seed: 1 });
+    const g = game as unknown as { paddleX: number; stuck: boolean };
+    const before = g.paddleX;
+    // Drag 50 px to the right near the top of the screen, nowhere near the paddle.
+    drag(game, input, 'x', 100, 150, 10);
+    expect(g.paddleX).toBeCloseTo(before + 50 * 1.6, 3);
+    input.pointer.down = false;
+    input.pointer.released = true;
+    game.update(DT);
+    input.postUpdate();
+    expect(g.stuck).toBe(true);
+    // A tap launches.
+    input.pointer.down = true;
+    input.pointer.pressed = true;
+    game.update(DT);
+    input.postUpdate();
+    input.pointer.down = false;
+    input.pointer.released = true;
+    game.update(DT);
+    input.postUpdate();
+    expect(g.stuck).toBe(false);
+  });
+
+  it('holds the ball while a finger is down, even past the auto-launch time', () => {
+    const { game, input } = createGame(breakoutGame, { seed: 1 });
+    const p = input.pointer;
+    p.touch = true;
+    p.down = true;
+    p.pressed = true;
+    run(game, 5);
+    expect((game as unknown as { stuck: boolean }).stuck).toBe(true);
+  });
+
+  it('slides the Ping Pong paddle with a drag anywhere on the stage', () => {
+    const { game, input } = createGame(pongGame, { seed: 1 });
+    const g = game as unknown as { playerY: number };
+    const before = g.playerY;
+    drag(game, input, 'y', 500, 440, 10);
+    expect(g.playerY).toBeCloseTo(before - 60 * 1.5, 3);
   });
 });

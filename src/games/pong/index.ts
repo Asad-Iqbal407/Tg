@@ -19,10 +19,11 @@ export const pongGame: GameDefinition = {
   gradient: ['#166534', '#1e3a8a'],
   controls: [
     ['↑ ↓ / W S', 'Move your paddle'],
-    ['Press and drag', 'Paddle follows the pointer height'],
+    ['Mouse press and drag', 'Paddle follows the pointer height'],
+    ['Touch drag', 'Drag anywhere: the paddle moves with your finger, never under it'],
     ['Esc / P', 'Pause'],
   ],
-  touchHint: 'Hold UP or DOWN, or drag up and down.',
+  touchHint: 'Drag up and down anywhere on the screen, or hold UP / DOWN.',
   touchButtons: [
     { action: 'up', label: 'UP', side: 'left', wide: true },
     { action: 'down', label: 'DOWN', side: 'right', wide: true },

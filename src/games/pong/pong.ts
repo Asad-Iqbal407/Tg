@@ -1,5 +1,6 @@
 import { clamp } from '../../core/math';
 import { BaseGame } from '../base';
+import { TouchDrag } from '../drag';
 import type { GameServices } from '../types';
 import {
   type Ball,
@@ -36,9 +37,14 @@ const MAX_SPEED = 780;
 const MAX_ANGLE = Math.PI / 3;
 const SERVE_ANGLE = 0.3;
 const SERVE_SEC = 0.9;
+/** Arrow keys ramp from PLAYER_SPEED to KEY_MAX over KEY_RAMP_SEC of holding: taps nudge, holds cross fast. */
 const PLAYER_SPEED = 560;
+const KEY_MAX = 820;
+const KEY_RAMP_SEC = 0.3;
+/** A touch drag moves the paddle this many times the finger's distance. */
+const TOUCH_GAIN = 1.5;
 /** The paddle follows a press or drag at this speed, fast enough that it never lags the finger. */
-const POINTER_SPEED = 1100;
+const POINTER_SPEED = 1800;
 const SUBSTEP = 1 / 240;
 const TRAIL_LEN = 8;
 const WIN_SEC = 2.6;
@@ -62,6 +68,9 @@ export class PongGame extends BaseGame {
   /** Shots in the current rally. The serve is the first shot, so a serve that is not returned is one shot. */
   private shots = 0;
   private readonly trail: { x: number; y: number }[] = [];
+  private readonly drag = new TouchDrag();
+  /** Seconds the current arrow key direction has been held, for the key ramp. */
+  private keyHeld = 0;
 
   constructor(services: GameServices) {
     super(services);
@@ -141,8 +150,10 @@ export class PongGame extends BaseGame {
   }
 
   /**
-   * The player's paddle: the arrow keys or W/S move it at PLAYER_SPEED. A press or drag on the stage moves it toward
-   * the pointer's height. Preview cards track the ball so the frame shows a rally.
+   * The player's paddle. The arrow keys or W/S move it, faster the longer they are held. On touch screens a drag
+   * anywhere on the stage moves it by the finger's distance (TOUCH_GAIN times), so the finger never covers the
+   * paddle or the ball. A mouse press or drag moves it toward the pointer's height. Preview cards track the ball so
+   * the frame shows a rally.
    */
   private movePlayer(dt: number, t: Table, half: number): void {
     const lo = t.top + half;
@@ -150,8 +161,22 @@ export class PongGame extends BaseGame {
     const k = speedScale(t);
     const axis = this.input.axisY();
     const pointer = this.input.pointer;
+    this.keyHeld = axis !== 0 ? this.keyHeld + dt : 0;
+    const touch = pointer.touch
+      ? this.drag.update(
+          pointer.down,
+          pointer.pressed,
+          pointer.y,
+          this.playerY,
+          TOUCH_GAIN,
+          (t.bottom - t.top) * 0.4,
+        )
+      : this.drag.update(false, false, 0, 0, 0, 0);
     if (axis !== 0) {
-      this.playerY += axis * PLAYER_SPEED * k * dt;
+      const ramp = Math.min(1, this.keyHeld / KEY_RAMP_SEC);
+      this.playerY += axis * (PLAYER_SPEED + (KEY_MAX - PLAYER_SPEED) * ramp) * k * dt;
+    } else if (touch !== null) {
+      this.playerY = touch;
     } else if (pointer.down) {
       const max = POINTER_SPEED * k * dt;
       this.playerY += clamp(clamp(pointer.y, lo, hi) - this.playerY, -max, max);

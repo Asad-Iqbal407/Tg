@@ -1,6 +1,7 @@
 import { clamp, TAU } from '../../core/math';
 import { BaseGame } from '../base';
 import { banner, fillRoundRect, shade, text } from '../draw';
+import { TapTracker, TouchDrag } from '../drag';
 import { drawStatBar, statBarHeight } from '../statbar';
 import type { GameServices } from '../types';
 import { bounceAxis, type Brick, buildLevel, circleHitsRect, COLS, isCleared } from './levels';
@@ -47,8 +48,17 @@ const BALL_SPEED = 470;
 const LEVEL_SPEEDUP = 0.05;
 const MAX_SPEEDUP = 1.45;
 const SLOW_FACTOR = 0.68;
-const KEY_SPEED = 760;
+/** Arrow keys ramp from KEY_SPEED to KEY_MAX over KEY_RAMP_SEC of holding, so taps nudge and holds cross fast. */
+const KEY_SPEED = 620;
+const KEY_MAX = 1150;
+const KEY_RAMP_SEC = 0.25;
+/** A hovering mouse follows at up to this speed, fast enough that it never lags the hand. */
 const POINTER_SPEED = 2400;
+/** A touch drag moves the paddle this many times the finger's distance. */
+const TOUCH_GAIN = 1.6;
+/** A tap (press and lift without dragging) launches the ball. */
+const TAP_SLOP = 18;
+const TAP_SEC = 0.35;
 /** The paddle's edge sends the ball off at this angle from straight up. */
 const MAX_ANGLE = (Math.PI / 180) * 62;
 /** Smallest vertical share of the ball's direction, so it never skims sideways for long. */
@@ -105,6 +115,10 @@ export class BreakoutGame extends BaseGame {
   private combo = 0;
   /** Seconds left of the LEVEL banner between levels; 0 while playing. */
   private levelT = 0;
+  private readonly drag = new TouchDrag();
+  private readonly tap = new TapTracker();
+  /** Seconds the current arrow key direction has been held, for the key ramp. */
+  private keyHeld = 0;
 
   constructor(services: GameServices) {
     super(services);
@@ -136,9 +150,21 @@ export class BreakoutGame extends BaseGame {
     if (this.stuck) {
       this.stuckT += dt;
       this.holdBall(f);
-      const tapped = this.input.pointer.released && this.input.pointer.inside;
+      const p = this.input.pointer;
+      const tapped = this.tap.update(
+        p.down,
+        p.pressed,
+        p.released,
+        p.x,
+        p.y,
+        this.time,
+        TAP_SLOP * this.u,
+        TAP_SEC,
+      );
       const pressed = this.input.wasPressed('primary') || this.input.wasPressed('up') || tapped;
-      if (pressed || this.stuckT >= AUTO_LAUNCH_SEC || this.services.preview) this.launch();
+      // The ball waits while a finger is down, so lining up the first shot never launches it early.
+      const auto = this.stuckT >= AUTO_LAUNCH_SEC && !p.down;
+      if (pressed || auto || this.services.preview) this.launch();
     } else {
       let left = dt;
       while (left > 0 && !this.stuck && this.levelT <= 0 && !this.isEnding) {
@@ -180,8 +206,8 @@ export class BreakoutGame extends BaseGame {
     ]);
     if (this.levelT > 0) {
       banner(ctx, this.W, this.H, `LEVEL ${this.level + 1}`, 'Bricks cleared!', 1 - this.levelT / LEVEL_SEC);
-    } else if (this.stuck && this.stuckT < AUTO_LAUNCH_SEC) {
-      text(ctx, 'TAP TO LAUNCH', this.W / 2, f.paddleY - 90 * this.u, {
+    } else if (this.stuck) {
+      text(ctx, 'DRAG TO MOVE · TAP TO LAUNCH', this.W / 2, f.paddleY - 90 * this.u, {
         size: Math.round(22 * this.u),
         align: 'center',
         color: 'rgba(255,255,255,0.85)',
@@ -255,17 +281,26 @@ export class BreakoutGame extends BaseGame {
   }
 
   /**
-   * Arrow keys move the paddle at KEY_SPEED. A press or drag moves it under the finger, and a mouse moves it by
-   * hovering. Preview cards follow the lowest ball so the frame shows play.
+   * Arrow keys move the paddle, faster the longer they are held. On touch screens a drag anywhere moves the paddle
+   * by the finger's distance (TOUCH_GAIN times), so the finger never covers it. A mouse moves it by hovering or
+   * dragging. Preview cards follow the lowest ball so the frame shows play.
    */
   private movePaddle(dt: number, f: Field): void {
     const half = this.paddleHalf();
     const axis = this.input.axisX();
     const p = this.input.pointer;
     let target: number | null = null;
+    this.keyHeld = axis !== 0 ? this.keyHeld + dt : 0;
+    const touch = p.touch
+      ? this.drag.update(p.down, p.pressed, p.x, this.paddleX, TOUCH_GAIN, this.W * 0.3)
+      : null;
+    if (!p.touch) this.drag.update(false, false, 0, 0, 0, 0);
     if (axis !== 0) {
-      this.paddleX += axis * KEY_SPEED * this.u * dt;
-    } else if (p.down || (p.active && !p.touch && p.inside)) {
+      const ramp = Math.min(1, this.keyHeld / KEY_RAMP_SEC);
+      this.paddleX += axis * (KEY_SPEED + (KEY_MAX - KEY_SPEED) * ramp) * this.u * dt;
+    } else if (touch !== null) {
+      this.paddleX = touch;
+    } else if (!p.touch && (p.down || (p.active && p.inside))) {
       target = p.x;
     } else if (this.services.preview) {
       const low = this.balls.reduce<Ball | null>((m, b) => (!m || b.y > m.y ? b : m), null);
