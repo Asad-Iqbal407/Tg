@@ -33,6 +33,9 @@ const PREVIEW: Record<string, PreviewConfig> = {
   galaxy: { seed: 2, seconds: 7.5, focus: 0.3 },
   bubble: { seed: 5, seconds: 1.2, focus: 0.5, fit: 'contain' },
   pong: { seed: 7, seconds: 3.2, focus: 0.5 },
+  breakout: { seed: 3, seconds: 2.4, focus: 0.35 },
+  merge: { seed: 4, seconds: 3.4, focus: 0.5, fit: 'contain' },
+  flappy: { seed: 6, seconds: 3.0, focus: 0.55 },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -498,6 +501,106 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
       ctx.fillStyle = p.ball ?? '#fef9c3';
       ctx.beginPath();
       ctx.arc(14, -8, 4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'breakout': {
+      // Three rows of bricks, a ball on its way up and the paddle below. Offset like the other board cards.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const bg = ctx.createLinearGradient(0, -44, 0, 44);
+      bg.addColorStop(0, p.bg1 ?? '#1e1b4b');
+      bg.addColorStop(1, p.bg2 ?? '#020617');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, bg);
+      const rows = [p.b3 ?? '#f472b6', p.b2 ?? '#a78bfa', p.b1 ?? '#22d3ee'];
+      rows.forEach((colour, r) => {
+        for (let c = 0; c < 6; c++) {
+          if (r === 2 && c === 3) continue;
+          fillRoundRect(
+            ctx,
+            -46 + c * 15.5,
+            -36 + r * 10,
+            13.5,
+            8,
+            2,
+            r === 1 && c === 0 ? (p.steel ?? '#94a3b8') : colour,
+          );
+        }
+      });
+      ctx.fillStyle = p.ball ?? '#fef9c3';
+      ctx.beginPath();
+      ctx.arc(8, 8, 4.5, 0, TAU);
+      ctx.fill();
+      fillRoundRect(ctx, -16, 30, 32, 6, 3, p.paddle ?? '#e2e8f0');
+      ctx.restore();
+      break;
+    }
+    case 'merge': {
+      // A four-by-four board with a few tiles, coloured from the skin's ramp.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -44, -44, 88, 88, 8, p.board ?? '#1e1b4b');
+      const ramp = [p.low ?? '#fde68a', p.mid ?? '#f97316', p.high ?? '#db2777'];
+      const tiles: Record<string, number> = {
+        '0,0': 0,
+        '1,0': 1,
+        '3,0': 0,
+        '1,1': 2,
+        '2,2': 1,
+        '3,3': 2,
+        '0,3': 1,
+      };
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const i = tiles[`${c},${r}`];
+          fillRoundRect(
+            ctx,
+            -40 + c * 20.5,
+            -40 + r * 20.5,
+            18,
+            18,
+            3,
+            i === undefined ? (p.cell ?? '#312e81') : (ramp[i] ?? '#fff'),
+          );
+        }
+      }
+      ctx.restore();
+      break;
+    }
+    case 'flappy': {
+      // Sky, a pipe pair and the bird mid-flap.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const sky = ctx.createLinearGradient(0, -44, 0, 44);
+      sky.addColorStop(0, p.sky1 ?? '#38bdf8');
+      sky.addColorStop(1, p.sky2 ?? '#bae6fd');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, sky);
+      ctx.fillStyle = p.pipe ?? '#22c55e';
+      ctx.fillRect(14, -44, 18, 30);
+      ctx.fillRect(10, -18, 26, 7);
+      ctx.fillRect(14, 16, 18, 20);
+      ctx.fillRect(10, 12, 26, 7);
+      ctx.fillStyle = p.ground ?? '#d97706';
+      ctx.fillRect(-52, 34, 104, 10);
+      ctx.fillStyle = p.grass ?? '#65a30d';
+      ctx.fillRect(-52, 32, 104, 3);
+      ctx.fillStyle = p.bird ?? '#facc15';
+      ctx.beginPath();
+      ctx.ellipse(-18, 0, 11, 9, -0.2, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(-13, -3, 3.4, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.beak ?? '#f97316';
+      ctx.beginPath();
+      ctx.moveTo(-8, 0);
+      ctx.lineTo(0, 2);
+      ctx.lineTo(-8, 4);
       ctx.fill();
       ctx.restore();
       break;

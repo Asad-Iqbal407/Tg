@@ -1,6 +1,6 @@
 # Neon Arcade
 
-A browser arcade with ten original canvas games and one shared progression and reward system.
+A browser arcade with 13 original canvas games and one shared progression and reward system.
 The browser app has no runtime dependencies. All graphics and sound are generated in code, so there are no
 image or audio files to download, and it keeps working offline after the first visit. Players can
 optionally create an account, which syncs their progress through a small API backed by MongoDB Atlas.
@@ -17,6 +17,9 @@ optionally create an account, which syncs their progress through a small API bac
 | **Block Drop**     | Falling-block puzzle (_Tetris_)           | Seven-bag randomiser, hold, ghost piece, wall kicks, lock delay and endless levels                 |
 | **Bubble Shooter** | Classic Pop puzzle (_Bubble Shooter_)     | Matches of three, floating drops, combo multipliers, and a ceiling that sinks every six shots      |
 | **Ping Pong**      | Table tennis (_classic table tennis_)     | Computer rival, edge-of-paddle angles, speeding rallies, long-rally bonuses, first to 11 by two    |
+| **Brick Breaker**  | Paddle and bricks (_Breakout / Arkanoid_) | Five looping layouts, multi-hit and steel bricks, wide / multi-ball / slow capsules, combo bonuses |
+| **2048**           | Number puzzle (_2048_)                    | Animated slides and merges, one merge per tile per move, coins for 128+ tiles, play on past 2048   |
+| **Sky Hopper**     | One-tap flier (_Flappy Bird_)             | Narrowing gaps, rising speed, coins inside the gaps, parallax hills, a Guardian shield             |
 
 All characters, names, pixel art and sounds are original. The games are inspired by those
 classics and are not affiliated with them.
@@ -30,9 +33,9 @@ Every run feeds one profile:
 - **Gems**: the premium currency. You earn them from level-ups, achievements, hard missions and login streaks.
 - **Daily login**: a 7-day reward calendar. The streak resets if you miss a day.
 - **Daily missions**: three a day (easy, medium and hard), the same set for everyone on a given date.
-- **44 achievements** in bronze, silver, gold and platinum tiers, each paying coins and gems.
+- **53 achievements** in bronze, silver, gold and platinum tiers, each paying coins and gems.
 - **Shop**:
-  - **Skins**: 40, four per game. Hill Rider vehicles and Galaxy War ships also change handling and stats.
+  - **Skins**: 52, four per game. Hill Rider vehicles and Galaxy War ships also change handling and stats.
   - **Boosts**: four single-use items. Coin Doubler, XP Booster, Guardian (a one-time save that works differently in each game) and Power Start.
   - **Upgrades**: four permanent upgrades. Lucky Charm (more coins), Scholar (more XP), Overclock (longer power-ups) and Loyalty Card (bigger daily rewards).
 - **Hall of Fame**: your top 10 runs per game.

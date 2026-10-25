@@ -132,8 +132,8 @@ describe('game card art', () => {
 describe('home copy', () => {
   it('counts the games it offers', () => {
     // Regression: the hero said "Five classic-inspired games" with ten in the grid.
-    expect(GAMES.length).toBe(10);
-    expect(countWord(GAMES.length)).toBe('Ten');
+    expect(GAMES.length).toBe(13);
+    expect(countWord(GAMES.length)).toBe('13');
     expect(countWord(5)).toBe('Five');
     expect(countWord(20)).toBe('20');
   });

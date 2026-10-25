@@ -3,7 +3,19 @@ import type { Action, Input } from '../core/input';
 import type { Rng } from '../core/rng';
 
 export type GameId =
-  'runner' | 'platformer' | 'duck' | 'hill' | 'galaxy' | 'snake' | 'bombsquad' | 'tetris' | 'bubble' | 'pong';
+  | 'runner'
+  | 'platformer'
+  | 'duck'
+  | 'hill'
+  | 'galaxy'
+  | 'snake'
+  | 'bombsquad'
+  | 'tetris'
+  | 'bubble'
+  | 'pong'
+  | 'breakout'
+  | 'merge'
+  | 'flappy';
 export const GAME_IDS: readonly GameId[] = [
   'runner',
   'platformer',
@@ -15,6 +27,9 @@ export const GAME_IDS: readonly GameId[] = [
   'tetris',
   'bubble',
   'pong',
+  'breakout',
+  'merge',
+  'flappy',
 ];
 
 export type BoostId = 'coin-doubler' | 'xp-booster' | 'shield' | 'head-start';
