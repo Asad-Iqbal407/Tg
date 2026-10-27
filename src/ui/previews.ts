@@ -42,6 +42,9 @@ const PREVIEW: Record<string, PreviewConfig> = {
   mines: { seed: 2, seconds: 0.5, focus: 0.5, fit: 'contain' },
   slice: { seed: 4, seconds: 10.6, focus: 0.5 },
   jumper: { seed: 3, seconds: 6, focus: 0.55 },
+  hopper: { seed: 3, seconds: 6, focus: 0.6 },
+  sort: { seed: 2, seconds: 1.2, focus: 0.5, fit: 'contain' },
+  four: { seed: 2, seconds: 0.3, focus: 0.5, fit: 'contain' },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -739,6 +742,87 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
       ctx.beginPath();
       ctx.arc(-16, 4, 2, 0, TAU);
       ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'hopper': {
+      // A hen on the grass, a road with a car and a river with a log above it.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const bands: [string, number][] = [
+        [p.water ?? '#3b82f6', -44],
+        [p.road ?? '#334155', -22],
+        [p.grass1 ?? '#4ade80', 0],
+        [p.grass2 ?? '#22c55e', 22],
+      ];
+      for (const [colour, y] of bands) {
+        ctx.fillStyle = colour;
+        ctx.fillRect(-52, y, 104, 22);
+      }
+      fillRoundRect(ctx, -30, -41, 44, 16, 6, p.log ?? '#92400e');
+      fillRoundRect(ctx, 10, -19, 30, 16, 5, '#ef4444');
+      fillRoundRect(ctx, -9, 2, 18, 18, 5, p.body ?? '#ffffff');
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(-3, -1, 6, 4);
+      ctx.fillStyle = p.tree ?? '#15803d';
+      ctx.beginPath();
+      ctx.arc(32, 32, 9, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'sort': {
+      // Three tubes, one sorted.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg1 ?? '#312e81');
+      const cols = [p.c1 ?? '#ef4444', p.c2 ?? '#3b82f6', p.c3 ?? '#22c55e'];
+      const stacks = [
+        [0, 1, 0, 2],
+        [1, 1, 1, 1],
+        [2, 0, 2],
+      ];
+      stacks.forEach((stack, t) => {
+        const x = -32 + t * 32;
+        fillRoundRect(ctx, x - 11, -36, 22, 74, 11, p.glass ?? 'rgba(255,255,255,0.12)');
+        stack.forEach((c, k) => {
+          ctx.fillStyle = cols[c] ?? '#fff';
+          ctx.beginPath();
+          ctx.arc(x, 28 - k * 17, 8, 0, TAU);
+          ctx.fill();
+        });
+      });
+      ctx.restore();
+      break;
+    }
+    case 'four': {
+      // A small frame with discs of both colours.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -50, -38, 100, 80, 6, p.board ?? '#2563eb');
+      const discs: Record<string, number> = {
+        '3,0': 1,
+        '3,1': 2,
+        '2,0': 1,
+        '4,0': 2,
+        '4,1': 1,
+        '2,1': 2,
+        '3,2': 1,
+        '5,0': 2,
+      };
+      for (let c = 0; c < 7; c++) {
+        for (let r = 0; r < 5; r++) {
+          const who = discs[`${c},${r}`];
+          ctx.fillStyle =
+            who === 1 ? (p.player ?? '#ef4444') : who === 2 ? (p.cpu ?? '#facc15') : (p.bg2 ?? '#0b1530');
+          ctx.beginPath();
+          ctx.arc(-42 + c * 14, 32 - r * 15, 5.5, 0, TAU);
+          ctx.fill();
+        }
+      }
       ctx.restore();
       break;
     }
