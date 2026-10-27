@@ -15,7 +15,10 @@ export type GameId =
   | 'pong'
   | 'breakout'
   | 'merge'
-  | 'flappy';
+  | 'flappy'
+  | 'stack'
+  | 'memory'
+  | 'mole';
 export const GAME_IDS: readonly GameId[] = [
   'runner',
   'platformer',
@@ -30,6 +33,9 @@ export const GAME_IDS: readonly GameId[] = [
   'breakout',
   'merge',
   'flappy',
+  'stack',
+  'memory',
+  'mole',
 ];
 
 export type BoostId = 'coin-doubler' | 'xp-booster' | 'shield' | 'head-start';

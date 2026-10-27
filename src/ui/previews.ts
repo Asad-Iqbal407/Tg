@@ -36,6 +36,9 @@ const PREVIEW: Record<string, PreviewConfig> = {
   breakout: { seed: 3, seconds: 2.4, focus: 0.35 },
   merge: { seed: 4, seconds: 3.4, focus: 0.5, fit: 'contain' },
   flappy: { seed: 6, seconds: 3.0, focus: 0.55 },
+  stack: { seed: 2, seconds: 6, focus: 0.45 },
+  memory: { seed: 3, seconds: 1, focus: 0.5, fit: 'contain' },
+  mole: { seed: 5, seconds: 14, focus: 0.55 },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -567,6 +570,82 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
           );
         }
       }
+      ctx.restore();
+      break;
+    }
+    case 'stack': {
+      // A tower of slabs narrowing as it climbs, with the next block sliding in.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const sky = ctx.createLinearGradient(0, -44, 0, 44);
+      sky.addColorStop(0, p.sky1 ?? '#1e1b4b');
+      sky.addColorStop(1, p.sky2 ?? '#7c3aed');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, sky);
+      const hue = item.params.hue ?? 260;
+      const step = item.params.hueStep ?? 9;
+      const widths = [70, 66, 66, 58, 52, 52, 46];
+      widths.forEach((w, i) => {
+        ctx.fillStyle = `hsl(${(hue + i * step) % 360},70%,58%)`;
+        ctx.fillRect(-w / 2 + (i % 2) * 2, 34 - (i + 1) * 9, w, 8);
+      });
+      ctx.fillStyle = `hsl(${(hue + 7 * step) % 360},70%,58%)`;
+      ctx.fillRect(-10, -38, 46, 8);
+      ctx.fillStyle = p.ground ?? '#0f172a';
+      ctx.fillRect(-52, 34, 104, 10);
+      ctx.restore();
+      break;
+    }
+    case 'memory': {
+      // Three rows of cards: some face down, a matched pair face up.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg1 ?? '#0f766e');
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 4; c++) {
+          const x = -44 + c * 23;
+          const y = -38 + r * 26;
+          const up = (r === 0 && c === 1) || (r === 2 && c === 2);
+          fillRoundRect(ctx, x, y, 19, 23, 3, up ? (p.matched ?? '#ecfeff') : (p.back ?? '#f97316'));
+          if (up) {
+            ctx.fillStyle = '#ec4899';
+            ctx.beginPath();
+            ctx.arc(x + 9.5, y + 11.5, 5, 0, TAU);
+            ctx.fill();
+          }
+        }
+      }
+      ctx.restore();
+      break;
+    }
+    case 'mole': {
+      // A mole popping out of its hole on the lawn.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const lawn = ctx.createLinearGradient(0, -44, 0, 44);
+      lawn.addColorStop(0, p.grass1 ?? '#4ade80');
+      lawn.addColorStop(1, p.grass2 ?? '#15803d');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, lawn);
+      ctx.fillStyle = p.dirt ?? '#92400e';
+      ctx.beginPath();
+      ctx.ellipse(0, 22, 34, 12, 0, 0, TAU);
+      ctx.fill();
+      fillRoundRect(ctx, -18, -20, 36, 44, 18, p.fur ?? '#8b5a2b');
+      ctx.fillStyle = '#111827';
+      ctx.beginPath();
+      ctx.arc(-7, -6, 3, 0, TAU);
+      ctx.arc(7, -6, 3, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#f472b6';
+      ctx.beginPath();
+      ctx.ellipse(0, 2, 4, 3, 0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.dirt ?? '#92400e';
+      ctx.beginPath();
+      ctx.ellipse(0, 26, 30, 8, 0, 0, Math.PI);
+      ctx.fill();
       ctx.restore();
       break;
     }
