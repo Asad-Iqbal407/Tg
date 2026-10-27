@@ -18,7 +18,10 @@ export type GameId =
   | 'flappy'
   | 'stack'
   | 'memory'
-  | 'mole';
+  | 'mole'
+  | 'mines'
+  | 'slice'
+  | 'jumper';
 export const GAME_IDS: readonly GameId[] = [
   'runner',
   'platformer',
@@ -36,6 +39,9 @@ export const GAME_IDS: readonly GameId[] = [
   'stack',
   'memory',
   'mole',
+  'mines',
+  'slice',
+  'jumper',
 ];
 
 export type BoostId = 'coin-doubler' | 'xp-booster' | 'shield' | 'head-start';

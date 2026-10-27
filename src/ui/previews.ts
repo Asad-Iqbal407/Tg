@@ -39,6 +39,9 @@ const PREVIEW: Record<string, PreviewConfig> = {
   stack: { seed: 2, seconds: 6, focus: 0.45 },
   memory: { seed: 3, seconds: 1, focus: 0.5, fit: 'contain' },
   mole: { seed: 5, seconds: 14, focus: 0.55 },
+  mines: { seed: 2, seconds: 0.5, focus: 0.5, fit: 'contain' },
+  slice: { seed: 4, seconds: 10.6, focus: 0.5 },
+  jumper: { seed: 3, seconds: 6, focus: 0.55 },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -645,6 +648,96 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
       ctx.fillStyle = p.dirt ?? '#92400e';
       ctx.beginPath();
       ctx.ellipse(0, 26, 30, 8, 0, 0, Math.PI);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'mines': {
+      // A corner of a field: open squares with numbers, grass squares and a flag.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -48, -44, 96, 88, 8, p.bg2 ?? '#0f172a');
+      const open = new Set(['0,2', '1,2', '2,2', '1,3', '2,3', '0,3', '2,1', '3,2', '3,3']);
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const x = -42 + c * 21;
+          const y = -40 + r * 21;
+          const isOpen = open.has(`${c},${r}`);
+          fillRoundRect(ctx, x, y, 19, 19, 3, isOpen ? (p.open1 ?? '#e2e8f0') : (p.tile1 ?? '#4ade80'));
+        }
+      }
+      ctx.fillStyle = '#2563eb';
+      ctx.font = '900 14px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('1', -42 + 2 * 21 + 9.5, -40 + 21 + 10);
+      ctx.fillStyle = '#16a34a';
+      ctx.fillText('2', -42 + 3 * 21 + 9.5, -40 + 2 * 21 + 10);
+      ctx.fillStyle = '#1f2937';
+      ctx.fillRect(-42 + 3 * 21 + 7, -40 + 21 + 3, 2, 14);
+      ctx.fillStyle = p.flag ?? '#ef4444';
+      ctx.beginPath();
+      ctx.moveTo(-42 + 3 * 21 + 9, -40 + 21 + 3);
+      ctx.lineTo(-42 + 3 * 21 + 17, -40 + 21 + 7);
+      ctx.lineTo(-42 + 3 * 21 + 9, -40 + 21 + 11);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'slice': {
+      // A sliced apple flying apart along a blade stroke.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const board = ctx.createLinearGradient(0, -44, 0, 44);
+      board.addColorStop(0, p.bg1 ?? '#7c2d12');
+      board.addColorStop(1, p.bg2 ?? '#1c0a04');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, board);
+      for (const [dx, a0, a1] of [
+        [-8, Math.PI / 2, (Math.PI * 3) / 2],
+        [8, -Math.PI / 2, Math.PI / 2],
+      ] as const) {
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(dx, 4, 22, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath();
+        ctx.arc(dx, 4, 18, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.strokeStyle = p.blade ?? '#e0f2fe';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-6, -38);
+      ctx.lineTo(4, 40);
+      ctx.stroke();
+      ctx.restore();
+      break;
+    }
+    case 'jumper': {
+      // The jumper above a pad, with another pad higher up.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const sky = ctx.createLinearGradient(0, -44, 0, 44);
+      sky.addColorStop(0, p.sky1 ?? '#38bdf8');
+      sky.addColorStop(1, p.sky2 ?? '#e0f2fe');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, sky);
+      fillRoundRect(ctx, -40, 28, 40, 8, 4, p.pad ?? '#22c55e');
+      fillRoundRect(ctx, 6, -26, 40, 8, 4, p.moving ?? '#3b82f6');
+      fillRoundRect(ctx, -32, -4, 22, 26, 10, p.body ?? '#facc15');
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(-17, 4, 4, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#111827';
+      ctx.beginPath();
+      ctx.arc(-16, 4, 2, 0, TAU);
       ctx.fill();
       ctx.restore();
       break;
