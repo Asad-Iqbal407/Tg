@@ -208,7 +208,7 @@ export class JumperGame extends BaseGame {
     else if (this.vx < -1) this.facing = -1;
   }
 
-  /** Falling onto a pad from above bounces; a breaking pad crumbles instead; a spring launches high. */
+  /** Falling onto a pad from above bounces; a breaking pad gives one bounce and crumbles; a spring launches high. */
   private land(prevFeet: number): void {
     const u = this.u;
     const feet = this.y + (BODY_H * u) / 2;
@@ -217,6 +217,7 @@ export class JumperGame extends BaseGame {
       if (p.broken || prevFeet > p.y || feet < p.y) continue;
       if (this.x + half * 0.8 < p.x || this.x - half * 0.8 > p.x + PAD_W * u) continue;
       if (p.kind === 'breaking') {
+        // A wooden pad takes one bounce, then crumbles away under the jumper.
         p.broken = true;
         this.audio.play('bump', { volume: 0.5 });
         this.particles.emit({
@@ -228,7 +229,6 @@ export class JumperGame extends BaseGame {
           size: 4,
           colors: ['#a16207', '#78350f'],
         });
-        continue;
       }
       this.y = p.y - (BODY_H * u) / 2;
       this.bounceT = 0;
@@ -268,7 +268,7 @@ export class JumperGame extends BaseGame {
     }
   }
 
-  /** Lays pads up to a screen above the camera: the climbing path, plus breaking decoys beside it. */
+  /** Lays pads up to a screen above the camera: the climbing path, plus one-bounce breaking pads beside it. */
   private fillPads(): void {
     const u = this.u;
     while (this.topY > this.camY - this.H) {

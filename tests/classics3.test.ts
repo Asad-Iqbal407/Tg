@@ -262,3 +262,29 @@ describe('Sky Jumper', () => {
     expect(game.getResult().stats.springs).toBe(1);
   });
 });
+
+describe('Sky Jumper wooden pads', () => {
+  it('a wooden pad gives one bounce, then crumbles', () => {
+    const { game } = createGame(jumperGame, { seed: 1 });
+    const g = game as unknown as { x: number; y: number; vy: number; pads: Pad[] };
+    const pad: Pad = {
+      kind: 'breaking',
+      x: g.x - 48,
+      y: g.y + 25 + 4,
+      vx: 0,
+      broken: false,
+      vy: 0,
+      coin: false,
+    };
+    g.pads = [pad];
+    g.vy = 300;
+    game.update(DT);
+    expect(g.vy).toBeLessThan(-800);
+    expect(pad.broken).toBe(true);
+    // Falling back down, the broken pad no longer holds.
+    g.y = pad.y - 30;
+    g.vy = 300;
+    game.update(DT);
+    expect(g.vy).toBeGreaterThan(0);
+  });
+});
