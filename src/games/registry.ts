@@ -8,6 +8,7 @@ import { galaxyGame } from './galaxy';
 import { hillGame } from './hill';
 import { hopperGame } from './hopper/index';
 import { jumperGame } from './jumper/index';
+import { knifeGame } from './knife/index';
 import { memoryGame } from './memory/index';
 import { mergeGame } from './merge/index';
 import { minesGame } from './mines/index';
@@ -15,10 +16,12 @@ import { moleGame } from './mole/index';
 import { platformerGame } from './platformer';
 import { pongGame } from './pong/index';
 import { runnerGame } from './runner';
+import { simonGame } from './simon/index';
 import { sliceGame } from './slice/index';
 import { snakeGame } from './snake';
 import { sortGame } from './sort/index';
 import { stackGame } from './stack/index';
+import { sudokuGame } from './sudoku/index';
 import { tetrisGame } from './tetris';
 import type { GameDefinition, GameId } from './types';
 
@@ -45,6 +48,9 @@ export const GAMES: readonly GameDefinition[] = [
   hopperGame,
   sortGame,
   fourGame,
+  knifeGame,
+  sudokuGame,
+  simonGame,
 ];
 
 const BY_ID = new Map<string, GameDefinition>(GAMES.map((g) => [g.id, g]));

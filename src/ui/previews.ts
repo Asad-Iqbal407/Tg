@@ -45,6 +45,9 @@ const PREVIEW: Record<string, PreviewConfig> = {
   hopper: { seed: 3, seconds: 6, focus: 0.6 },
   sort: { seed: 2, seconds: 1.2, focus: 0.5, fit: 'contain' },
   four: { seed: 2, seconds: 0.3, focus: 0.5, fit: 'contain' },
+  knife: { seed: 3, seconds: 3.2, focus: 0.35 },
+  sudoku: { seed: 2, seconds: 0.2, focus: 0.4, fit: 'contain' },
+  simon: { seed: 4, seconds: 1.5, focus: 0.5 },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -823,6 +826,95 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
           ctx.fill();
         }
       }
+      ctx.restore();
+      break;
+    }
+    case 'knife': {
+      // A log with knives stuck in it and one on its way.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg2 ?? '#0f172a');
+      ctx.fillStyle = p.wood ?? '#b45309';
+      ctx.beginPath();
+      ctx.arc(0, -10, 24, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, -10, 14, 0, TAU);
+      ctx.stroke();
+      for (const a of [-2.4, -0.6, 0.9, 2.6]) {
+        ctx.save();
+        ctx.translate(Math.cos(a) * 30, -10 + Math.sin(a) * 30);
+        ctx.rotate(a);
+        ctx.fillStyle = p.handle ?? '#7c2d12';
+        ctx.fillRect(0, -2.5, 14, 5);
+        ctx.restore();
+      }
+      ctx.fillStyle = p.blade ?? '#e2e8f0';
+      ctx.fillRect(-2.5, 20, 5, 14);
+      ctx.fillStyle = p.handle ?? '#7c2d12';
+      ctx.fillRect(-2.5, 34, 5, 10);
+      ctx.restore();
+      break;
+    }
+    case 'sudoku': {
+      // A corner of a grid with a few numbers.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -44, -44, 88, 88, 6, p.paper ?? '#f8fafc');
+      ctx.fillStyle = p.select ?? '#93c5fd';
+      ctx.fillRect(-44 + 29.3, -44 + 29.3, 29.3, 29.3);
+      ctx.strokeStyle = p.lines ?? '#0f172a';
+      ctx.lineWidth = 2;
+      for (let k = 0; k <= 3; k++) {
+        ctx.beginPath();
+        ctx.moveTo(-44 + k * 29.3, -44);
+        ctx.lineTo(-44 + k * 29.3, 44);
+        ctx.moveTo(-44, -44 + k * 29.3);
+        ctx.lineTo(44, -44 + k * 29.3);
+        ctx.stroke();
+      }
+      ctx.font = '800 18px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const nums: [number, number, string, boolean][] = [
+        [0, 0, '5', true],
+        [2, 0, '3', true],
+        [1, 1, '7', false],
+        [0, 2, '9', true],
+        [2, 2, '1', false],
+      ];
+      for (const [c, r, n, given] of nums) {
+        ctx.fillStyle = given ? (p.given ?? '#0f172a') : (p.ink ?? '#2563eb');
+        ctx.fillText(n, -44 + (c + 0.5) * 29.3, -44 + (r + 0.5) * 29.3 + 1);
+      }
+      ctx.restore();
+      break;
+    }
+    case 'simon': {
+      // The four pads round the centre, one lit.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      ctx.fillStyle = p.case ?? '#111827';
+      ctx.beginPath();
+      ctx.arc(0, 0, 44, 0, TAU);
+      ctx.fill();
+      const pads = [p.p1 ?? '#22c55e', p.p2 ?? '#ef4444', p.p3 ?? '#3b82f6', p.p4 ?? '#facc15'];
+      pads.forEach((colour, i) => {
+        const mid = -Math.PI / 2 + i * (Math.PI / 2);
+        ctx.fillStyle = colour;
+        ctx.globalAlpha = i === 1 ? 1 : 0.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, 38, mid - Math.PI / 4 + 0.07, mid + Math.PI / 4 - 0.07);
+        ctx.arc(0, 0, 15, mid + Math.PI / 4 - 0.07, mid - Math.PI / 4 + 0.07, true);
+        ctx.closePath();
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
       ctx.restore();
       break;
     }
