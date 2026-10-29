@@ -5,10 +5,13 @@ import { duckGame } from './duck';
 import { flappyGame } from './flappy/index';
 import { fourGame } from './four/index';
 import { galaxyGame } from './galaxy';
+import { golfGame } from './golf/index';
 import { hillGame } from './hill';
+import { hoopsGame } from './hoops/index';
 import { hopperGame } from './hopper/index';
 import { jumperGame } from './jumper/index';
 import { knifeGame } from './knife/index';
+import { mazeGame } from './maze/index';
 import { memoryGame } from './memory/index';
 import { mergeGame } from './merge/index';
 import { minesGame } from './mines/index';
@@ -51,6 +54,9 @@ export const GAMES: readonly GameDefinition[] = [
   knifeGame,
   sudokuGame,
   simonGame,
+  mazeGame,
+  golfGame,
+  hoopsGame,
 ];
 
 const BY_ID = new Map<string, GameDefinition>(GAMES.map((g) => [g.id, g]));

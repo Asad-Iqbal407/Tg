@@ -1,37 +1,40 @@
 # Neon Arcade
 
-A browser arcade with 25 original canvas games and one shared progression and reward system.
+A browser arcade with 28 original canvas games and one shared progression and reward system.
 The browser app has no runtime dependencies. All graphics and sound are generated in code, so there are no
 image or audio files to download, and it keeps working offline after the first visit. Players can
 optionally create an account, which syncs their progress through a small API backed by MongoDB Atlas.
 
-| Game               | Genre (inspired by)                       | Highlights                                                                                         |
-| ------------------ | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **Metro Dash**     | Endless 3-lane runner (_Subway Surfers_)  | Pseudo-3D track, ramps onto train roofs, oncoming trains, magnet / 2× / super-jump / jetpack       |
-| **Pixel Quest**    | Side-scrolling platformer (_Super Mario_) | Levels assembled from hand-built chunks, coyote time and jump buffering, stomps, shells, fireballs |
-| **Duck Season**    | Shooting gallery (_Duck Hunt_)            | Rounds of 10 ducks, combos, double kills, golden ducks, slow-mo and scatter-shot crates            |
-| **Hill Rider**     | Physics driving (_Hill Climb Racing_)     | Verlet soft-body suspension, fuel, flips and air time, four biomes including a low-gravity Moon    |
-| **Galaxy War**     | Vertical shoot-'em-up (_Galaga_)          | Five weapon levels, bombs, chain multipliers, formations and a Mothership boss every fifth wave    |
-| **Snake Classic**  | Grid snake (_Nokia Snake_)                | Queued turns, golden apples that slow time, new walls every few apples, a Guardian shield          |
-| **Bomb Squad**     | Bomb arena (_BombSquad_)                  | Lay bombs on the floor and kick them with punch, crates, walker and bomber bots, waves and items   |
-| **Block Drop**     | Falling-block puzzle (_Tetris_)           | Seven-bag randomiser, hold, ghost piece, wall kicks, lock delay and endless levels                 |
-| **Bubble Shooter** | Classic Pop puzzle (_Bubble Shooter_)     | Matches of three, floating drops, combo multipliers, and a ceiling that sinks every six shots      |
-| **Ping Pong**      | Table tennis (_classic table tennis_)     | Computer rival, edge-of-paddle angles, speeding rallies, long-rally bonuses, first to 11 by two    |
-| **Brick Breaker**  | Paddle and bricks (_Breakout / Arkanoid_) | Five looping layouts, multi-hit and steel bricks, wide / multi-ball / slow capsules, combo bonuses |
-| **2048**           | Number puzzle (_2048_)                    | Animated slides and merges, one merge per tile per move, coins for 128+ tiles, play on past 2048   |
-| **Sky Hopper**     | One-tap flier (_Flappy Bird_)             | Narrowing gaps, rising speed, coins inside the gaps, parallax hills, a Guardian shield             |
-| **Stack Tower**    | One-tap timing (_Stack_)                  | Overhangs sliced off, perfect drops that snap and regrow the block, a colour-shifting tower        |
-| **Memory Match**   | Memory puzzle (_Concentration_)           | Twelve drawn symbols, flip animations, streak multipliers, bigger boards against the clock         |
-| **Whack-a-Mole**   | Reflex arcade (_Whac-A-Mole_)             | 60-second rounds, combo multipliers, golden moles worth coins, bombs that cost time                |
-| **Minesweeper**    | Logic puzzle (_Minesweeper_)              | Safe first dig, flood opening, hold-to-flag and a flag mode, chording, more mines every field      |
-| **Fruit Slice**    | Swipe action (_Fruit Ninja_)              | Blade trail, halves that fly apart, multi-fruit combos, golden fruit, bombs that end the run       |
-| **Sky Jumper**     | Endless climber (_Doodle Jump_)           | Moving, crumbling and spring pads, screen wrap, relative touch steering, a sky that turns to space |
-| **Road Hopper**    | Endless hopper (_Crossy Road / Frogger_)  | Traffic lanes, logs that carry you, trees in the way, coins on the grass, an eagle for dawdlers    |
-| **Color Sort**     | Sorting puzzle (_Ball Sort Puzzle_)       | Deals proven solvable by a solver, unlimited undo, more colours each level against the clock       |
-| **Connect Four**   | Strategy (_Connect Four_)                 | Alpha-beta computer opponent that looks deeper every win, falling discs, winning-line highlight    |
-| **Knife Hit**      | One-tap timing (_Knife Hit_)              | Steady, surging and reversing logs, apples on the rim, boss logs every fifth stage                 |
-| **Sudoku**         | Number puzzle (_Sudoku_)                  | Unique-solution puzzles from a solver, pencil notes, peer highlights, fewer givens each puzzle     |
-| **Simon Says**     | Memory game (_Simon_)                     | Four pads with their own sounds, a sequence that grows and quickens, a timeout on every tap        |
+| Game               | Genre (inspired by)                       | Highlights                                                                                          |
+| ------------------ | ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Metro Dash**     | Endless 3-lane runner (_Subway Surfers_)  | Pseudo-3D track, ramps onto train roofs, oncoming trains, magnet / 2× / super-jump / jetpack        |
+| **Pixel Quest**    | Side-scrolling platformer (_Super Mario_) | Levels assembled from hand-built chunks, coyote time and jump buffering, stomps, shells, fireballs  |
+| **Duck Season**    | Shooting gallery (_Duck Hunt_)            | Rounds of 10 ducks, combos, double kills, golden ducks, slow-mo and scatter-shot crates             |
+| **Hill Rider**     | Physics driving (_Hill Climb Racing_)     | Verlet soft-body suspension, fuel, flips and air time, four biomes including a low-gravity Moon     |
+| **Galaxy War**     | Vertical shoot-'em-up (_Galaga_)          | Five weapon levels, bombs, chain multipliers, formations and a Mothership boss every fifth wave     |
+| **Snake Classic**  | Grid snake (_Nokia Snake_)                | Queued turns, golden apples that slow time, new walls every few apples, a Guardian shield           |
+| **Bomb Squad**     | Bomb arena (_BombSquad_)                  | Lay bombs on the floor and kick them with punch, crates, walker and bomber bots, waves and items    |
+| **Block Drop**     | Falling-block puzzle (_Tetris_)           | Seven-bag randomiser, hold, ghost piece, wall kicks, lock delay and endless levels                  |
+| **Bubble Shooter** | Classic Pop puzzle (_Bubble Shooter_)     | Matches of three, floating drops, combo multipliers, and a ceiling that sinks every six shots       |
+| **Ping Pong**      | Table tennis (_classic table tennis_)     | Computer rival, edge-of-paddle angles, speeding rallies, long-rally bonuses, first to 11 by two     |
+| **Brick Breaker**  | Paddle and bricks (_Breakout / Arkanoid_) | Five looping layouts, multi-hit and steel bricks, wide / multi-ball / slow capsules, combo bonuses  |
+| **2048**           | Number puzzle (_2048_)                    | Animated slides and merges, one merge per tile per move, coins for 128+ tiles, play on past 2048    |
+| **Sky Hopper**     | One-tap flier (_Flappy Bird_)             | Narrowing gaps, rising speed, coins inside the gaps, parallax hills, a Guardian shield              |
+| **Stack Tower**    | One-tap timing (_Stack_)                  | Overhangs sliced off, perfect drops that snap and regrow the block, a colour-shifting tower         |
+| **Memory Match**   | Memory puzzle (_Concentration_)           | Twelve drawn symbols, flip animations, streak multipliers, bigger boards against the clock          |
+| **Whack-a-Mole**   | Reflex arcade (_Whac-A-Mole_)             | 60-second rounds, combo multipliers, golden moles worth coins, bombs that cost time                 |
+| **Minesweeper**    | Logic puzzle (_Minesweeper_)              | Safe first dig, flood opening, hold-to-flag and a flag mode, chording, more mines every field       |
+| **Fruit Slice**    | Swipe action (_Fruit Ninja_)              | Blade trail, halves that fly apart, multi-fruit combos, golden fruit, bombs that end the run        |
+| **Sky Jumper**     | Endless climber (_Doodle Jump_)           | Moving, crumbling and spring pads, screen wrap, relative touch steering, a sky that turns to space  |
+| **Road Hopper**    | Endless hopper (_Crossy Road / Frogger_)  | Traffic lanes, logs that carry you, trees in the way, coins on the grass, an eagle for dawdlers     |
+| **Color Sort**     | Sorting puzzle (_Ball Sort Puzzle_)       | Deals proven solvable by a solver, unlimited undo, more colours each level against the clock        |
+| **Connect Four**   | Strategy (_Connect Four_)                 | Alpha-beta computer opponent that looks deeper every win, falling discs, winning-line highlight     |
+| **Knife Hit**      | One-tap timing (_Knife Hit_)              | Steady, surging and reversing logs, apples on the rim, boss logs every fifth stage                  |
+| **Sudoku**         | Number puzzle (_Sudoku_)                  | Unique-solution puzzles from a solver, pencil notes, peer highlights, fewer givens each puzzle      |
+| **Simon Says**     | Memory game (_Simon_)                     | Four pads with their own sounds, a sequence that grows and quickens, a timeout on every tap         |
+| **Maze Chase**     | Maze chase (_Pac-Man_)                    | Four ghosts with their own chase styles, power pellets, a wrap-round tunnel, faster ghosts per maze |
+| **Mini Golf**      | Putting sport (_mini golf_)               | Nine holes with sand, water, a windmill and bumpers, slingshot putting, scored against par          |
+| **Hoops**          | Flick sport (_arcade basketball_)         | Flick to shoot, swishes that add time, streak multipliers, a hoop that starts to move               |
 
 All characters, names, pixel art and sounds are original. The games are inspired by those
 classics and are not affiliated with them.
@@ -45,9 +48,9 @@ Every run feeds one profile:
 - **Gems**: the premium currency. You earn them from level-ups, achievements, hard missions and login streaks.
 - **Daily login**: a 7-day reward calendar. The streak resets if you miss a day.
 - **Daily missions**: three a day (easy, medium and hard), the same set for everyone on a given date.
-- **89 achievements** in bronze, silver, gold and platinum tiers, each paying coins and gems.
+- **98 achievements** in bronze, silver, gold and platinum tiers, each paying coins and gems.
 - **Shop**:
-  - **Skins**: 100, four per game. Hill Rider vehicles and Galaxy War ships also change handling and stats.
+  - **Skins**: 112, four per game. Hill Rider vehicles and Galaxy War ships also change handling and stats.
   - **Boosts**: four single-use items. Coin Doubler, XP Booster, Guardian (a one-time save that works differently in each game) and Power Start.
   - **Upgrades**: four permanent upgrades. Lucky Charm (more coins), Scholar (more XP), Overclock (longer power-ups) and Loyalty Card (bigger daily rewards).
 - **Hall of Fame**: your top 10 runs per game.

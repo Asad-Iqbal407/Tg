@@ -48,6 +48,9 @@ const PREVIEW: Record<string, PreviewConfig> = {
   knife: { seed: 3, seconds: 3.2, focus: 0.35 },
   sudoku: { seed: 2, seconds: 0.2, focus: 0.4, fit: 'contain' },
   simon: { seed: 4, seconds: 1.5, focus: 0.5 },
+  maze: { seed: 2, seconds: 3, focus: 0.5, fit: 'contain' },
+  golf: { seed: 2, seconds: 1.0, focus: 0.5, fit: 'contain' },
+  hoops: { seed: 3, seconds: 0.95, focus: 0.35 },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -915,6 +918,100 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
         ctx.fill();
       });
       ctx.globalAlpha = 1;
+      ctx.restore();
+      break;
+    }
+    case 'maze': {
+      // A corner of the maze: walls, dots, the muncher and a ghost.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg ?? '#020617');
+      ctx.strokeStyle = p.wall ?? '#2563eb';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(-46, -38, 92, 76);
+      ctx.strokeRect(-24, -16, 48, 14);
+      ctx.fillStyle = p.dot ?? '#fde68a';
+      for (let k = 0; k < 6; k++) {
+        ctx.beginPath();
+        ctx.arc(-30 + k * 12, 14, 2.5, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = p.hero ?? '#facc15';
+      ctx.beginPath();
+      ctx.moveTo(-36, 14);
+      ctx.arc(-36, 14, 10, 0.6, TAU - 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(30, 10, 10, Math.PI, 0);
+      ctx.lineTo(40, 24);
+      ctx.lineTo(20, 24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'golf': {
+      // A green with a flag in the cup and a ball short of it.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -36, -44, 72, 88, 6, p.felt ?? '#22c55e');
+      ctx.strokeStyle = p.wall ?? '#78350f';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(-36, -44, 72, 88);
+      ctx.fillStyle = p.sand ?? '#fde68a';
+      ctx.fillRect(-36, 0, 30, 18);
+      ctx.fillStyle = '#052e16';
+      ctx.beginPath();
+      ctx.arc(8, -24, 5, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#e5e7eb';
+      ctx.fillRect(7, -44, 2, 20);
+      ctx.fillStyle = p.flag ?? '#ef4444';
+      ctx.beginPath();
+      ctx.moveTo(9, -44);
+      ctx.lineTo(22, -40);
+      ctx.lineTo(9, -36);
+      ctx.fill();
+      ctx.fillStyle = p.ball ?? '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 26, 4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'hoops': {
+      // A ball on its way into the hoop.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const wall = ctx.createLinearGradient(0, -44, 0, 44);
+      wall.addColorStop(0, p.wall1 ?? '#1e3a8a');
+      wall.addColorStop(1, p.wall2 ?? '#0f172a');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, wall);
+      ctx.fillStyle = p.board ?? 'rgba(255,255,255,0.9)';
+      ctx.fillRect(-26, -40, 52, 32);
+      ctx.strokeStyle = p.net ?? 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.5;
+      for (let k = 0; k <= 4; k++) {
+        ctx.beginPath();
+        ctx.moveTo(-14 + k * 7, -8);
+        ctx.lineTo(-9 + k * 4.5, 6);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = p.rim ?? '#ea580c';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-15, -8);
+      ctx.lineTo(15, -8);
+      ctx.stroke();
+      ctx.fillStyle = p.ball ?? '#f97316';
+      ctx.beginPath();
+      ctx.arc(14, 24, 10, 0, TAU);
+      ctx.fill();
       ctx.restore();
       break;
     }

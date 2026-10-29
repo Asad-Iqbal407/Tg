@@ -27,7 +27,10 @@ export type GameId =
   | 'four'
   | 'knife'
   | 'sudoku'
-  | 'simon';
+  | 'simon'
+  | 'maze'
+  | 'golf'
+  | 'hoops';
 export const GAME_IDS: readonly GameId[] = [
   'runner',
   'platformer',
@@ -54,6 +57,9 @@ export const GAME_IDS: readonly GameId[] = [
   'knife',
   'sudoku',
   'simon',
+  'maze',
+  'golf',
+  'hoops',
 ];
 
 export type BoostId = 'coin-doubler' | 'xp-booster' | 'shield' | 'head-start';
