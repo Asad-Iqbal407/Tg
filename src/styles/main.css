@@ -2650,3 +2650,24 @@ body.is-playing .toast__text span {
   gap: 6px;
   margin: 0 0 4px;
 }
+
+/* Four results actions (Arcade, Share, Loadout, Play again) share one row on a phone: icon over label. */
+@media (max-width: 520px) {
+  .modal--results .modal__actions {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .modal--results .modal__actions .btn {
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    min-height: 56px;
+    padding: 8px 4px;
+    font-size: 0.82rem;
+    line-height: 1.15;
+  }
+  .modal--results .modal__actions .btn--primary {
+    flex-grow: 1.4;
+  }
+}

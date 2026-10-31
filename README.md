@@ -58,6 +58,7 @@ Every run feeds one profile:
 - **Gems**: the premium currency. You earn them from level-ups, achievements, hard missions and login streaks.
 - **Daily login**: a 7-day reward calendar. The streak resets if you miss a day.
 - **Daily missions**: three a day (easy, medium and hard), the same set for everyone on a given date.
+- **Daily Challenge**: every game's lobby offers today's run, the same seeded run for everyone on a given date. The first run that scores pays a one-time bonus of 50 coins and 50 XP, and later tries only chase the day's best.
 - **128 achievements** in bronze, silver, gold and platinum tiers, each paying coins and gems.
 - **Shop**:
   - **Skins**: 152, four per game. Hill Rider vehicles and Galaxy War ships also change handling and stats.
@@ -123,6 +124,8 @@ rules and data model are in [server/README.md](server/README.md).
 
 ## Platform features
 
+- Finding games: search by title, genre or category, filter by category or by your starred favourites (kept in your profile and synced with your account), and a "Jump back in" row of recently played games.
+- Sharing: the results screen shares your score through the system share sheet, or copies it to the clipboard.
 - Fixed-timestep game loop (60 Hz simulation on any refresh rate). The simulation is deterministic and covered by tests.
 - Input from keyboard, mouse, touch (swipes and on-screen buttons) and gamepads.
 - Pause automatically when the tab is hidden or loses focus. Fullscreen mode. FPS counter.
