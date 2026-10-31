@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
+
+  docker:
+    name: Docker image smoke test
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t neon-arcade:ci .
+      - name: Run container and check headers
+        run: |
+          docker run -d --name arcade -p 8080:8080 neon-arcade:ci
+          for i in $(seq 1 30); do curl -fsS http://localhost:8080/healthz && break; sleep 1; done
+          curl -fsS -D headers.txt -o index.html http://localhost:8080/
+          cat headers.txt
+          grep -qi '^content-security-policy:' headers.txt
+          grep -qi '^cache-control: no-cache' headers.txt || (curl -fsSI http://localhost:8080/index.html | grep -qi '^cache-control: no-cache')
+          grep -q 'id="app"' index.html
+          curl -fsS http://localhost:8080/sw.js | grep -q 'neon-arcade-'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/assets/does-not-exist.js.map)" = "404"
+      - if: always()
+        run: docker logs arcade || true
+
+  api:
+    name: API build and image smoke test
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run server:build
+      - run: test -f dist-server/server/index.js
+      - run: docker build -f Dockerfile.api -t neon-arcade-api:ci .
+      - name: Run the API in memory mode and check its health route
+        run: |
+          docker run -d --name api -p 8787:8787 -e NODE_ENV=test -e DATA_STORE=memory -e APP_ORIGIN=http://localhost:8080 neon-arcade-api:ci
+          for i in $(seq 1 30); do curl -fsS http://localhost:8787/api/health && break; sleep 1; done
+          curl -fsS http://localhost:8787/api/health | grep -q '"ok":true'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/api/does-not-exist)" = "404"
+      - if: always()
+        run: docker logs api || true

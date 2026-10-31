@@ -1,0 +1,1341 @@
+import { NullAudio } from '../core/audio';
+import { chooseLogicalSize } from '../core/engine';
+import { Input } from '../core/input';
+import { TAU } from '../core/math';
+import { Rng } from '../core/rng';
+import { fillRoundRect } from '../games/draw';
+import { HERO } from '../games/platformer/sprites';
+import { drawSprite } from '../games/sprite';
+import { type GameDefinition, NO_INSETS, type SkinData } from '../games/types';
+import type { SkinItem } from '../meta/catalog';
+
+interface PreviewConfig {
+  seed: number;
+  seconds: number;
+  /** Vertical crop focus for 'cover' art (0 = top, 1 = bottom). */
+  focus: number;
+  /**
+   * 'contain' shows the whole frame (over a dimmed, cropped copy of itself) and keeps it clear of the
+   * card's genre pill: for tall boards whose top rows a crop would hide under the pill.
+   */
+  fit?: 'cover' | 'contain';
+}
+
+/** Seed, simulated seconds and framing for card art. */
+const PREVIEW: Record<string, PreviewConfig> = {
+  snake: { seed: 4, seconds: 1.6, focus: 0.5 },
+  bombsquad: { seed: 6, seconds: 1.5, focus: 0.5 },
+  tetris: { seed: 8, seconds: 2.0, focus: 0.5 },
+  runner: { seed: 4, seconds: 2.6, focus: 0.75 },
+  platformer: { seed: 9, seconds: 2.6, focus: 0.5 },
+  duck: { seed: 3, seconds: 2.4, focus: 0.5 },
+  hill: { seed: 5, seconds: 2.8, focus: 0.5 },
+  galaxy: { seed: 2, seconds: 7.5, focus: 0.3 },
+  bubble: { seed: 5, seconds: 1.2, focus: 0.5, fit: 'contain' },
+  pong: { seed: 7, seconds: 3.2, focus: 0.5 },
+  breakout: { seed: 3, seconds: 2.4, focus: 0.35 },
+  merge: { seed: 4, seconds: 3.4, focus: 0.5, fit: 'contain' },
+  flappy: { seed: 6, seconds: 3.0, focus: 0.55 },
+  stack: { seed: 2, seconds: 6, focus: 0.45 },
+  memory: { seed: 3, seconds: 1, focus: 0.5, fit: 'contain' },
+  mole: { seed: 5, seconds: 14, focus: 0.55 },
+  mines: { seed: 2, seconds: 0.5, focus: 0.5, fit: 'contain' },
+  slice: { seed: 4, seconds: 10.6, focus: 0.5 },
+  jumper: { seed: 3, seconds: 6, focus: 0.55 },
+  hopper: { seed: 3, seconds: 6, focus: 0.6 },
+  sort: { seed: 2, seconds: 1.2, focus: 0.5, fit: 'contain' },
+  four: { seed: 2, seconds: 0.3, focus: 0.5, fit: 'contain' },
+  knife: { seed: 3, seconds: 3.2, focus: 0.35 },
+  sudoku: { seed: 2, seconds: 0.2, focus: 0.4, fit: 'contain' },
+  simon: { seed: 4, seconds: 1.5, focus: 0.5 },
+  maze: { seed: 2, seconds: 3, focus: 0.5, fit: 'contain' },
+  golf: { seed: 2, seconds: 1.0, focus: 0.5, fit: 'contain' },
+  hoops: { seed: 3, seconds: 0.95, focus: 0.35 },
+  dino: { seed: 3, seconds: 4, focus: 0.55 },
+  tiles: { seed: 2, seconds: 2, focus: 0.5 },
+  tictactoe: { seed: 2, seconds: 3, focus: 0.45, fit: 'contain' },
+  lights: { seed: 2, seconds: 0.2, focus: 0.45, fit: 'contain' },
+  pipes: { seed: 2, seconds: 0.2, focus: 0.45, fit: 'contain' },
+  gems: { seed: 2, seconds: 1.5, focus: 0.4, fit: 'contain' },
+  hockey: { seed: 2, seconds: 2.5, focus: 0.5 },
+  missile: { seed: 2, seconds: 5, focus: 0.45 },
+  blaster: { seed: 2, seconds: 5, focus: 0.5 },
+  archery: { seed: 2, seconds: 1.0, focus: 0.55 },
+};
+
+const cache = new Map<string, HTMLCanvasElement>();
+
+/**
+ * Render a real frame of the game (simulated headlessly for a few seconds) for card art. The
+ * logical size is chosen for the card's aspect, exactly as the play screen would for a stage of
+ * that shape, and the frame is rendered at the resolution the card will show it at.
+ */
+function renderFrame(
+  def: GameDefinition,
+  skin: SkinData,
+  targetW: number,
+  targetH: number,
+): HTMLCanvasElement | null {
+  const size = chooseLogicalSize(def, targetW, targetH);
+  const key = `${def.id}:${skin.id}:${size.width}x${size.height}@${targetW}x${targetH}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const scale = Math.min(1, Math.max(targetW / size.width, targetH / size.height));
+  const off = document.createElement('canvas');
+  off.width = Math.max(1, Math.round(size.width * scale));
+  off.height = Math.max(1, Math.round(size.height * scale));
+  const ctx = off.getContext('2d');
+  if (!ctx) return null;
+  const cfg = PREVIEW[def.id] ?? { seed: 1, seconds: 2.5, focus: 0.5 };
+  const input = new Input();
+  // Simple autopilot so action games show something happening.
+  if (def.id === 'hill') input.setVirtual('right', true, 'preview');
+  const game = def.create({
+    ctx,
+    width: size.width,
+    height: size.height,
+    input,
+    audio: new NullAudio(),
+    rng: new Rng(cfg.seed),
+    loadout: { skin, boosts: new Set(), powerDuration: 1 },
+    insets: NO_INSETS,
+    reducedMotion: true,
+    haptic: () => undefined,
+    preview: true,
+  });
+  try {
+    const steps = Math.round(cfg.seconds * 60);
+    for (let i = 0; i < steps; i++) {
+      game.update(1 / 60);
+      input.postUpdate();
+    }
+    ctx.setTransform(off.width / size.width, 0, 0, off.height / size.height, 0, 0);
+    game.render();
+  } finally {
+    game.destroy();
+  }
+  cache.set(key, off);
+  return off;
+}
+
+/** Part of the card width, from the left, that the genre pill may cover (it is about 100 of 356 px). */
+export const PILL_ZONE = 0.37;
+/** Widest share of the card a 'contain' frame may take, so it stays clear of the pill and the play button. */
+const CONTAIN_MAX_WIDTH = 0.5;
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Where a `fw` x `fh` frame is drawn on a `tw` x `th` card. 'cover' fills the card (cropped about the
+ * focus). 'contain' fits the whole frame, at most half the card wide, centred but moved right where it
+ * would reach under a pill in the top-left corner (the left `pillZone` share of the card).
+ */
+export function previewRect(
+  fw: number,
+  fh: number,
+  tw: number,
+  th: number,
+  fit: 'cover' | 'contain',
+  focus = 0.5,
+  pillZone = PILL_ZONE,
+): Rect {
+  if (fit === 'cover') {
+    const s = Math.max(tw / fw, th / fh);
+    const w = fw * s;
+    const h = fh * s;
+    return { x: (tw - w) / 2, y: (th - h) * focus, w, h };
+  }
+  const s = Math.min(th / fh, (tw * CONTAIN_MAX_WIDTH) / fw);
+  const w = fw * s;
+  const h = fh * s;
+  const x = Math.min(Math.max((tw - w) / 2, tw * pillZone), tw - w);
+  return { x, y: (th - h) / 2, w, h };
+}
+
+/**
+ * Draw a game preview into `target` (cropped to fill it, or whole for 'contain' games). `pillZone` is the
+ * share of the width, from the left, that a top-left pill covers (0 when the art has none there).
+ */
+export function drawGamePreview(
+  def: GameDefinition,
+  skin: SkinData,
+  target: HTMLCanvasElement,
+  pillZone = PILL_ZONE,
+): void {
+  const frame = renderFrame(def, skin, target.width, target.height);
+  const ctx = target.getContext('2d');
+  if (!frame || !ctx) return;
+  const tw = target.width;
+  const th = target.height;
+  const cfg = PREVIEW[def.id];
+  const cover = previewRect(frame.width, frame.height, tw, th, 'cover', cfg?.focus ?? 0.5);
+  if (cfg?.fit !== 'contain') {
+    ctx.drawImage(frame, cover.x, cover.y, cover.w, cover.h);
+    return;
+  }
+  // A dimmed crop fills the card behind the whole board, so the art keeps the game's colours edge to edge.
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.drawImage(frame, cover.x, cover.y, cover.w, cover.h);
+  ctx.restore();
+  ctx.fillStyle = 'rgba(5, 6, 15, 0.45)';
+  ctx.fillRect(0, 0, tw, th);
+  const r = previewRect(frame.width, frame.height, tw, th, 'contain', 0.5, pillZone);
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+  ctx.shadowBlur = th * 0.06;
+  ctx.drawImage(frame, r.x, r.y, r.w, r.h);
+  ctx.restore();
+}
+
+/** Queue preview rendering during idle time so the arcade paints instantly. */
+export function schedulePreview(fn: () => void): void {
+  const ric = (
+    window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }
+  ).requestIdleCallback;
+  if (ric) ric(fn, { timeout: 600 });
+  else setTimeout(fn, 30);
+}
+
+/** Small standalone drawings of each skin for the shop. */
+export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width;
+  const hgt = canvas.height;
+  const p = item.palette;
+  ctx.clearRect(0, 0, w, hgt);
+  ctx.save();
+  ctx.translate(w / 2, hgt / 2);
+  const k = Math.min(w, hgt) / 100;
+  ctx.scale(k, k);
+  switch (item.gameId) {
+    case 'runner': {
+      fillRoundRect(ctx, -12, 4, 9, 30, 4, p.accent ?? '#333');
+      fillRoundRect(ctx, 3, 4, 9, 30, 4, p.accent ?? '#333');
+      fillRoundRect(ctx, -14, 30, 12, 6, 3, p.shoes ?? '#fff');
+      fillRoundRect(ctx, 2, 30, 12, 6, 3, p.shoes ?? '#fff');
+      fillRoundRect(ctx, -16, -26, 32, 34, 8, p.body ?? '#e63946');
+      fillRoundRect(ctx, -24, -22, 9, 26, 4, p.body ?? '#e63946');
+      fillRoundRect(ctx, 15, -22, 9, 26, 4, p.body ?? '#e63946');
+      ctx.fillStyle = p.skin ?? '#f1c27d';
+      ctx.beginPath();
+      ctx.arc(0, -36, 12, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.accent ?? '#333';
+      ctx.beginPath();
+      ctx.arc(0, -40, 12.5, Math.PI, 0);
+      ctx.fill();
+      break;
+    }
+    case 'platformer': {
+      const def = HERO.big.stand;
+      const px = 3.4;
+      const pal = {
+        H: p.hat ?? '#e63946',
+        V: p.hat ?? '#e63946',
+        h: p.hair ?? '#5a3214',
+        S: p.skin ?? '#f6c18f',
+        E: '#1b1b2f',
+        m: '#7a2e2e',
+        C: p.shirt ?? '#e63946',
+        O: p.overalls ?? '#1d4ed8',
+        B: '#ffd23f',
+        F: '#6b3a1e',
+      };
+      drawSprite(ctx, def, pal, (-12 * px) / 2, (-def.length * px) / 2, px);
+      break;
+    }
+    case 'duck': {
+      const r = 28;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = p.main ?? '#f33';
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.stroke();
+      const style = item.params.style ?? 0;
+      if (style === 1) {
+        ctx.fillStyle = p.main ?? '#f33';
+        ctx.shadowColor = p.main ?? '#f33';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(0, 0, 6, 0, TAU);
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = p.accent ?? '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ] as const) {
+          ctx.moveTo(dx * 8, dy * 8);
+          ctx.lineTo(dx * (r + 10), dy * (r + 10));
+        }
+        ctx.stroke();
+        if (style === 2) {
+          ctx.strokeStyle = p.main ?? '#f33';
+          ctx.beginPath();
+          ctx.arc(0, 0, r / 2, 0, TAU);
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+    case 'hill': {
+      const wr = (item.params.wheelRadius ?? 20) * 0.9;
+      ctx.fillStyle = p.body ?? '#e63946';
+      ctx.beginPath();
+      ctx.moveTo(-40, 8);
+      ctx.lineTo(40, 8);
+      ctx.lineTo(32, -12);
+      ctx.lineTo(-38, -14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = p.trim ?? '#1d3557';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-38, -2);
+      ctx.lineTo(36, -2);
+      ctx.stroke();
+      ctx.strokeStyle = '#2b2b33';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-34, -14);
+      ctx.lineTo(-28, -40);
+      ctx.lineTo(18, -34);
+      ctx.lineTo(28, -12);
+      ctx.stroke();
+      ctx.fillStyle = p.helmet ?? '#ffd23f';
+      ctx.beginPath();
+      ctx.arc(-6, -30, 9, 0, TAU);
+      ctx.fill();
+      for (const x of [-26, 28]) {
+        ctx.fillStyle = '#1b1b1f';
+        ctx.beginPath();
+        ctx.arc(x, 14, wr, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = '#9aa0ad';
+        ctx.beginPath();
+        ctx.arc(x, 14, wr * 0.5, 0, TAU);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'snake': {
+      // A curled serpent with a golden apple and a red apple.
+      const body = p.body ?? '#4ade80';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = body;
+      ctx.lineWidth = 15;
+      ctx.beginPath();
+      ctx.moveTo(-34, 22);
+      ctx.bezierCurveTo(-34, -16, 4, -30, 4, -2);
+      ctx.bezierCurveTo(4, 20, 30, 18, 26, -10);
+      ctx.stroke();
+      ctx.fillStyle = p.head ?? '#bbf7d0';
+      ctx.beginPath();
+      ctx.arc(26, -10, 9, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.food ?? '#ef4444';
+      ctx.beginPath();
+      ctx.arc(-30, -26, 7, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.gold ?? '#fde047';
+      ctx.beginPath();
+      ctx.arc(20, 26, 6, 0, TAU);
+      ctx.fill();
+      break;
+    }
+    case 'bombsquad': {
+      // A round bomb with a lit fuse.
+      ctx.fillStyle = p.bomb ?? '#111827';
+      ctx.beginPath();
+      ctx.arc(0, 6, 26, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = p.fuse ?? '#f97316';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(10, -18);
+      ctx.quadraticCurveTo(20, -36, 34, -30);
+      ctx.stroke();
+      ctx.fillStyle = p.fuse ?? '#f97316';
+      ctx.beginPath();
+      ctx.arc(34, -30, 5, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.suit ?? '#3b82f6';
+      fillRoundRect(ctx, -20, 26, 40, 14, 6, p.suit ?? '#3b82f6');
+      ctx.fillStyle = p.visor ?? '#e0f2fe';
+      ctx.beginPath();
+      ctx.arc(-6, 2, 3, 0, TAU);
+      ctx.arc(8, 2, 3, 0, TAU);
+      ctx.fill();
+      break;
+    }
+    case 'tetris': {
+      // A T piece in its own colour, with a faint well behind it.
+      const cell = 22;
+      const x0 = -cell * 1.5;
+      const y0 = -cell * 1.5;
+      ctx.fillStyle = p.grid ?? '#16203a';
+      fillRoundRect(ctx, x0 - 6, y0 - 6, cell * 3 + 12, cell * 2 + 12, 6, p.grid ?? '#16203a');
+      const tColour = p.T ?? '#a855f7';
+      const cells: [number, number][] = [
+        [0, 0],
+        [1, 0],
+        [2, 0],
+        [1, 1],
+      ];
+      for (const [cx, cy] of cells) {
+        fillRoundRect(ctx, x0 + cx * cell + 1, y0 + cy * cell + 1, cell - 2, cell - 2, 4, tColour);
+      }
+      ctx.fillStyle = p.frame ?? '#334155';
+      ctx.fillRect(x0 + cell * 3 + 6, y0, 3, cell * 2);
+      fillRoundRect(ctx, x0 + cell * 3 + 12, y0 + cell * 0.2, cell * 0.8, cell * 0.8, 3, p.O ?? '#facc15');
+      fillRoundRect(ctx, x0 + cell * 3 + 12, y0 + cell * 1.2, cell * 0.8, cell * 0.8, 3, p.I ?? '#22d3ee');
+      break;
+    }
+    case 'galaxy': {
+      const style = item.params.style ?? 0;
+      const glow = ctx.createRadialGradient(0, 30, 2, 0, 30, 24);
+      glow.addColorStop(0, p.engine ?? '#ffb703');
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(-30, 10, 60, 50);
+      ctx.fillStyle = p.body ?? '#4dd9ff';
+      ctx.beginPath();
+      const shapes: Record<number, number[]> = {
+        0: [0, -30, 10, -8, 26, 14, 10, 18, 0, 24, -10, 18, -26, 14, -10, -8],
+        1: [0, -34, 8, -6, 28, 18, 8, 14, 0, 24, -8, 14, -28, 18, -8, -6],
+        2: [0, -28, 16, -14, 32, 8, 30, 22, 10, 18, 0, 26, -10, 18, -30, 22, -32, 8, -16, -14],
+        3: [0, -32, 10, -2, 30, -12, 22, 20, 0, 12, -22, 20, -30, -12, -10, -2],
+      };
+      const pts = shapes[style] ?? shapes[0]!;
+      for (let i = 0; i < pts.length; i += 2) {
+        const x = (pts[i] as number) * 1.2;
+        const y = (pts[i + 1] as number) * 1.2;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = p.accent ?? '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#0b1d3a';
+      ctx.beginPath();
+      ctx.ellipse(0, -6, 6, 12, 0, 0, TAU);
+      ctx.fill();
+      break;
+    }
+    case 'bubble': {
+      // Coloured bubbles hanging over a loaded shooter, with a dashed aim line. Drawn a little smaller and
+      // down and right, so the rarity tag in the corner of the card does not cover the top row.
+      ctx.save();
+      ctx.translate(8, 6);
+      ctx.scale(0.8, 0.8);
+      const board = ctx.createLinearGradient(0, -46, 0, 46);
+      board.addColorStop(0, p.top ?? '#1e3a8a');
+      board.addColorStop(1, p.bottom ?? '#0b1530');
+      fillRoundRect(ctx, -50, -46, 100, 92, 10, board);
+      ctx.strokeStyle = p.rail ?? '#67e8f9';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, 14);
+      ctx.lineTo(-16, -14);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const colours = [
+        p.c1 ?? '#38bdf8',
+        p.c2 ?? '#f472b6',
+        p.c3 ?? '#facc15',
+        p.c4 ?? '#4ade80',
+        p.c5 ?? '#a78bfa',
+        p.c6 ?? '#fb923c',
+      ];
+      // [x, y, colour index] for each hanging bubble.
+      const cells: [number, number, number][] = [
+        [-36, -34, 0],
+        [-18, -34, 1],
+        [0, -34, 2],
+        [18, -34, 3],
+        [36, -34, 4],
+        [-27, -17, 5],
+        [-9, -17, 0],
+        [9, -17, 1],
+        [27, -17, 2],
+        [-36, 0, 3],
+        [-18, 0, 4],
+        [0, 0, 5],
+        [18, 0, 0],
+        [36, 0, 1],
+      ];
+      for (const [x, y, i] of cells) {
+        ctx.fillStyle = colours[i] ?? '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x, y, 8.5, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.beginPath();
+        ctx.arc(x - 3, y - 3, 2.2, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = colours[2] ?? '#facc15';
+      ctx.beginPath();
+      ctx.arc(0, 24, 8.5, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.gun ?? '#e0f2fe';
+      ctx.beginPath();
+      ctx.arc(0, 44, 12, Math.PI, 0);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'pong': {
+      // A table from above, with the centre line, both paddles and the ball in play. Offset and a little
+      // smaller, like the bubble card, so the rarity tag stays clear.
+      ctx.save();
+      ctx.translate(8, 8);
+      ctx.scale(0.85, 0.85);
+      const table = ctx.createLinearGradient(0, -36, 0, 36);
+      table.addColorStop(0, p.table1 ?? '#0f3d2e');
+      table.addColorStop(1, p.table2 ?? '#0b2456');
+      fillRoundRect(ctx, -56, -38, 112, 76, 8, table);
+      ctx.fillStyle = p.rail ?? '#e2e8f0';
+      ctx.fillRect(-56, -38, 112, 2.5);
+      ctx.fillRect(-56, 35.5, 112, 2.5);
+      ctx.strokeStyle = p.line ?? 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(0, -36);
+      ctx.lineTo(0, 36);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      fillRoundRect(ctx, -50, -12, 5, 24, 2.5, p.player ?? '#fb923c');
+      fillRoundRect(ctx, 45, -18, 5, 24, 2.5, p.rival ?? '#60a5fa');
+      ctx.fillStyle = p.ball ?? '#fef9c3';
+      ctx.beginPath();
+      ctx.arc(14, -8, 4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'breakout': {
+      // Three rows of bricks, a ball on its way up and the paddle below. Offset like the other board cards.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const bg = ctx.createLinearGradient(0, -44, 0, 44);
+      bg.addColorStop(0, p.bg1 ?? '#1e1b4b');
+      bg.addColorStop(1, p.bg2 ?? '#020617');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, bg);
+      const rows = [p.b3 ?? '#f472b6', p.b2 ?? '#a78bfa', p.b1 ?? '#22d3ee'];
+      rows.forEach((colour, r) => {
+        for (let c = 0; c < 6; c++) {
+          if (r === 2 && c === 3) continue;
+          fillRoundRect(
+            ctx,
+            -46 + c * 15.5,
+            -36 + r * 10,
+            13.5,
+            8,
+            2,
+            r === 1 && c === 0 ? (p.steel ?? '#94a3b8') : colour,
+          );
+        }
+      });
+      ctx.fillStyle = p.ball ?? '#fef9c3';
+      ctx.beginPath();
+      ctx.arc(8, 8, 4.5, 0, TAU);
+      ctx.fill();
+      fillRoundRect(ctx, -16, 30, 32, 6, 3, p.paddle ?? '#e2e8f0');
+      ctx.restore();
+      break;
+    }
+    case 'merge': {
+      // A four-by-four board with a few tiles, coloured from the skin's ramp.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -44, -44, 88, 88, 8, p.board ?? '#1e1b4b');
+      const ramp = [p.low ?? '#fde68a', p.mid ?? '#f97316', p.high ?? '#db2777'];
+      const tiles: Record<string, number> = {
+        '0,0': 0,
+        '1,0': 1,
+        '3,0': 0,
+        '1,1': 2,
+        '2,2': 1,
+        '3,3': 2,
+        '0,3': 1,
+      };
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const i = tiles[`${c},${r}`];
+          fillRoundRect(
+            ctx,
+            -40 + c * 20.5,
+            -40 + r * 20.5,
+            18,
+            18,
+            3,
+            i === undefined ? (p.cell ?? '#312e81') : (ramp[i] ?? '#fff'),
+          );
+        }
+      }
+      ctx.restore();
+      break;
+    }
+    case 'stack': {
+      // A tower of slabs narrowing as it climbs, with the next block sliding in.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const sky = ctx.createLinearGradient(0, -44, 0, 44);
+      sky.addColorStop(0, p.sky1 ?? '#1e1b4b');
+      sky.addColorStop(1, p.sky2 ?? '#7c3aed');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, sky);
+      const hue = item.params.hue ?? 260;
+      const step = item.params.hueStep ?? 9;
+      const widths = [70, 66, 66, 58, 52, 52, 46];
+      widths.forEach((w, i) => {
+        ctx.fillStyle = `hsl(${(hue + i * step) % 360},70%,58%)`;
+        ctx.fillRect(-w / 2 + (i % 2) * 2, 34 - (i + 1) * 9, w, 8);
+      });
+      ctx.fillStyle = `hsl(${(hue + 7 * step) % 360},70%,58%)`;
+      ctx.fillRect(-10, -38, 46, 8);
+      ctx.fillStyle = p.ground ?? '#0f172a';
+      ctx.fillRect(-52, 34, 104, 10);
+      ctx.restore();
+      break;
+    }
+    case 'memory': {
+      // Three rows of cards: some face down, a matched pair face up.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg1 ?? '#0f766e');
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 4; c++) {
+          const x = -44 + c * 23;
+          const y = -38 + r * 26;
+          const up = (r === 0 && c === 1) || (r === 2 && c === 2);
+          fillRoundRect(ctx, x, y, 19, 23, 3, up ? (p.matched ?? '#ecfeff') : (p.back ?? '#f97316'));
+          if (up) {
+            ctx.fillStyle = '#ec4899';
+            ctx.beginPath();
+            ctx.arc(x + 9.5, y + 11.5, 5, 0, TAU);
+            ctx.fill();
+          }
+        }
+      }
+      ctx.restore();
+      break;
+    }
+    case 'mole': {
+      // A mole popping out of its hole on the lawn.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const lawn = ctx.createLinearGradient(0, -44, 0, 44);
+      lawn.addColorStop(0, p.grass1 ?? '#4ade80');
+      lawn.addColorStop(1, p.grass2 ?? '#15803d');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, lawn);
+      ctx.fillStyle = p.dirt ?? '#92400e';
+      ctx.beginPath();
+      ctx.ellipse(0, 22, 34, 12, 0, 0, TAU);
+      ctx.fill();
+      fillRoundRect(ctx, -18, -20, 36, 44, 18, p.fur ?? '#8b5a2b');
+      ctx.fillStyle = '#111827';
+      ctx.beginPath();
+      ctx.arc(-7, -6, 3, 0, TAU);
+      ctx.arc(7, -6, 3, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#f472b6';
+      ctx.beginPath();
+      ctx.ellipse(0, 2, 4, 3, 0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.dirt ?? '#92400e';
+      ctx.beginPath();
+      ctx.ellipse(0, 26, 30, 8, 0, 0, Math.PI);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'mines': {
+      // A corner of a field: open squares with numbers, grass squares and a flag.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -48, -44, 96, 88, 8, p.bg2 ?? '#0f172a');
+      const open = new Set(['0,2', '1,2', '2,2', '1,3', '2,3', '0,3', '2,1', '3,2', '3,3']);
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const x = -42 + c * 21;
+          const y = -40 + r * 21;
+          const isOpen = open.has(`${c},${r}`);
+          fillRoundRect(ctx, x, y, 19, 19, 3, isOpen ? (p.open1 ?? '#e2e8f0') : (p.tile1 ?? '#4ade80'));
+        }
+      }
+      ctx.fillStyle = '#2563eb';
+      ctx.font = '900 14px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('1', -42 + 2 * 21 + 9.5, -40 + 21 + 10);
+      ctx.fillStyle = '#16a34a';
+      ctx.fillText('2', -42 + 3 * 21 + 9.5, -40 + 2 * 21 + 10);
+      ctx.fillStyle = '#1f2937';
+      ctx.fillRect(-42 + 3 * 21 + 7, -40 + 21 + 3, 2, 14);
+      ctx.fillStyle = p.flag ?? '#ef4444';
+      ctx.beginPath();
+      ctx.moveTo(-42 + 3 * 21 + 9, -40 + 21 + 3);
+      ctx.lineTo(-42 + 3 * 21 + 17, -40 + 21 + 7);
+      ctx.lineTo(-42 + 3 * 21 + 9, -40 + 21 + 11);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'slice': {
+      // A sliced apple flying apart along a blade stroke.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const board = ctx.createLinearGradient(0, -44, 0, 44);
+      board.addColorStop(0, p.bg1 ?? '#7c2d12');
+      board.addColorStop(1, p.bg2 ?? '#1c0a04');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, board);
+      for (const [dx, a0, a1] of [
+        [-8, Math.PI / 2, (Math.PI * 3) / 2],
+        [8, -Math.PI / 2, Math.PI / 2],
+      ] as const) {
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(dx, 4, 22, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath();
+        ctx.arc(dx, 4, 18, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.strokeStyle = p.blade ?? '#e0f2fe';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-6, -38);
+      ctx.lineTo(4, 40);
+      ctx.stroke();
+      ctx.restore();
+      break;
+    }
+    case 'jumper': {
+      // The jumper above a pad, with another pad higher up.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const sky = ctx.createLinearGradient(0, -44, 0, 44);
+      sky.addColorStop(0, p.sky1 ?? '#38bdf8');
+      sky.addColorStop(1, p.sky2 ?? '#e0f2fe');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, sky);
+      fillRoundRect(ctx, -40, 28, 40, 8, 4, p.pad ?? '#22c55e');
+      fillRoundRect(ctx, 6, -26, 40, 8, 4, p.moving ?? '#3b82f6');
+      fillRoundRect(ctx, -32, -4, 22, 26, 10, p.body ?? '#facc15');
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(-17, 4, 4, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#111827';
+      ctx.beginPath();
+      ctx.arc(-16, 4, 2, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'hopper': {
+      // A hen on the grass, a road with a car and a river with a log above it.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const bands: [string, number][] = [
+        [p.water ?? '#3b82f6', -44],
+        [p.road ?? '#334155', -22],
+        [p.grass1 ?? '#4ade80', 0],
+        [p.grass2 ?? '#22c55e', 22],
+      ];
+      for (const [colour, y] of bands) {
+        ctx.fillStyle = colour;
+        ctx.fillRect(-52, y, 104, 22);
+      }
+      fillRoundRect(ctx, -30, -41, 44, 16, 6, p.log ?? '#92400e');
+      fillRoundRect(ctx, 10, -19, 30, 16, 5, '#ef4444');
+      fillRoundRect(ctx, -9, 2, 18, 18, 5, p.body ?? '#ffffff');
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(-3, -1, 6, 4);
+      ctx.fillStyle = p.tree ?? '#15803d';
+      ctx.beginPath();
+      ctx.arc(32, 32, 9, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'sort': {
+      // Three tubes, one sorted.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg1 ?? '#312e81');
+      const cols = [p.c1 ?? '#ef4444', p.c2 ?? '#3b82f6', p.c3 ?? '#22c55e'];
+      const stacks = [
+        [0, 1, 0, 2],
+        [1, 1, 1, 1],
+        [2, 0, 2],
+      ];
+      stacks.forEach((stack, t) => {
+        const x = -32 + t * 32;
+        fillRoundRect(ctx, x - 11, -36, 22, 74, 11, p.glass ?? 'rgba(255,255,255,0.12)');
+        stack.forEach((c, k) => {
+          ctx.fillStyle = cols[c] ?? '#fff';
+          ctx.beginPath();
+          ctx.arc(x, 28 - k * 17, 8, 0, TAU);
+          ctx.fill();
+        });
+      });
+      ctx.restore();
+      break;
+    }
+    case 'four': {
+      // A small frame with discs of both colours.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -50, -38, 100, 80, 6, p.board ?? '#2563eb');
+      const discs: Record<string, number> = {
+        '3,0': 1,
+        '3,1': 2,
+        '2,0': 1,
+        '4,0': 2,
+        '4,1': 1,
+        '2,1': 2,
+        '3,2': 1,
+        '5,0': 2,
+      };
+      for (let c = 0; c < 7; c++) {
+        for (let r = 0; r < 5; r++) {
+          const who = discs[`${c},${r}`];
+          ctx.fillStyle =
+            who === 1 ? (p.player ?? '#ef4444') : who === 2 ? (p.cpu ?? '#facc15') : (p.bg2 ?? '#0b1530');
+          ctx.beginPath();
+          ctx.arc(-42 + c * 14, 32 - r * 15, 5.5, 0, TAU);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+      break;
+    }
+    case 'knife': {
+      // A log with knives stuck in it and one on its way.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg2 ?? '#0f172a');
+      ctx.fillStyle = p.wood ?? '#b45309';
+      ctx.beginPath();
+      ctx.arc(0, -10, 24, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, -10, 14, 0, TAU);
+      ctx.stroke();
+      for (const a of [-2.4, -0.6, 0.9, 2.6]) {
+        ctx.save();
+        ctx.translate(Math.cos(a) * 30, -10 + Math.sin(a) * 30);
+        ctx.rotate(a);
+        ctx.fillStyle = p.handle ?? '#7c2d12';
+        ctx.fillRect(0, -2.5, 14, 5);
+        ctx.restore();
+      }
+      ctx.fillStyle = p.blade ?? '#e2e8f0';
+      ctx.fillRect(-2.5, 20, 5, 14);
+      ctx.fillStyle = p.handle ?? '#7c2d12';
+      ctx.fillRect(-2.5, 34, 5, 10);
+      ctx.restore();
+      break;
+    }
+    case 'sudoku': {
+      // A corner of a grid with a few numbers.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -44, -44, 88, 88, 6, p.paper ?? '#f8fafc');
+      ctx.fillStyle = p.select ?? '#93c5fd';
+      ctx.fillRect(-44 + 29.3, -44 + 29.3, 29.3, 29.3);
+      ctx.strokeStyle = p.lines ?? '#0f172a';
+      ctx.lineWidth = 2;
+      for (let k = 0; k <= 3; k++) {
+        ctx.beginPath();
+        ctx.moveTo(-44 + k * 29.3, -44);
+        ctx.lineTo(-44 + k * 29.3, 44);
+        ctx.moveTo(-44, -44 + k * 29.3);
+        ctx.lineTo(44, -44 + k * 29.3);
+        ctx.stroke();
+      }
+      ctx.font = '800 18px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const nums: [number, number, string, boolean][] = [
+        [0, 0, '5', true],
+        [2, 0, '3', true],
+        [1, 1, '7', false],
+        [0, 2, '9', true],
+        [2, 2, '1', false],
+      ];
+      for (const [c, r, n, given] of nums) {
+        ctx.fillStyle = given ? (p.given ?? '#0f172a') : (p.ink ?? '#2563eb');
+        ctx.fillText(n, -44 + (c + 0.5) * 29.3, -44 + (r + 0.5) * 29.3 + 1);
+      }
+      ctx.restore();
+      break;
+    }
+    case 'simon': {
+      // The four pads round the centre, one lit.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      ctx.fillStyle = p.case ?? '#111827';
+      ctx.beginPath();
+      ctx.arc(0, 0, 44, 0, TAU);
+      ctx.fill();
+      const pads = [p.p1 ?? '#22c55e', p.p2 ?? '#ef4444', p.p3 ?? '#3b82f6', p.p4 ?? '#facc15'];
+      pads.forEach((colour, i) => {
+        const mid = -Math.PI / 2 + i * (Math.PI / 2);
+        ctx.fillStyle = colour;
+        ctx.globalAlpha = i === 1 ? 1 : 0.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, 38, mid - Math.PI / 4 + 0.07, mid + Math.PI / 4 - 0.07);
+        ctx.arc(0, 0, 15, mid + Math.PI / 4 - 0.07, mid - Math.PI / 4 + 0.07, true);
+        ctx.closePath();
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      break;
+    }
+    case 'maze': {
+      // A corner of the maze: walls, dots, the muncher and a ghost.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.bg ?? '#020617');
+      ctx.strokeStyle = p.wall ?? '#2563eb';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(-46, -38, 92, 76);
+      ctx.strokeRect(-24, -16, 48, 14);
+      ctx.fillStyle = p.dot ?? '#fde68a';
+      for (let k = 0; k < 6; k++) {
+        ctx.beginPath();
+        ctx.arc(-30 + k * 12, 14, 2.5, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = p.hero ?? '#facc15';
+      ctx.beginPath();
+      ctx.moveTo(-36, 14);
+      ctx.arc(-36, 14, 10, 0.6, TAU - 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(30, 10, 10, Math.PI, 0);
+      ctx.lineTo(40, 24);
+      ctx.lineTo(20, 24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'golf': {
+      // A green with a flag in the cup and a ball short of it.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -36, -44, 72, 88, 6, p.felt ?? '#22c55e');
+      ctx.strokeStyle = p.wall ?? '#78350f';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(-36, -44, 72, 88);
+      ctx.fillStyle = p.sand ?? '#fde68a';
+      ctx.fillRect(-36, 0, 30, 18);
+      ctx.fillStyle = '#052e16';
+      ctx.beginPath();
+      ctx.arc(8, -24, 5, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#e5e7eb';
+      ctx.fillRect(7, -44, 2, 20);
+      ctx.fillStyle = p.flag ?? '#ef4444';
+      ctx.beginPath();
+      ctx.moveTo(9, -44);
+      ctx.lineTo(22, -40);
+      ctx.lineTo(9, -36);
+      ctx.fill();
+      ctx.fillStyle = p.ball ?? '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 26, 4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'hoops': {
+      // A ball on its way into the hoop.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const wall = ctx.createLinearGradient(0, -44, 0, 44);
+      wall.addColorStop(0, p.wall1 ?? '#1e3a8a');
+      wall.addColorStop(1, p.wall2 ?? '#0f172a');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, wall);
+      ctx.fillStyle = p.board ?? 'rgba(255,255,255,0.9)';
+      ctx.fillRect(-26, -40, 52, 32);
+      ctx.strokeStyle = p.net ?? 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.5;
+      for (let k = 0; k <= 4; k++) {
+        ctx.beginPath();
+        ctx.moveTo(-14 + k * 7, -8);
+        ctx.lineTo(-9 + k * 4.5, 6);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = p.rim ?? '#ea580c';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-15, -8);
+      ctx.lineTo(15, -8);
+      ctx.stroke();
+      ctx.fillStyle = p.ball ?? '#f97316';
+      ctx.beginPath();
+      ctx.arc(14, 24, 10, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'dino': {
+      // The dinosaur leaping a cactus.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.sky ?? '#f8fafc');
+      ctx.fillStyle = p.ink ?? '#475569';
+      ctx.fillRect(-52, 26, 104, 2);
+      ctx.fillStyle = p.dino ?? '#475569';
+      ctx.fillRect(-30, -16, 18, 16);
+      ctx.fillRect(-20, -26, 16, 12);
+      ctx.fillRect(-36, -12, 8, 5);
+      ctx.fillRect(-26, 0, 4, 8);
+      ctx.fillRect(-18, 0, 4, 8);
+      ctx.fillStyle = p.cactus ?? '#15803d';
+      ctx.fillRect(16, -4, 9, 30);
+      ctx.fillRect(10, 4, 6, 4);
+      ctx.fillRect(10, -2, 3, 8);
+      ctx.fillRect(25, 8, 6, 4);
+      ctx.restore();
+      break;
+    }
+    case 'tiles': {
+      // Four lanes with a black tile in each row.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -44, -44, 88, 88, 6, p.white ?? '#f8fafc');
+      [2, 0, 3, 1].forEach((lane, row) => {
+        fillRoundRect(
+          ctx,
+          -44 + lane * 22 + 1,
+          -44 + row * 22 + 1,
+          20,
+          20,
+          3,
+          row === 3 ? (p.done ?? '#cbd5e1') : (p.tile ?? '#111827'),
+        );
+      });
+      ctx.restore();
+      break;
+    }
+    case 'tictactoe': {
+      // A game won with a diagonal.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg1 ?? '#0f766e');
+      ctx.strokeStyle = p.grid ?? 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 3;
+      for (const k of [-13, 13]) {
+        ctx.beginPath();
+        ctx.moveTo(k, -38);
+        ctx.lineTo(k, 38);
+        ctx.moveTo(-38, k);
+        ctx.lineTo(38, k);
+        ctx.stroke();
+      }
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = p.x ?? '#fb7185';
+      for (const [cx, cy] of [
+        [-26, -26],
+        [0, 0],
+        [26, 26],
+      ] as const) {
+        ctx.beginPath();
+        ctx.moveTo(cx - 7, cy - 7);
+        ctx.lineTo(cx + 7, cy + 7);
+        ctx.moveTo(cx + 7, cy - 7);
+        ctx.lineTo(cx - 7, cy + 7);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = p.o ?? '#fde047';
+      for (const [cx, cy] of [
+        [26, -26],
+        [-26, 26],
+      ] as const) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 8, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.restore();
+      break;
+    }
+    case 'lights': {
+      // A grid of lights, some on.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg ?? '#0b1020');
+      const lit = new Set([1, 5, 6, 7, 11, 13, 17, 18, 19, 23]);
+      for (let i = 0; i < 25; i++) {
+        fillRoundRect(
+          ctx,
+          -42 + (i % 5) * 17,
+          -42 + Math.floor(i / 5) * 17,
+          15,
+          15,
+          3,
+          lit.has(i) ? (p.lit ?? '#facc15') : (p.off ?? '#1e293b'),
+        );
+      }
+      ctx.restore();
+      break;
+    }
+    case 'pipes': {
+      // A few pipe tiles, the ones joined to the pump full of water.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg ?? '#1c1917');
+      ctx.lineCap = 'round';
+      const segs: [number, number, number, number, boolean][] = [
+        [0, 0, 30, 0, true],
+        [0, 0, 0, -30, true],
+        [0, -30, -30, -30, true],
+        [30, 0, 30, 30, false],
+        [-30, 0, -30, 30, false],
+        [0, 0, 0, 30, false],
+      ];
+      for (const [x0, y0, x1, y1, wet] of segs) {
+        ctx.strokeStyle = p.pipe ?? '#78716c';
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+        ctx.strokeStyle = wet ? (p.water ?? '#38bdf8') : (p.dry ?? '#44403c');
+        ctx.lineWidth = 5;
+        ctx.stroke();
+      }
+      ctx.fillStyle = p.pump ?? '#ef4444';
+      ctx.beginPath();
+      ctx.arc(0, 0, 8, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'gems': {
+      // A row of three matching gems among others.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg1 ?? '#312e81');
+      const cols = [
+        p.g1 ?? '#ef4444',
+        p.g2 ?? '#3b82f6',
+        p.g3 ?? '#22c55e',
+        p.g4 ?? '#facc15',
+        p.g5 ?? '#a855f7',
+        p.g6 ?? '#f97316',
+      ];
+      const grid = [0, 1, 2, 3, 4, 3, 3, 3, 5, 2, 1, 0, 4, 5, 1, 2];
+      grid.forEach((k, i) => {
+        ctx.fillStyle = cols[k] ?? '#fff';
+        ctx.beginPath();
+        ctx.arc(-33 + (i % 4) * 22, -33 + Math.floor(i / 4) * 22, 8, 0, TAU);
+        ctx.fill();
+      });
+      ctx.restore();
+      break;
+    }
+    case 'hockey': {
+      // The table with both mallets and the puck.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -36, -48, 72, 96, 10, p.rail ?? '#1e40af');
+      fillRoundRect(ctx, -32, -44, 64, 88, 8, p.ice ?? '#e0f2fe');
+      ctx.strokeStyle = p.lines ?? '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-32, 0);
+      ctx.lineTo(32, 0);
+      ctx.stroke();
+      for (const [y, c] of [
+        [-30, p.cpu ?? '#2563eb'],
+        [30, p.player ?? '#ef4444'],
+      ] as const) {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(0, y, 9, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = p.puck ?? '#111827';
+      ctx.beginPath();
+      ctx.arc(10, 8, 6, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'missile': {
+      // Missile trails over the cities, one caught in a burst.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.sky1 ?? '#020617');
+      ctx.fillStyle = p.ground ?? '#854d0e';
+      ctx.fillRect(-52, 30, 104, 14);
+      ctx.fillStyle = p.city ?? '#38bdf8';
+      for (const x of [-40, -24, 16, 32]) ctx.fillRect(x, 20, 10, 10);
+      ctx.strokeStyle = p.trail ?? 'rgba(248,113,113,0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-30, -44);
+      ctx.lineTo(-10, -6);
+      ctx.moveTo(30, -44);
+      ctx.lineTo(18, -18);
+      ctx.stroke();
+      ctx.fillStyle = '#fde047';
+      ctx.beginPath();
+      ctx.arc(18, -18, 10, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'blaster': {
+      // The ship among rocks.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.space ?? '#030712');
+      ctx.strokeStyle = p.rock ?? '#a8a29e';
+      ctx.fillStyle = p.rockFill ?? '#292524';
+      ctx.lineWidth = 2;
+      for (const [x, y, r] of [
+        [-30, -22, 14],
+        [32, -16, 10],
+        [26, 26, 16],
+      ] as const) {
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++)
+          ctx.lineTo(
+            x + Math.cos((k / 8) * TAU) * r * (k % 2 ? 0.8 : 1),
+            y + Math.sin((k / 8) * TAU) * r * (k % 2 ? 0.8 : 1),
+          );
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.fillStyle = p.ship ?? '#e2e8f0';
+      ctx.beginPath();
+      ctx.moveTo(10, -6);
+      ctx.lineTo(-8, 4);
+      ctx.lineTo(-4, -6);
+      ctx.lineTo(-8, -16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'archery': {
+      // The target with an arrow in the gold.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.sky1 ?? '#7dd3fc');
+      ctx.fillStyle = p.grass ?? '#4ade80';
+      ctx.fillRect(-52, 26, 104, 18);
+      ['#f8fafc', '#111827', '#3b82f6', '#ef4444', '#facc15'].forEach((c, k) => {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(14, -4, 26 - k * 5, 0, TAU);
+        ctx.fill();
+      });
+      ctx.strokeStyle = p.bow ?? '#92400e';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-40, 10);
+      ctx.lineTo(14, -4);
+      ctx.stroke();
+      ctx.fillStyle = p.fletch ?? '#ef4444';
+      ctx.fillRect(-44, 8, 8, 4);
+      ctx.restore();
+      break;
+    }
+    case 'flappy': {
+      // Sky, a pipe pair and the bird mid-flap.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      const sky = ctx.createLinearGradient(0, -44, 0, 44);
+      sky.addColorStop(0, p.sky1 ?? '#38bdf8');
+      sky.addColorStop(1, p.sky2 ?? '#bae6fd');
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, sky);
+      ctx.fillStyle = p.pipe ?? '#22c55e';
+      ctx.fillRect(14, -44, 18, 30);
+      ctx.fillRect(10, -18, 26, 7);
+      ctx.fillRect(14, 16, 18, 20);
+      ctx.fillRect(10, 12, 26, 7);
+      ctx.fillStyle = p.ground ?? '#d97706';
+      ctx.fillRect(-52, 34, 104, 10);
+      ctx.fillStyle = p.grass ?? '#65a30d';
+      ctx.fillRect(-52, 32, 104, 3);
+      ctx.fillStyle = p.bird ?? '#facc15';
+      ctx.beginPath();
+      ctx.ellipse(-18, 0, 11, 9, -0.2, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(-13, -3, 3.4, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = p.beak ?? '#f97316';
+      ctx.beginPath();
+      ctx.moveTo(-8, 0);
+      ctx.lineTo(0, 2);
+      ctx.lineTo(-8, 4);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+  }
+  ctx.restore();
+}
