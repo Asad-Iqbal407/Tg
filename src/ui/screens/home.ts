@@ -1,3 +1,11 @@
+import {
+  CATEGORIES,
+  CATEGORY_LABEL,
+  CATEGORY_OF,
+  type Category,
+  matchesQuery,
+  recentGames,
+} from '../../games/categories';
 import { GAMES } from '../../games/registry';
 import type { GameDefinition } from '../../games/types';
 import { ACHIEVEMENTS, unlockedCount } from '../../meta/achievements';
@@ -32,16 +40,23 @@ export function countWord(n: number): string {
   return COUNT_WORDS[n] ?? String(n);
 }
 
+/** What the games list is showing: everything, the starred games, or one category. */
+type Filter = 'all' | 'favorites' | Category;
+
+/** The search and filter, kept across redraws of the screen (claiming the daily reward redraws it). */
+interface HomeView {
+  filter: Filter;
+  query: string;
+}
+
+const JUMP_BACK_IN = 4;
+
 export function homeScreen(app: App): Screen {
   const el = h('section', { class: 'screen home' });
   const account = accountCard(app);
+  const view: HomeView = { filter: 'all', query: '' };
   const render = () => {
-    el.replaceChildren(
-      hero(app, render),
-      h('h2', { class: 'section-title', text: 'Games' }),
-      gameGrid(app),
-      sidePanels(app, render, account.el),
-    );
+    el.replaceChildren(hero(app, render), gamesSection(app, view), sidePanels(app, render, account.el));
   };
   render();
   account.refresh();
@@ -119,13 +134,156 @@ function hero(app: App, rerender: () => void): HTMLElement {
   );
 }
 
-function gameGrid(app: App): HTMLElement {
-  const grid = h('div', { class: 'game-grid' });
-  for (const def of GAMES) grid.appendChild(gameCard(app, def));
-  return grid;
+function gamesSection(app: App, view: HomeView): HTMLElement {
+  const root = h('section', { class: 'games' });
+  const list = h('div', { class: 'games__list' });
+  const chips = h('div', { class: 'chips', attrs: { role: 'group', 'aria-label': 'Filter games' } });
+
+  const search = h('input', {
+    class: 'search__input',
+    attrs: {
+      type: 'search',
+      placeholder: 'Search games',
+      'aria-label': 'Search games',
+      autocomplete: 'off',
+      spellcheck: false,
+      enterkeyhint: 'search',
+    },
+    on: {
+      input: () => {
+        view.query = search.value;
+        refresh();
+      },
+    },
+  });
+  search.value = view.query;
+
+  const chipDefs = (): { id: Filter; label: string; count: number }[] => {
+    const favs = app.arcade.profile.favorites;
+    return [
+      { id: 'all', label: 'All', count: GAMES.length },
+      { id: 'favorites', label: '★ Favourites', count: favs.length },
+      ...CATEGORIES.map((c) => ({
+        id: c as Filter,
+        label: CATEGORY_LABEL[c],
+        count: GAMES.filter((g) => CATEGORY_OF[g.id] === c).length,
+      })),
+    ];
+  };
+  const renderChips = () => {
+    chips.replaceChildren();
+    for (const c of chipDefs()) {
+      chips.appendChild(
+        h(
+          'button',
+          {
+            class: `chip ${view.filter === c.id ? 'is-on' : ''}`,
+            attrs: { type: 'button', 'aria-pressed': view.filter === c.id ? 'true' : 'false' },
+            on: {
+              click: () => {
+                app.sfx('click');
+                view.filter = c.id;
+                refresh();
+              },
+            },
+          },
+          c.label,
+          h('span', { class: 'chip__count', text: String(c.count) }),
+        ),
+      );
+    }
+  };
+
+  /** The games that pass the filter and the search, in the arcade's order (starred games first when starred is chosen). */
+  const visible = (): GameDefinition[] => {
+    const favs = app.arcade.profile.favorites;
+    let games = GAMES.filter((g) => matchesQuery(g, view.query));
+    if (view.filter === 'favorites') games = games.filter((g) => favs.includes(g.id));
+    else if (view.filter !== 'all') games = games.filter((g) => CATEGORY_OF[g.id] === view.filter);
+    return games;
+  };
+
+  const refresh = () => {
+    renderChips();
+    const games = visible();
+    const browsing = view.filter === 'all' && view.query.trim() === '';
+    list.replaceChildren();
+    if (browsing) {
+      const recent = recentGames(
+        app.arcade.profile.games,
+        GAMES.map((g) => g.id),
+        JUMP_BACK_IN,
+      );
+      if (recent.length > 0) {
+        const row = h('div', { class: 'game-grid game-grid--recent' });
+        for (const id of recent) {
+          const def = GAMES.find((g) => g.id === id);
+          if (def) row.appendChild(gameCard(app, def, refresh));
+        }
+        list.append(h('h2', { class: 'section-title', text: 'Jump back in' }), row);
+      }
+      list.append(h('h2', { class: 'section-title', text: 'All games' }));
+    }
+    if (games.length === 0) {
+      const none =
+        view.filter === 'favorites' && view.query.trim() === ''
+          ? 'No favourites yet. Tap the star on a game to add it here.'
+          : 'No games match that.';
+      list.append(
+        h(
+          'div',
+          { class: 'games__empty' },
+          h('p', { text: none }),
+          h(
+            'button',
+            {
+              class: 'btn btn--ghost btn--sm',
+              attrs: { type: 'button' },
+              on: {
+                click: () => {
+                  view.filter = 'all';
+                  view.query = '';
+                  search.value = '';
+                  refresh();
+                },
+              },
+            },
+            'Show all games',
+          ),
+        ),
+      );
+      return;
+    }
+    const grid = h('div', { class: 'game-grid' });
+    for (const def of games) grid.appendChild(gameCard(app, def, refresh));
+    list.append(
+      grid,
+      h('p', {
+        class: 'games__count muted small',
+        attrs: { 'aria-live': 'polite' },
+        text:
+          games.length === GAMES.length
+            ? `${GAMES.length} games`
+            : `${games.length} of ${GAMES.length} games`,
+      }),
+    );
+  };
+  refresh();
+
+  root.append(
+    h(
+      'div',
+      { class: 'games__bar' },
+      h('h2', { class: 'section-title games__title', text: 'Games' }),
+      h('label', { class: 'search' }, search),
+    ),
+    chips,
+    list,
+  );
+  return root;
 }
 
-function gameCard(app: App, def: GameDefinition): HTMLElement {
+function gameCard(app: App, def: GameDefinition, onFavorite: () => void): HTMLElement {
   const p = app.arcade.profile;
   const rec = p.games[def.id];
   const art = h('canvas', {
@@ -138,6 +296,26 @@ function gameCard(app: App, def: GameDefinition): HTMLElement {
     app.sfx('click');
     app.openLobby(def.id);
   };
+  const starred = app.arcade.isFavorite(def.id);
+  const star = h(
+    'button',
+    {
+      class: `game-card__fav ${starred ? 'is-on' : ''}`,
+      attrs: {
+        type: 'button',
+        'aria-pressed': starred ? 'true' : 'false',
+        'aria-label': starred ? `Remove ${def.title} from favourites` : `Add ${def.title} to favourites`,
+      },
+      on: {
+        click: () => {
+          app.sfx('click');
+          app.arcade.toggleFavorite(def.id);
+          onFavorite();
+        },
+      },
+    },
+    icon('star'),
+  );
   const card = h(
     'article',
     { class: 'game-card' },
@@ -152,6 +330,7 @@ function gameCard(app: App, def: GameDefinition): HTMLElement {
       h('span', { class: 'game-card__play' }, icon('play')),
       h('span', { class: 'pill pill--dark', text: def.genre }),
     ),
+    star,
     h(
       'div',
       { class: 'game-card__body' },

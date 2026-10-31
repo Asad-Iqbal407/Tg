@@ -1,6 +1,7 @@
 import { bool, int, num, numberRecord, obj, safeKey, str } from '../core/storage';
 import { GAME_IDS, type GameId } from '../games/types';
 import { BOOSTS, getSkin, getUpgrade, SKINS, UPGRADES } from './catalog';
+import { type ChallengeRecord, emptyChallenge } from './challenge';
 
 export const PROFILE_VERSION = 1;
 export const LEADERBOARD_SIZE = 10;
@@ -67,6 +68,10 @@ export interface Profile {
   daily: { lastClaim: string | null; streak: number; best: number };
   missions: { day: string; list: MissionState[] };
   leaderboard: Record<GameId, ScoreEntry[]>;
+  /** Games the player has starred, in the order they were starred. */
+  favorites: GameId[];
+  /** Each game's Daily Challenge figures for the day they were last played. */
+  challenge: Record<GameId, ChallengeRecord>;
   settings: Settings;
 }
 
@@ -118,6 +123,8 @@ export function defaultProfile(now = Date.now()): Profile {
     daily: { lastClaim: null, streak: 0, best: 0 },
     missions: { day: '', list: [] },
     leaderboard: perGame(() => []),
+    favorites: [],
+    challenge: perGame(emptyChallenge),
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -163,6 +170,17 @@ function sanitizeMission(raw: unknown): MissionState | null {
   };
 }
 
+/** The starred games from saved data: real game ids only, each once, in order. */
+function favoritesFrom(raw: unknown): GameId[] {
+  const out: GameId[] = [];
+  if (!Array.isArray(raw)) return out;
+  for (const id of raw) {
+    if (typeof id === 'string' && (GAME_IDS as readonly string[]).includes(id) && !out.includes(id as GameId))
+      out.push(id as GameId);
+  }
+  return out;
+}
+
 /** Coerce anything (corrupted storage, hand-edited imports) into a valid Profile. */
 export function sanitizeProfile(raw: unknown): Profile {
   const d = defaultProfile();
@@ -173,6 +191,7 @@ export function sanitizeProfile(raw: unknown): Profile {
   const settingsRaw = obj(r.settings);
   const dailyRaw = obj(r.daily);
   const missionsRaw = obj(r.missions);
+  const challengeRaw = obj(r.challenge);
 
   const owned = new Set<string>(d.owned);
   if (Array.isArray(r.owned))
@@ -249,6 +268,14 @@ export function sanitizeProfile(raw: unknown): Profile {
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, LEADERBOARD_SIZE);
+    }),
+    favorites: favoritesFrom(r.favorites),
+    challenge: perGame((id) => {
+      const c = obj(challengeRaw[id]);
+      const day = typeof c.day === 'string' && DAY_RE.test(c.day) ? c.day : '';
+      return day
+        ? { day, best: int(c.best, 0), plays: int(c.plays, 0, 0, 1e6), claimed: bool(c.claimed, false) }
+        : emptyChallenge();
     }),
     settings: {
       masterVolume: num(settingsRaw.masterVolume, DEFAULT_SETTINGS.masterVolume, 0, 1),

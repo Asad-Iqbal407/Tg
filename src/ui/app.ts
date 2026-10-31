@@ -64,7 +64,7 @@ export class App {
   private readonly nav: HTMLElement;
   private screen: Screen | null = null;
   private play: PlayScreen | null = null;
-  private pendingBoosts: { gameId: GameId; boosts: BoostId[] } | null = null;
+  private pendingBoosts: { gameId: GameId; boosts: BoostId[]; challenge: boolean } | null = null;
   private pendingLobby: GameId | null = null;
   private readonly hud: {
     level: HTMLElement;
@@ -216,8 +216,8 @@ export class App {
   }
 
   /** Called by the lobby: start a run with the chosen boosts. */
-  launch(gameId: GameId, boosts: BoostId[]): void {
-    this.pendingBoosts = { gameId, boosts };
+  launch(gameId: GameId, boosts: BoostId[], challenge = false): void {
+    this.pendingBoosts = { gameId, boosts, challenge };
     this.navigate(`play/${gameId}`);
   }
 
@@ -232,10 +232,12 @@ export class App {
     this.navigate('');
   }
 
-  takePendingBoosts(gameId: GameId): BoostId[] {
+  takePendingBoosts(gameId: GameId): { boosts: BoostId[]; challenge: boolean } {
     const p = this.pendingBoosts;
     this.pendingBoosts = null;
-    return p && p.gameId === gameId ? p.boosts : [];
+    return p && p.gameId === gameId
+      ? { boosts: p.boosts, challenge: p.challenge }
+      : { boosts: [], challenge: false };
   }
 
   private cloudNotice(notice: CloudNotice): void {
@@ -293,7 +295,8 @@ export class App {
       this.stopMenuMusic();
       document.body.classList.add('is-playing');
       document.title = `${def.title} · Neon Arcade`;
-      this.play = new PlayScreen(this, def, this.takePendingBoosts(def.id));
+      const launch = this.takePendingBoosts(def.id);
+      this.play = new PlayScreen(this, def, launch.boosts, launch.challenge);
       this.main.appendChild(this.play.el);
       this.play.start();
       return;

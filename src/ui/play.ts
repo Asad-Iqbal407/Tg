@@ -1,5 +1,6 @@
 import { chooseLogicalSize, fittedArea, GameLoop, type LogicalSize, Viewport } from '../core/engine';
 import { type Action, Input } from '../core/input';
+import { challengeSeed } from '../meta/challenge';
 import { Rng } from '../core/rng';
 import type { BoostId, GameDefinition, GameInstance, GameResult, Insets } from '../games/types';
 import type { RunSummary, RunTicket } from '../meta/arcade';
@@ -141,6 +142,8 @@ export class PlayScreen {
     private readonly app: App,
     private readonly def: GameDefinition,
     private readonly initialBoosts: BoostId[],
+    /** Whether this is today's Daily Challenge (the shared seed); Play again keeps it so. */
+    private challengeMode = false,
   ) {
     this.runSize = { width: def.width, height: def.height };
     this.fpsEl = h('span', { class: 'play__fps', attrs: { hidden: !app.settings.showFps } });
@@ -220,13 +223,14 @@ export class PlayScreen {
     window.addEventListener('gamepadconnected', this.onGamepadConnected);
     this.viewport.onRefit = this.onRefit;
     this.viewport.fit();
-    this.newRun(this.initialBoosts);
+    this.newRun(this.initialBoosts, this.challengeMode);
     this.viewport.canvas.focus({ preventScroll: true });
   }
 
-  private newRun(boosts: BoostId[]): void {
+  private newRun(boosts: BoostId[], challenge = this.challengeMode): void {
     this.stopMenuPad();
-    this.ticket = this.app.arcade.startRun(this.def.id, boosts);
+    this.challengeMode = challenge;
+    this.ticket = this.app.arcade.startRun(this.def.id, boosts, challenge);
     this.app.audio.stopEngines();
     this.stepped = false;
     this.build();
@@ -273,7 +277,11 @@ export class PlayScreen {
       height: size.height,
       input: this.input,
       audio: this.app.audio,
-      rng: new Rng((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0),
+      rng: new Rng(
+        ticket.challenge
+          ? challengeSeed(ticket.challenge, this.def.id)
+          : (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0,
+      ),
       loadout: ticket.loadout,
       insets: this.insets,
       reducedMotion: this.app.reducedMotion,

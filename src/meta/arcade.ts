@@ -3,6 +3,7 @@ import type { BoostId, GameDefinition, GameId, GameResult, Loadout } from '../ga
 import { type AchievementDef, newlyCompleted } from './achievements';
 import { defaultSkin, getBoost, getSkin, getUpgrade, isFree, toSkinData } from './catalog';
 import { DAILY_REWARDS, dailyStatus, dayKey, type DailyReward } from './daily';
+import { CHALLENGE_COINS, CHALLENGE_XP, type ChallengeOutcome, challengeOn } from './challenge';
 import { applyRunToMissions, generateMissions } from './missions';
 import { type LevelInfo, type LevelReward, levelInfo, levelUpReward } from './progression';
 import {
@@ -21,6 +22,8 @@ export interface RunTicket {
   boosts: BoostId[];
   loadout: Loadout;
   startedAt: number;
+  /** The day (YYYY-MM-DD) of the Daily Challenge this run is, or null for an ordinary run. */
+  challenge: string | null;
 }
 
 export interface RunSummary {
@@ -36,6 +39,8 @@ export interface RunSummary {
   achievements: AchievementDef[];
   missionsCompleted: MissionState[];
   boosts: BoostId[];
+  /** Set for a Daily Challenge run. */
+  challenge: ChallengeOutcome | null;
 }
 
 export type ArcadeEvent =
@@ -199,7 +204,7 @@ export class ArcadeService {
   }
 
   /** Validate and consume the selected boosts, returning a ticket for `finishRun`. */
-  startRun(gameId: GameId, requested: readonly BoostId[] = []): RunTicket {
+  startRun(gameId: GameId, requested: readonly BoostId[] = [], challenge = false): RunTicket {
     this.def(gameId);
     const boosts: BoostId[] = [];
     this.store.update((p) => {
@@ -217,6 +222,7 @@ export class ArcadeService {
       boosts,
       loadout: this.loadoutFor(gameId, boosts),
       startedAt: this.now().getTime(),
+      challenge: challenge ? dayKey(this.now()) : null,
     };
     this.activeTicket = ticket;
     return ticket;
@@ -267,6 +273,7 @@ export class ArcadeService {
     let achievements: AchievementDef[] = [];
     let missionsCompleted: MissionState[] = [];
     let rank: number | null = null;
+    let challenge: ChallengeOutcome | null = null;
 
     this.store.update((p) => {
       const rec = p.games[gameId];
@@ -294,8 +301,9 @@ export class ArcadeService {
       }
 
       missionsCompleted = applyRunToMissions(p.missions.list, gameId, runStats);
-      this.addCoins(p, rewards.coins);
-      levelUps = this.addXp(p, rewards.xp);
+      if (ticket.challenge) challenge = this.recordChallenge(p, gameId, ticket.challenge, score);
+      this.addCoins(p, rewards.coins + (challenge?.bonusCoins ?? 0));
+      levelUps = this.addXp(p, rewards.xp + (challenge?.bonusXp ?? 0));
       achievements = this.checkAchievements(p);
     });
     this.store.save();
@@ -317,9 +325,59 @@ export class ArcadeService {
       achievements,
       missionsCompleted,
       boosts: ticket.boosts,
+      challenge,
     };
     this.emit({ type: 'run-finished', summary, startedAt: ticket.startedAt });
     return summary;
+  }
+
+  // ---------------------------------------------------------------- favourites and the daily challenge
+
+  isFavorite(gameId: GameId): boolean {
+    return this.profile.favorites.includes(gameId);
+  }
+
+  /** Stars or unstars a game. Returns whether it is starred now. */
+  toggleFavorite(gameId: GameId): boolean {
+    this.def(gameId);
+    let now = false;
+    this.store.update((p) => {
+      const at = p.favorites.indexOf(gameId);
+      if (at >= 0) p.favorites.splice(at, 1);
+      else p.favorites.push(gameId);
+      now = at < 0;
+    });
+    this.store.save();
+    return now;
+  }
+
+  /** Today's Daily Challenge figures for a game: attempts, best score and whether the bonus is still to be had. */
+  challengeStatus(gameId: GameId): { day: string; plays: number; best: number; bonusAvailable: boolean } {
+    const day = dayKey(this.now());
+    const rec = challengeOn(this.profile.challenge[gameId], day);
+    return { day, plays: rec.plays, best: rec.best, bonusAvailable: !rec.claimed };
+  }
+
+  /**
+   * Books a finished Daily Challenge run on the day it started. The first run of the day that scores something pays
+   * the bonus; a day's figures start again from nothing when the day changes.
+   */
+  private recordChallenge(p: Profile, gameId: GameId, day: string, score: number): ChallengeOutcome {
+    const rec = challengeOn(p.challenge[gameId], day);
+    p.challenge[gameId] = rec;
+    const beatBest = rec.best > 0 && score > rec.best;
+    rec.plays += 1;
+    rec.best = Math.max(rec.best, score);
+    const pays = !rec.claimed && score > 0;
+    if (pays) rec.claimed = true;
+    return {
+      day,
+      attempt: rec.plays,
+      bestToday: rec.best,
+      beatBest,
+      bonusCoins: pays ? CHALLENGE_COINS : 0,
+      bonusXp: pays ? CHALLENGE_XP : 0,
+    };
   }
 
   // ---------------------------------------------------------------- shop

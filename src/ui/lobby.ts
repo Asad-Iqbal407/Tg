@@ -1,5 +1,6 @@
 import type { BoostId, GameDefinition } from '../games/types';
 import { BOOSTS, getSkin, skinsFor, toSkinData } from '../meta/catalog';
+import { CHALLENGE_COINS, CHALLENGE_XP } from '../meta/challenge';
 import type { App } from './app';
 import { duration, fmt, h } from './dom';
 import { icon } from './icons';
@@ -125,6 +126,38 @@ export function openLobby(app: App, def: GameDefinition): void {
     'Play',
   );
 
+  const ch = app.arcade.challengeStatus(def.id);
+  const daily = h(
+    'section',
+    { class: 'lobby__section challenge' },
+    h(
+      'div',
+      { class: 'challenge__text' },
+      h('h3', null, icon('star'), 'Daily Challenge'),
+      h('p', {
+        class: 'muted small',
+        text: ch.bonusAvailable
+          ? `Everyone gets the same run today. Score on it for +${CHALLENGE_COINS} coins and +${CHALLENGE_XP} XP.`
+          : `Bonus claimed. Today's best: ${fmt(ch.best)} over ${ch.plays} ${ch.plays === 1 ? 'try' : 'tries'}. Beat it!`,
+      }),
+    ),
+    h(
+      'button',
+      {
+        class: 'btn btn--ghost',
+        attrs: { type: 'button' },
+        on: {
+          click: () => {
+            app.sfx('select');
+            modal.close();
+            app.launch(def.id, [...selected], true);
+          },
+        },
+      },
+      'Play today’s run',
+    ),
+  );
+
   modal.el.style.setProperty('--accent', def.accent);
   modal.body.append(
     h(
@@ -151,6 +184,7 @@ export function openLobby(app: App, def: GameDefinition): void {
         controls,
         h('p', { class: 'muted small', text: `Touch: ${def.touchHint}` }),
       ),
+      daily,
       h('section', { class: 'lobby__section' }, h('h3', { text: 'Loadout' }), skinRow),
       h(
         'section',

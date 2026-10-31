@@ -2502,3 +2502,151 @@ body.is-playing .toast__text span {
     z-index: 40;
   }
 }
+
+/* Finding a game: search, category chips, favourites and the "Jump back in" row. */
+.games__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 28px;
+}
+.games__bar .games__title {
+  margin: 0;
+}
+.search {
+  display: block;
+  flex: 1 1 220px;
+  max-width: 340px;
+}
+.search__input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.search__input::placeholder {
+  color: var(--muted);
+}
+.search__input:focus-visible {
+  outline: 2px solid var(--primary-2);
+  outline-offset: 2px;
+}
+.chips {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding-bottom: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chips::-webkit-scrollbar {
+  display: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip:hover {
+  border-color: var(--border-strong);
+}
+.chip.is-on {
+  background: color-mix(in srgb, var(--primary) 35%, transparent);
+  border-color: var(--primary);
+}
+.chip__count {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.chip.is-on .chip__count {
+  color: var(--text);
+}
+.chip:focus-visible,
+.game-card__fav:focus-visible {
+  outline: 2px solid var(--primary-2);
+  outline-offset: 2px;
+}
+.game-card {
+  position: relative;
+}
+.game-card__fav {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(8, 10, 30, 0.55);
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+}
+.game-card__fav svg {
+  width: 22px;
+  height: 22px;
+}
+.game-card__fav:hover {
+  background: rgba(8, 10, 30, 0.75);
+  color: #fff;
+}
+.game-card__fav.is-on {
+  color: var(--gold);
+}
+.game-grid--recent {
+  margin-bottom: 4px;
+}
+.games__count {
+  margin: 14px 0 0;
+  text-align: center;
+}
+.games__empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 36px 16px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.challenge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+}
+.challenge__text {
+  flex: 1 1 220px;
+}
+.challenge h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+}

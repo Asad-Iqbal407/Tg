@@ -77,6 +77,26 @@ export function showResults(app: App, def: GameDefinition, s: RunSummary, action
   xpLabel.textContent = `+${fmt(r.xp)} XP${r.xpBonus > 0 ? ` (incl. +${fmt(r.xpBonus)} bonus)` : ''}`;
 
   const extras = h('div', { class: 'results__extras' });
+  if (s.challenge) {
+    const c = s.challenge;
+    extras.appendChild(
+      h(
+        'div',
+        { class: 'unlock unlock--level' },
+        icon('star'),
+        h(
+          'div',
+          null,
+          h('strong', { text: c.bonusCoins > 0 ? 'Daily Challenge complete!' : 'Daily Challenge' }),
+          h('span', {
+            text:
+              (c.bonusCoins > 0 ? `+${fmt(c.bonusCoins)} coins · +${fmt(c.bonusXp)} XP · ` : '') +
+              `Try ${c.attempt} · today's best ${fmt(c.bestToday)}${c.beatBest ? ' · you beat it!' : ''}`,
+          }),
+        ),
+      ),
+    );
+  }
   for (const lv of s.levelUps) {
     extras.appendChild(
       h(
@@ -169,6 +189,16 @@ export function showResults(app: App, def: GameDefinition, s: RunSummary, action
       ),
       h(
         'button',
+        {
+          class: 'btn btn--ghost',
+          attrs: { type: 'button' },
+          on: { click: () => void shareScore(app, def, s) },
+        },
+        icon('trophy'),
+        'Share',
+      ),
+      h(
+        'button',
         { class: 'btn btn--ghost', attrs: { type: 'button' }, on: { click: act(actions.changeLoadout) } },
         icon('bolt'),
         'Loadout',
@@ -220,4 +250,22 @@ async function animateXp(
 
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Shares the score with the native sheet when there is one, else copies it to the clipboard. */
+async function shareScore(app: App, def: GameDefinition, s: RunSummary): Promise<void> {
+  const line = `I scored ${fmt(s.result.score)} in ${def.title}${s.challenge ? ' (Daily Challenge)' : ''} on Neon Arcade!`;
+  const url = location.href.split('#')[0] ?? '';
+  try {
+    if (typeof navigator.share === 'function') {
+      await navigator.share({ title: 'Neon Arcade', text: line, url });
+      return;
+    }
+    await navigator.clipboard.writeText(`${line} ${url}`);
+    app.toaster.show({ title: 'Copied', body: 'Your score is on the clipboard, ready to paste.' });
+  } catch (e) {
+    // The person closed the share sheet: nothing to report. Anything else: say it did not work.
+    if (e instanceof DOMException && e.name === 'AbortError') return;
+    app.toaster.show({ title: 'Could not share', body: 'Copy your score by hand instead.' });
+  }
 }
