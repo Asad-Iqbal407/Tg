@@ -1,5 +1,6 @@
 import { TAU } from '../../core/math';
 import { BaseGame } from '../base';
+import { PressBuffer } from '../drag';
 import { text } from '../draw';
 import { drawStatBar, statBarHeight } from '../statbar';
 import type { GameServices } from '../types';
@@ -12,6 +13,8 @@ export interface Obstacle {
   x: number;
 }
 
+/** How early before landing a jump press still counts. */
+const JUMP_BUFFER_SEC = 0.12;
 const DESIGN_W = 600;
 /** The dinosaur, the obstacles and the jump are drawn this much bigger than the design px, so they read on a phone. */
 const BIG = 1.35;
@@ -79,6 +82,8 @@ export class DinoGame extends BaseGame {
   private obstacles: Obstacle[] = [];
   private gap = 0;
   private started = false;
+  /** A jump pressed just before landing (see `tick`). */
+  private readonly jumpBuf = new PressBuffer(JUMP_BUFFER_SEC);
   private shield = false;
   private invulnT = 0;
   private run = 0;
@@ -105,15 +110,18 @@ export class DinoGame extends BaseGame {
     const jump =
       this.input.wasPressed('primary') || this.input.wasPressed('up') || this.input.pointer.pressed;
     const swipe = this.input.consumeSwipe();
-    if (swipe === 'up') this.tryJump();
+    const wantsJump = jump || swipe === 'up';
     if (!this.started) {
-      if (jump || swipe === 'up') {
+      if (wantsJump) {
         this.started = true;
         this.tryJump();
       }
       return;
     }
-    if (jump) this.tryJump();
+    // A jump asked for a moment before landing is not lost: it fires the step the dino touches down.
+    if (wantsJump) this.jumpBuf.press();
+    this.jumpBuf.tick(dt);
+    if (this.y <= 0 && this.jumpBuf.take()) this.tryJump();
     const down = this.input.isDown('down') || swipe === 'down';
     if (swipe === 'down') this.duckT = DUCK_SEC;
     this.diving = down && this.y > 0;

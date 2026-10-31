@@ -1,9 +1,12 @@
 import { TAU, wrapAngle } from '../../core/math';
 import { BaseGame } from '../base';
+import { PressBuffer } from '../drag';
 import { banner, fillRoundRect, shade, text } from '../draw';
 import { drawStatBar, statBarHeight } from '../statbar';
 import type { GameServices } from '../types';
 
+/** A tap this soon before the next knife is ready still throws it. */
+const THROW_BUFFER_SEC = 0.15;
 const DESIGN_W = 600;
 const LOG_R = 128;
 /** Two knives closer than this (radians round the log) collide. */
@@ -62,6 +65,7 @@ export class KnifeGame extends BaseGame {
   private apples: number[] = [];
   private left = 0;
   private flying: Flying | null = null;
+  private readonly throwBuf = new PressBuffer(THROW_BUFFER_SEC);
   private bounced: Bounced[] = [];
   private clearT = 0;
   private bannerT = 1.3;
@@ -96,10 +100,14 @@ export class KnifeGame extends BaseGame {
     this.bounced = this.bounced.filter((b) => b.y < this.H + 200 * this.u);
     if (this.isEnding) return;
     if (this.clearT > 0) {
+      this.throwBuf.clear();
       this.clearT -= dt;
       if (this.clearT <= 0) this.startStage(this.stage + 1);
       return;
     }
+    // A tap while the last knife is still in the air is kept for a moment and throws the next one.
+    if (!this.services.preview && this.pressedThrow()) this.throwBuf.press();
+    this.throwBuf.tick(dt);
     if (this.flying) this.fly(dt);
     else if (this.wantsThrow(dt) && this.left > 0) this.flying = { y: this.restY() };
   }
@@ -210,6 +218,10 @@ export class KnifeGame extends BaseGame {
       this.previewT = 0;
       return !hitsKnife(this.stuck, this.impactAngle());
     }
+    return this.throwBuf.take() !== null;
+  }
+
+  private pressedThrow(): boolean {
     return this.input.wasPressed('primary') || this.input.wasPressed('up') || this.input.pointer.pressed;
   }
 

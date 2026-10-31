@@ -1,6 +1,6 @@
 import { TAU } from '../../core/math';
 import { BaseGame } from '../base';
-import { TapTracker } from '../drag';
+import { PressBuffer, TapTracker } from '../drag';
 import { drawCoin, fillRoundRect, shade, text } from '../draw';
 import { drawStatBar, statBarHeight } from '../statbar';
 import type { GameServices } from '../types';
@@ -8,6 +8,8 @@ import { COLS, covered, type Lane, makeLane, stepLane } from './lanes';
 
 const DESIGN_W = 600;
 const HOP_SEC = 0.12;
+/** A hop asked for while the last one is still landing waits this long, then goes. */
+const HOP_BUFFER_SEC = 0.2;
 /** Standing still this long without a new best row brings the eagle. */
 const IDLE_SEC = 8;
 const HEAD_START_ROWS = 10;
@@ -38,6 +40,7 @@ export class HopperGame extends BaseGame {
   /** Hop animation: where the hop started and how far through it is (1 when standing). */
   private from = { col: 0, row: 0 };
   private hopT = 1;
+  private readonly queued = new PressBuffer<'up' | 'down' | 'left' | 'right'>(HOP_BUFFER_SEC);
   private facing: 'up' | 'down' | 'left' | 'right' = 'up';
   private camRow = 0;
   private idleT = 0;
@@ -75,7 +78,7 @@ export class HopperGame extends BaseGame {
     if (this.isEnding) return;
     this.hopT = Math.min(1, this.hopT + dt / HOP_SEC);
     this.ride(dt);
-    this.readMove();
+    this.readMove(dt);
     this.idleT += dt;
     if (this.idleT >= IDLE_SEC && !this.services.preview) this.die('eagle');
     if (this.hopT >= 1) this.checkHazards();
@@ -158,7 +161,7 @@ export class HopperGame extends BaseGame {
   }
 
   /** A tap hops forward; a swipe or the arrow keys hop that way. One hop at a time. */
-  private readMove(): void {
+  private readMove(dt: number): void {
     const p = this.input.pointer;
     const tapped = this.tap.update(p.down, p.pressed, p.released, p.x, p.y, this.time, 22 * this.u, 0.4);
     const swipe = this.input.consumeSwipe();
@@ -169,7 +172,12 @@ export class HopperGame extends BaseGame {
       else if (this.input.wasPressed('left')) dir = 'left';
       else if (this.input.wasPressed('right')) dir = 'right';
     }
-    if (dir && this.hopT >= 1) this.hop(dir);
+    if (dir) this.queued.press(dir);
+    this.queued.tick(dt);
+    if (this.hopT >= 1) {
+      const next = this.queued.take();
+      if (next) this.hop(next);
+    }
   }
 
   private hop(dir: 'up' | 'down' | 'left' | 'right'): void {

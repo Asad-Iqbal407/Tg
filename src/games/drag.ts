@@ -58,3 +58,39 @@ export class TapTracker {
     return !this.moved && time - s.t <= maxSec;
   }
 }
+
+/**
+ * Remembers a press that arrived a moment too early (a tap while the character is still mid-hop, mid-throw or
+ * in the air) and hands it back once the action is allowed, so a quick player is never ignored. The press
+ * expires after `window` seconds, and it holds the latest value, so two quick taps do not both fire later.
+ */
+export class PressBuffer<T = true> {
+  private left = 0;
+  private value: T | null = null;
+
+  constructor(private readonly window: number) {}
+
+  /** Notes a press; it stays ready for `window` seconds. */
+  press(value?: T): void {
+    this.left = this.window;
+    this.value = value ?? (true as T);
+  }
+
+  /** Call once per step. */
+  tick(dt: number): void {
+    this.left -= dt;
+    if (this.left <= 0) this.clear();
+  }
+
+  /** The waiting press, once (it is used up), or null when none is fresh. */
+  take(): T | null {
+    const v = this.value;
+    this.clear();
+    return v;
+  }
+
+  clear(): void {
+    this.left = 0;
+    this.value = null;
+  }
+}
