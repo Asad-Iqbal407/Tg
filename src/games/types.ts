@@ -30,7 +30,17 @@ export type GameId =
   | 'simon'
   | 'maze'
   | 'golf'
-  | 'hoops';
+  | 'hoops'
+  | 'dino'
+  | 'tiles'
+  | 'tictactoe'
+  | 'lights'
+  | 'pipes'
+  | 'gems'
+  | 'hockey'
+  | 'missile'
+  | 'blaster'
+  | 'archery';
 export const GAME_IDS: readonly GameId[] = [
   'runner',
   'platformer',
@@ -60,6 +70,16 @@ export const GAME_IDS: readonly GameId[] = [
   'maze',
   'golf',
   'hoops',
+  'dino',
+  'tiles',
+  'tictactoe',
+  'lights',
+  'pipes',
+  'gems',
+  'hockey',
+  'missile',
+  'blaster',
+  'archery',
 ];
 
 export type BoostId = 'coin-doubler' | 'xp-booster' | 'shield' | 'head-start';

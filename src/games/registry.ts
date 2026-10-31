@@ -26,6 +26,16 @@ import { sortGame } from './sort/index';
 import { stackGame } from './stack/index';
 import { sudokuGame } from './sudoku/index';
 import { tetrisGame } from './tetris';
+import { dinoGame } from './dino/index';
+import { tilesGame } from './tiles/index';
+import { tictactoeGame } from './tictactoe/index';
+import { lightsGame } from './lights/index';
+import { pipesGame } from './pipes/index';
+import { gemsGame } from './gems/index';
+import { hockeyGame } from './hockey/index';
+import { missileGame } from './missile/index';
+import { blasterGame } from './blaster/index';
+import { archeryGame } from './archery/index';
 import type { GameDefinition, GameId } from './types';
 
 export const GAMES: readonly GameDefinition[] = [
@@ -57,6 +67,16 @@ export const GAMES: readonly GameDefinition[] = [
   mazeGame,
   golfGame,
   hoopsGame,
+  dinoGame,
+  tilesGame,
+  tictactoeGame,
+  lightsGame,
+  pipesGame,
+  gemsGame,
+  hockeyGame,
+  missileGame,
+  blasterGame,
+  archeryGame,
 ];
 
 const BY_ID = new Map<string, GameDefinition>(GAMES.map((g) => [g.id, g]));

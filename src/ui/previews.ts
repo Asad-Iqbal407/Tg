@@ -51,6 +51,16 @@ const PREVIEW: Record<string, PreviewConfig> = {
   maze: { seed: 2, seconds: 3, focus: 0.5, fit: 'contain' },
   golf: { seed: 2, seconds: 1.0, focus: 0.5, fit: 'contain' },
   hoops: { seed: 3, seconds: 0.95, focus: 0.35 },
+  dino: { seed: 3, seconds: 4, focus: 0.55 },
+  tiles: { seed: 2, seconds: 2, focus: 0.5 },
+  tictactoe: { seed: 2, seconds: 3, focus: 0.45, fit: 'contain' },
+  lights: { seed: 2, seconds: 0.2, focus: 0.45, fit: 'contain' },
+  pipes: { seed: 2, seconds: 0.2, focus: 0.45, fit: 'contain' },
+  gems: { seed: 2, seconds: 1.5, focus: 0.4, fit: 'contain' },
+  hockey: { seed: 2, seconds: 2.5, focus: 0.5 },
+  missile: { seed: 2, seconds: 5, focus: 0.45 },
+  blaster: { seed: 2, seconds: 5, focus: 0.5 },
+  archery: { seed: 2, seconds: 1.0, focus: 0.55 },
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -1012,6 +1022,282 @@ export function drawSkinPreview(item: SkinItem, canvas: HTMLCanvasElement): void
       ctx.beginPath();
       ctx.arc(14, 24, 10, 0, TAU);
       ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'dino': {
+      // The dinosaur leaping a cactus.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.sky ?? '#f8fafc');
+      ctx.fillStyle = p.ink ?? '#475569';
+      ctx.fillRect(-52, 26, 104, 2);
+      ctx.fillStyle = p.dino ?? '#475569';
+      ctx.fillRect(-30, -16, 18, 16);
+      ctx.fillRect(-20, -26, 16, 12);
+      ctx.fillRect(-36, -12, 8, 5);
+      ctx.fillRect(-26, 0, 4, 8);
+      ctx.fillRect(-18, 0, 4, 8);
+      ctx.fillStyle = p.cactus ?? '#15803d';
+      ctx.fillRect(16, -4, 9, 30);
+      ctx.fillRect(10, 4, 6, 4);
+      ctx.fillRect(10, -2, 3, 8);
+      ctx.fillRect(25, 8, 6, 4);
+      ctx.restore();
+      break;
+    }
+    case 'tiles': {
+      // Four lanes with a black tile in each row.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -44, -44, 88, 88, 6, p.white ?? '#f8fafc');
+      [2, 0, 3, 1].forEach((lane, row) => {
+        fillRoundRect(
+          ctx,
+          -44 + lane * 22 + 1,
+          -44 + row * 22 + 1,
+          20,
+          20,
+          3,
+          row === 3 ? (p.done ?? '#cbd5e1') : (p.tile ?? '#111827'),
+        );
+      });
+      ctx.restore();
+      break;
+    }
+    case 'tictactoe': {
+      // A game won with a diagonal.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg1 ?? '#0f766e');
+      ctx.strokeStyle = p.grid ?? 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 3;
+      for (const k of [-13, 13]) {
+        ctx.beginPath();
+        ctx.moveTo(k, -38);
+        ctx.lineTo(k, 38);
+        ctx.moveTo(-38, k);
+        ctx.lineTo(38, k);
+        ctx.stroke();
+      }
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = p.x ?? '#fb7185';
+      for (const [cx, cy] of [
+        [-26, -26],
+        [0, 0],
+        [26, 26],
+      ] as const) {
+        ctx.beginPath();
+        ctx.moveTo(cx - 7, cy - 7);
+        ctx.lineTo(cx + 7, cy + 7);
+        ctx.moveTo(cx + 7, cy - 7);
+        ctx.lineTo(cx - 7, cy + 7);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = p.o ?? '#fde047';
+      for (const [cx, cy] of [
+        [26, -26],
+        [-26, 26],
+      ] as const) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 8, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.restore();
+      break;
+    }
+    case 'lights': {
+      // A grid of lights, some on.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg ?? '#0b1020');
+      const lit = new Set([1, 5, 6, 7, 11, 13, 17, 18, 19, 23]);
+      for (let i = 0; i < 25; i++) {
+        fillRoundRect(
+          ctx,
+          -42 + (i % 5) * 17,
+          -42 + Math.floor(i / 5) * 17,
+          15,
+          15,
+          3,
+          lit.has(i) ? (p.lit ?? '#facc15') : (p.off ?? '#1e293b'),
+        );
+      }
+      ctx.restore();
+      break;
+    }
+    case 'pipes': {
+      // A few pipe tiles, the ones joined to the pump full of water.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg ?? '#1c1917');
+      ctx.lineCap = 'round';
+      const segs: [number, number, number, number, boolean][] = [
+        [0, 0, 30, 0, true],
+        [0, 0, 0, -30, true],
+        [0, -30, -30, -30, true],
+        [30, 0, 30, 30, false],
+        [-30, 0, -30, 30, false],
+        [0, 0, 0, 30, false],
+      ];
+      for (const [x0, y0, x1, y1, wet] of segs) {
+        ctx.strokeStyle = p.pipe ?? '#78716c';
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+        ctx.strokeStyle = wet ? (p.water ?? '#38bdf8') : (p.dry ?? '#44403c');
+        ctx.lineWidth = 5;
+        ctx.stroke();
+      }
+      ctx.fillStyle = p.pump ?? '#ef4444';
+      ctx.beginPath();
+      ctx.arc(0, 0, 8, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'gems': {
+      // A row of three matching gems among others.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -46, -46, 92, 92, 8, p.bg1 ?? '#312e81');
+      const cols = [
+        p.g1 ?? '#ef4444',
+        p.g2 ?? '#3b82f6',
+        p.g3 ?? '#22c55e',
+        p.g4 ?? '#facc15',
+        p.g5 ?? '#a855f7',
+        p.g6 ?? '#f97316',
+      ];
+      const grid = [0, 1, 2, 3, 4, 3, 3, 3, 5, 2, 1, 0, 4, 5, 1, 2];
+      grid.forEach((k, i) => {
+        ctx.fillStyle = cols[k] ?? '#fff';
+        ctx.beginPath();
+        ctx.arc(-33 + (i % 4) * 22, -33 + Math.floor(i / 4) * 22, 8, 0, TAU);
+        ctx.fill();
+      });
+      ctx.restore();
+      break;
+    }
+    case 'hockey': {
+      // The table with both mallets and the puck.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -36, -48, 72, 96, 10, p.rail ?? '#1e40af');
+      fillRoundRect(ctx, -32, -44, 64, 88, 8, p.ice ?? '#e0f2fe');
+      ctx.strokeStyle = p.lines ?? '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-32, 0);
+      ctx.lineTo(32, 0);
+      ctx.stroke();
+      for (const [y, c] of [
+        [-30, p.cpu ?? '#2563eb'],
+        [30, p.player ?? '#ef4444'],
+      ] as const) {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(0, y, 9, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = p.puck ?? '#111827';
+      ctx.beginPath();
+      ctx.arc(10, 8, 6, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'missile': {
+      // Missile trails over the cities, one caught in a burst.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.sky1 ?? '#020617');
+      ctx.fillStyle = p.ground ?? '#854d0e';
+      ctx.fillRect(-52, 30, 104, 14);
+      ctx.fillStyle = p.city ?? '#38bdf8';
+      for (const x of [-40, -24, 16, 32]) ctx.fillRect(x, 20, 10, 10);
+      ctx.strokeStyle = p.trail ?? 'rgba(248,113,113,0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-30, -44);
+      ctx.lineTo(-10, -6);
+      ctx.moveTo(30, -44);
+      ctx.lineTo(18, -18);
+      ctx.stroke();
+      ctx.fillStyle = '#fde047';
+      ctx.beginPath();
+      ctx.arc(18, -18, 10, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'blaster': {
+      // The ship among rocks.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.space ?? '#030712');
+      ctx.strokeStyle = p.rock ?? '#a8a29e';
+      ctx.fillStyle = p.rockFill ?? '#292524';
+      ctx.lineWidth = 2;
+      for (const [x, y, r] of [
+        [-30, -22, 14],
+        [32, -16, 10],
+        [26, 26, 16],
+      ] as const) {
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++)
+          ctx.lineTo(
+            x + Math.cos((k / 8) * TAU) * r * (k % 2 ? 0.8 : 1),
+            y + Math.sin((k / 8) * TAU) * r * (k % 2 ? 0.8 : 1),
+          );
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.fillStyle = p.ship ?? '#e2e8f0';
+      ctx.beginPath();
+      ctx.moveTo(10, -6);
+      ctx.lineTo(-8, 4);
+      ctx.lineTo(-4, -6);
+      ctx.lineTo(-8, -16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'archery': {
+      // The target with an arrow in the gold.
+      ctx.save();
+      ctx.translate(6, 6);
+      ctx.scale(0.85, 0.85);
+      fillRoundRect(ctx, -52, -44, 104, 88, 8, p.sky1 ?? '#7dd3fc');
+      ctx.fillStyle = p.grass ?? '#4ade80';
+      ctx.fillRect(-52, 26, 104, 18);
+      ['#f8fafc', '#111827', '#3b82f6', '#ef4444', '#facc15'].forEach((c, k) => {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(14, -4, 26 - k * 5, 0, TAU);
+        ctx.fill();
+      });
+      ctx.strokeStyle = p.bow ?? '#92400e';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-40, 10);
+      ctx.lineTo(14, -4);
+      ctx.stroke();
+      ctx.fillStyle = p.fletch ?? '#ef4444';
+      ctx.fillRect(-44, 8, 8, 4);
       ctx.restore();
       break;
     }
