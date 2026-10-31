@@ -20,6 +20,9 @@ const INVULN_SEC = 1.5;
 /** The hopper's row sits this far down the screen. */
 const PLAYER_AT = 0.72;
 
+/** The grass that runs on behind the start line. */
+const BEHIND: Lane = { kind: 'grass', speed: 0, movers: [], trees: new Set(), coin: -1 };
+
 type Death = 'car' | 'water' | 'edge' | 'eagle';
 
 /** Road Hopper: hop up the screen across roads and rivers. Cars squash, water drowns, and the eagle hates waiting. */
@@ -88,7 +91,8 @@ export class HopperGame extends BaseGame {
     ctx.translate(this.shake.x, this.shake.y);
     const first = Math.floor(this.camRow - (this.H * (1 - PLAYER_AT)) / cell) - 1;
     const last = Math.ceil(this.camRow + (this.H * PLAYER_AT) / cell) + 1;
-    for (let r = Math.max(0, first); r <= last; r++) this.drawLane(r, cell);
+    // Rows behind the start line are plain grass, so the screen below the hen is never empty.
+    for (let r = first; r <= last; r++) this.drawLane(r, cell);
     this.drawHopper(cell);
     for (let r = Math.max(0, first); r <= last; r++) this.drawTrees(r, cell);
     this.particles.render(ctx);
@@ -264,7 +268,7 @@ export class HopperGame extends BaseGame {
 
   private drawLane(r: number, cell: number): void {
     const ctx = this.ctx;
-    const lane = this.lane(r);
+    const lane = r < 0 ? BEHIND : this.lane(r);
     const y = this.rowY(r, cell) - cell / 2;
     if (lane.kind === 'grass') {
       ctx.fillStyle = r % 2 === 0 ? this.skinColor('grass1', '#4ade80') : this.skinColor('grass2', '#22c55e');

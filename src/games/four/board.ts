@@ -51,6 +51,19 @@ export function winLine(g: Grid): [number, number][] | null {
   return null;
 }
 
+/** Whether the disc just placed at column c, row r completes four in a row: only the lines through it need a look. */
+export function winAt(g: Grid, c: number, r: number): boolean {
+  const who = g[c]?.[r] ?? 0;
+  if (!who) return false;
+  for (const [dc, dr] of DIRS) {
+    let n = 1;
+    for (let k = 1; k < 4 && g[c + dc * k]?.[r + dr * k] === who; k++) n++;
+    for (let k = 1; k < 4 && g[c - dc * k]?.[r - dr * k] === who; k++) n++;
+    if (n >= 4) return true;
+  }
+  return false;
+}
+
 export function full(g: Grid): boolean {
   return legalMoves(g).length === 0;
 }
@@ -86,62 +99,94 @@ function evaluate(g: Grid): number {
   return score;
 }
 
-function minimax(g: Grid, depth: number, alpha: number, beta: number, cpu: boolean): number {
-  const won = winLine(g);
-  if (won) {
-    const [c, r] = won[0] ?? [0, 0];
-    const who = g[c]?.[r];
-    // Sooner wins (and later losses) score better.
-    return who === 2 ? 100000 + depth : -100000 - depth;
-  }
+/** Positions the search may visit for one move: enough for depth 6 on most boards, a cap on the worst case. */
+export const NODE_BUDGET = 24000;
+/** What judging one position costs against the budget, in nodes. */
+const LEAF_COST = 4;
+
+interface Budget {
+  left: number;
+}
+
+function minimax(
+  g: Grid,
+  depth: number,
+  alpha: number,
+  beta: number,
+  cpu: boolean,
+  budget: Budget,
+  lastC: number,
+  lastR: number,
+): number {
+  // Out of budget: unwind at once; search() sees the negative count and discards this depth.
+  if (--budget.left < 0) return 0;
+  // The disc just placed belongs to the side that is not about to move. Sooner wins (and later losses) score better.
+  if (winAt(g, lastC, lastR)) return cpu ? -100000 - depth : 100000 + depth;
   const moves = legalMoves(g);
   if (moves.length === 0) return 0;
-  if (depth === 0) return evaluate(g);
+  // Judging a position scans every four-cell window, so it costs several nodes' worth.
+  if (depth === 0) {
+    budget.left -= LEAF_COST;
+    return evaluate(g);
+  }
   let a = alpha;
   let b = beta;
-  if (cpu) {
-    let best = -Infinity;
-    for (const c of moves) {
-      const r = landingRow(g, c);
-      (g[c] as number[])[r] = 2;
-      best = Math.max(best, minimax(g, depth - 1, a, b, false));
-      (g[c] as number[])[r] = 0;
-      a = Math.max(a, best);
-      if (a >= b) break;
-    }
-    return best;
-  }
-  let best = Infinity;
+  const who = cpu ? 2 : 1;
+  let best = cpu ? -Infinity : Infinity;
   for (const c of moves) {
     const r = landingRow(g, c);
-    (g[c] as number[])[r] = 1;
-    best = Math.min(best, minimax(g, depth - 1, a, b, true));
+    (g[c] as number[])[r] = who;
+    const v = minimax(g, depth - 1, a, b, !cpu, budget, c, r);
     (g[c] as number[])[r] = 0;
-    b = Math.min(b, best);
+    if (cpu) {
+      best = Math.max(best, v);
+      a = Math.max(a, best);
+    } else {
+      best = Math.min(best, v);
+      b = Math.min(b, best);
+    }
     if (a >= b) break;
   }
   return best;
 }
 
 /**
- * The computer's move: the best column found looking `depth` moves ahead, ties broken at random. With chance
- * `blunder` it plays a random legal column instead (the easiest levels).
+ * The best column when the computer looks `depth` moves ahead, and whether the search finished inside the budget. A
+ * search that runs out of nodes returns nothing, so the caller keeps the answer from the last depth it finished.
  */
-export function cpuMove(g: Grid, depth: number, rng: Rng, blunder = 0): number {
-  const moves = legalMoves(g);
-  if (moves.length === 0) return -1;
-  if (rng.chance(blunder)) return rng.pick(moves);
+function search(g: Grid, depth: number, rng: Rng, budget: Budget): number | null {
   let best = -Infinity;
   let picks: number[] = [];
-  for (const c of moves) {
+  for (const c of legalMoves(g)) {
     const r = landingRow(g, c);
     (g[c] as number[])[r] = 2;
-    const v = minimax(g, depth - 1, -Infinity, Infinity, false);
+    const v = minimax(g, depth - 1, -Infinity, Infinity, false, budget, c, r);
     (g[c] as number[])[r] = 0;
+    if (budget.left < 0) return null;
     if (v > best) {
       best = v;
       picks = [c];
     } else if (v === best) picks.push(c);
   }
-  return rng.pick(picks);
+  return picks.length > 0 ? rng.pick(picks) : null;
+}
+
+/**
+ * The computer's move: the best column found looking up to `depth` moves ahead (deepening one move at a time while the
+ * NODE_BUDGET lasts, so a slow phone never stalls on a deep search), ties broken at random. With chance `blunder` it
+ * plays a random legal column instead (the easiest levels).
+ */
+export function cpuMove(g: Grid, depth: number, rng: Rng, blunder = 0): number {
+  const moves = legalMoves(g);
+  if (moves.length === 0) return -1;
+  if (rng.chance(blunder)) return rng.pick(moves);
+  const budget: Budget = { left: NODE_BUDGET };
+  // Depth 1 always finishes; deeper searches replace it while they complete inside the budget.
+  let choice = search(g, 1, rng.fork(), { left: Infinity }) ?? (moves[0] as number);
+  for (let d = 2; d <= depth; d++) {
+    const found = search(g, d, rng.fork(), budget);
+    if (found === null) break;
+    choice = found;
+  }
+  return choice;
 }

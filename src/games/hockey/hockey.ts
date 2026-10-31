@@ -20,6 +20,8 @@ const GOAL_POINTS = 100;
 const WIN_POINTS = 500;
 const RESULT_SEC = 2;
 const FACE_OFF_SEC = 0.8;
+/** A puck pinned between both mallets this long is put back in play with a face-off. */
+const PINCH_SEC = 0.5;
 
 /** Fastest the computer's mallet moves on level n (logical px per second at the design width). */
 export function cpuSpeedFor(level: number): number {
@@ -65,6 +67,7 @@ export class HockeyGame extends BaseGame {
   private result: 'win' | 'loss' | null = null;
   private shield = false;
   private flash = 0;
+  private pinchT = 0;
 
   constructor(services: GameServices) {
     super(services);
@@ -311,11 +314,38 @@ export class HockeyGame extends BaseGame {
       } else this.wall(pk, 'y', r.bottom - pr);
     }
     for (const mallet of [this.me, this.cpu]) this.hit(mallet);
+    this.unpinch(h, cx, r);
     const sp = Math.hypot(pk.vx, pk.vy);
     if (sp > PUCK_MAX * this.u) {
       pk.vx *= (PUCK_MAX * this.u) / sp;
       pk.vy *= (PUCK_MAX * this.u) / sp;
     }
+  }
+
+  /**
+   * A puck squeezed between the two mallets (both touching it at once) would be shoved back and forth between them and
+   * freeze. It pops out sideways toward the side with more room; if it is still pinned after PINCH_SEC (against a rail,
+   * with nowhere to go), play restarts with a face-off in the middle.
+   */
+  private unpinch(h: number, cx: number, r: { left: number; right: number }): void {
+    const pk = this.puck;
+    const reach = (PUCK_R + MALLET_R) * this.u;
+    const touching = (m: Body) => Math.hypot(pk.x - m.x, pk.y - m.y) < reach * 1.03;
+    if (!touching(this.me) || !touching(this.cpu)) {
+      this.pinchT = 0;
+      return;
+    }
+    this.pinchT += h;
+    if (this.pinchT > PINCH_SEC) {
+      this.pinchT = 0;
+      this.faceOff(this.rng.chance(0.5));
+      return;
+    }
+    const side = pk.x === cx ? (this.rng.chance(0.5) ? 1 : -1) : pk.x > cx ? 1 : -1;
+    pk.y = (this.me.y + this.cpu.y) / 2;
+    pk.vx = side * 900 * this.u;
+    pk.vy = 0;
+    pk.x = Math.max(r.left + PUCK_R * this.u, Math.min(r.right - PUCK_R * this.u, pk.x));
   }
 
   private wall(pk: Body, axis: 'x' | 'y', at: number): void {

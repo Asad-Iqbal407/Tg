@@ -6,10 +6,10 @@ import type { GameServices } from '../types';
 
 const DESIGN_W = 600;
 const CITIES = 6;
-const AMMO = 20;
+const AMMO = 26;
 const HEAD_START_AMMO = 10;
 const INTERCEPT_SPEED = 950;
-const BLAST_R = 58;
+const BLAST_R = 66;
 const GROW_SEC = 0.3;
 const HOLD_SEC = 0.35;
 const FADE_SEC = 0.4;
@@ -23,9 +23,9 @@ const SPLIT_FROM = 3;
 /** Missiles in wave n, how fast they fall (design px/s) and the gap between launches (s). */
 export function waveSpec(n: number): { count: number; speed: number; gap: number } {
   return {
-    count: 8 + 3 * n,
-    speed: Math.min(230, 55 + 14 * n),
-    gap: Math.max(0.35, 1.3 - 0.08 * n),
+    count: 7 + 2 * n,
+    speed: Math.min(230, 50 + 12 * n),
+    gap: Math.max(0.4, 1.3 - 0.07 * n),
   };
 }
 

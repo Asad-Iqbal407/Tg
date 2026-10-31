@@ -79,6 +79,11 @@ export class TilesGame extends BaseGame {
     ctx.translate(this.shake.x, this.shake.y);
     ctx.fillStyle = this.skinColor('white', '#f8fafc');
     ctx.fillRect(b.x, b.y, b.w, b.h);
+    // Tiles scroll in from above the board and out below it: only the board itself shows them.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(b.x, b.y, b.w, b.h);
+    ctx.clip();
     const first = Math.max(0, Math.floor(this.scroll) - 1);
     for (let n = first; n < first + VISIBLE + 2; n++) {
       const row = this.rows[n];
@@ -115,6 +120,7 @@ export class TilesGame extends BaseGame {
       ctx.lineTo(b.x + (k * b.w) / LANES, b.y + b.h);
       ctx.stroke();
     }
+    ctx.restore();
     this.particles.render(ctx);
     ctx.restore();
     if (this.services.preview) return;

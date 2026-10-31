@@ -27,17 +27,27 @@ export function winnerOf(b: Board): { who: number; line: [number, number, number
   return null;
 }
 
-function minimax(b: Board, turn: number): number {
+/** Scores the position for the computer (positive is good for it), sooner wins scoring higher; alpha-beta prunes. */
+function minimax(b: Board, turn: number, alpha: number, beta: number): number {
   const w = winnerOf(b);
   if (w) return w.who === 2 ? 10 : -10;
   if (b.every((v) => v !== 0)) return 0;
   let best = turn === 2 ? -Infinity : Infinity;
+  let a = alpha;
+  let z = beta;
   for (let i = 0; i < 9; i++) {
     if (b[i]) continue;
     b[i] = turn;
-    const v = minimax(b, turn === 2 ? 1 : 2) * 0.9;
+    const v = minimax(b, turn === 2 ? 1 : 2, a, z) * 0.9;
     b[i] = 0;
-    best = turn === 2 ? Math.max(best, v) : Math.min(best, v);
+    if (turn === 2) {
+      best = Math.max(best, v);
+      a = Math.max(a, best);
+    } else {
+      best = Math.min(best, v);
+      z = Math.min(z, best);
+    }
+    if (a >= z) break;
   }
   return best;
 }
@@ -51,7 +61,7 @@ export function cpuMove(b: Board, skill: number, rng: Rng): number {
   let picks: number[] = [];
   for (const i of empty) {
     b[i] = 2;
-    const v = minimax(b, 1);
+    const v = minimax(b, 1, -Infinity, Infinity);
     b[i] = 0;
     if (v > best) {
       best = v;

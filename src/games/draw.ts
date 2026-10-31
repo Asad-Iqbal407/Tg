@@ -45,6 +45,26 @@ export interface TextOpts {
   strokeWidth?: number;
 }
 
+/** The smallest text drawn through `text()`, in CSS px: below this, labels stop being readable on a phone. */
+export const MIN_TEXT_CSS_PX = 11;
+
+/**
+ * CSS px per logical px for a canvas on screen, from its transform and its displayed size. 0 when it cannot be told
+ * (a canvas that is not in the page, as for card art and tests), which switches the legibility floor off.
+ */
+export function cssPerPx(ctx: CanvasRenderingContext2D): number {
+  const c = ctx.canvas as HTMLCanvasElement | undefined;
+  if (!c || !(c.clientWidth > 0) || !(c.width > 0) || typeof ctx.getTransform !== 'function') return 0;
+  const a = ctx.getTransform().a;
+  return a > 0 ? (a * c.clientWidth) / c.width : 0;
+}
+
+/** A text size (logical px) that is at least `minCss` CSS px on screen. */
+export function legibleSize(ctx: CanvasRenderingContext2D, size: number, minCss = MIN_TEXT_CSS_PX): number {
+  const k = cssPerPx(ctx);
+  return k > 0 ? Math.max(size, minCss / k) : size;
+}
+
 export function text(
   ctx: CanvasRenderingContext2D,
   value: string,
@@ -52,12 +72,13 @@ export function text(
   y: number,
   o: TextOpts = {},
 ): void {
-  ctx.font = `${o.weight ?? 800} ${o.size ?? 20}px ${FONT}`;
+  const size = legibleSize(ctx, o.size ?? 20);
+  ctx.font = `${o.weight ?? 800} ${size}px ${FONT}`;
   ctx.textAlign = o.align ?? 'left';
   ctx.textBaseline = o.baseline ?? 'middle';
   if (o.stroke !== null) {
     ctx.lineJoin = 'round';
-    ctx.lineWidth = o.strokeWidth ?? Math.max(3, (o.size ?? 20) / 5);
+    ctx.lineWidth = o.strokeWidth ?? Math.max(3, size / 5);
     ctx.strokeStyle = o.stroke ?? 'rgba(0,0,0,0.55)';
     ctx.strokeText(value, x, y);
   }

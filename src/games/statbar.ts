@@ -1,4 +1,4 @@
-import { hudPill, text } from './draw';
+import { cssPerPx, fillRoundRect, roundRectPath, text } from './draw';
 
 /**
  * A row of HUD pills across the top of the canvas, each with a small label above its value. Used by the games
@@ -19,16 +19,25 @@ export function drawStatBar(
   const h = 46 * u;
   const w = (W - pad * 2 - gap * (n - 1)) / n;
   const y = top + 10 * u;
-  items.forEach(([label, value], i) => {
+  // On a small phone the canvas is drawn below its design size; keep the label and value readable there.
+  const k = cssPerPx(ctx);
+  const label = Math.max(11 * u, k > 0 ? 10.5 / k : 0);
+  const value = Math.max(20 * u, k > 0 ? 13.5 / k : 0, 16);
+  items.forEach(([name, v], i) => {
     const x = pad + i * (w + gap);
-    hudPill(ctx, x, y, w, h);
-    text(ctx, label, x + w / 2, y + h * 0.3, {
-      size: Math.max(11, 11 * u),
+    // Denser than the plain HUD pill: these bars sit over busy backgrounds (water, clouds, bricks) and must stay readable.
+    fillRoundRect(ctx, x, y, w, h, h / 2, 'rgba(8, 10, 30, 0.74)');
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 1.5;
+    roundRectPath(ctx, x, y, w, h, h / 2);
+    ctx.stroke();
+    text(ctx, name, x + w / 2, y + h * 0.27, {
+      size: label,
       align: 'center',
       color: labelColor,
       stroke: null,
     });
-    text(ctx, value, x + w / 2, y + h * 0.66, { size: Math.max(16, 20 * u), align: 'center' });
+    text(ctx, v, x + w / 2, y + h * 0.7, { size: value, align: 'center' });
   });
 }
 

@@ -237,7 +237,8 @@ export function drawNext(
     weight: 700,
   });
   drawBubble(ctx, x, y, r * 0.7, colour);
-  text(ctx, '⇄ SWAP', x, y + l.d * 0.8, {
+  // Kept within the 48 px the shooter sits above the bottom edge, so the label is never cut off.
+  text(ctx, '⇄ SWAP', x, y + Math.min(l.d * 0.8, 32), {
     size: Math.round(Math.max(HUD_MIN * 0.8, l.d * 0.24)),
     align: 'center',
     color: pal.text,
